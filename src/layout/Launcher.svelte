@@ -77,6 +77,35 @@
     align-items: flex-start;
     padding-top: 12vh;
     z-index: 100;
+    overflow: hidden;
+  }
+  /* 漂うオーロラ帯（blur 不使用・transform/opacity 駆動で軽量）。 */
+  .overlay::before {
+    content: "";
+    position: absolute;
+    inset: -30%;
+    background:
+      radial-gradient(ellipse at 30% 35%, rgba(45, 212, 191, 0.16), transparent 60%),
+      radial-gradient(ellipse at 70% 65%, rgba(167, 139, 250, 0.13), transparent 55%);
+    animation: aurora 16s ease-in-out infinite alternate;
+    pointer-events: none;
+  }
+  @keyframes aurora {
+    from {
+      transform: translate3d(-4%, -3%, 0) scale(1.05);
+    }
+    to {
+      transform: translate3d(4%, 4%, 0) scale(1.18);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .overlay::before {
+      animation: none;
+    }
+  }
+  .palette {
+    position: relative;
+    z-index: 1;
   }
   .palette {
     width: min(640px, 86vw);

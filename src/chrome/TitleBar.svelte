@@ -40,7 +40,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 0 0 14px;
-    background: #000;
+    background: linear-gradient(90deg, #000 0%, #061712 50%, #000 100%);
     border-bottom: 1px solid rgba(45, 212, 191, 0.25);
     user-select: none;
   }
