@@ -6,6 +6,7 @@
   import { Unicode11Addon } from "@xterm/addon-unicode11";
   import { ClipboardAddon } from "@xterm/addon-clipboard";
   import { PtyClient } from "../core/pty";
+  import { CommandBlocks } from "./blocks/osc";
 
   // P0 は 1 ペイン固定。ペイン分割は P2 で LayoutTree が採番する。
   const PANE_ID = 0;
@@ -18,7 +19,31 @@
   let observer: ResizeObserver | undefined;
   let resizeTimer: number | undefined;
   let disposed = false;
+  let blocks: CommandBlocks | undefined;
   const encoder = new TextEncoder();
+
+  // コピペは attachCustomKeyEventHandler だと keydown/keypress の二重発火で入力が
+  // 二重化するため使わない。container の keydown を capture phase で横取りし、
+  // コピペ操作のときだけ既定処理を止める（通常入力・無選択 Ctrl+C は素通し＝SIGINT）。
+  function onCopyPaste(e: KeyboardEvent) {
+    if (!e.ctrlKey) return;
+    const key = e.key.toLowerCase();
+    if (key === "c" && (e.shiftKey || (term?.hasSelection() ?? false))) {
+      const sel = term?.getSelection() ?? "";
+      if (sel) {
+        void navigator.clipboard.writeText(sel);
+        term?.clearSelection();
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    } else if (key === "v") {
+      void navigator.clipboard.readText().then((t) => {
+        if (t) pty?.write(encoder.encode(t));
+      });
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
 
   onMount(async () => {
     term = new Terminal({
@@ -56,6 +81,9 @@
 
     term.open(container);
 
+    // コピペは capture phase の keydown で横取り（attachCustomKeyEventHandler は使わない）。
+    container.addEventListener("keydown", onCopyPaste, true);
+
     // WebGL は open 後に attach。失敗時は canvas/DOM レンダラへフォールバック。
     try {
       const webgl = new WebglAddon();
@@ -66,6 +94,9 @@
     }
 
     fit.fit();
+
+    // OSC 133/633 を解釈してコマンドブロック装飾を出す（出力ストリームに乗る）。
+    blocks = new CommandBlocks(term);
 
     pty = new PtyClient(PANE_ID);
     try {
@@ -108,7 +139,9 @@
   onDestroy(() => {
     disposed = true;
     if (resizeTimer) clearTimeout(resizeTimer);
+    container?.removeEventListener("keydown", onCopyPaste, true);
     observer?.disconnect();
+    blocks?.dispose();
     pty?.close();
     term?.dispose();
   });
@@ -129,5 +162,33 @@
   .term :global(.xterm-viewport)::-webkit-scrollbar-thumb {
     background: rgba(45, 212, 191, 0.35);
     border-radius: 6px;
+  }
+
+  /* コマンドブロック（OSC 133/633 の decoration オーバーレイ） */
+  .term :global(.orb-block) {
+    pointer-events: none;
+    box-sizing: border-box;
+    border-left: 3px solid transparent;
+  }
+  .term :global(.orb-block.ok) {
+    border-left-color: rgba(45, 212, 191, 0.55);
+  }
+  .term :global(.orb-block.fail) {
+    border-left-color: rgba(255, 92, 138, 0.7);
+    background: rgba(255, 92, 138, 0.05);
+  }
+  .term :global(.orb-block-badge) {
+    position: absolute;
+    right: 6px;
+    top: 0;
+    font-size: 10px;
+    line-height: 1.4;
+    letter-spacing: 0.02em;
+  }
+  .term :global(.orb-block.ok .orb-block-badge) {
+    color: #2dd4bf;
+  }
+  .term :global(.orb-block.fail .orb-block-badge) {
+    color: #ff5c8a;
   }
 </style>
