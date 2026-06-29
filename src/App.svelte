@@ -1,30 +1,23 @@
 <script lang="ts">
-  // P0 でここに TerminalView をマウントする。今はブート確認用プレースホルダ。
+  import TitleBar from "./chrome/TitleBar.svelte";
+  import Terminal from "./terminal/Terminal.svelte";
 </script>
 
-<main class="boot" data-tauri-drag-region>
-  <h1>orb</h1>
-  <p>vibe-coding terminal — booting…</p>
-</main>
+<div class="app">
+  <TitleBar />
+  <div class="body">
+    <Terminal />
+  </div>
+</div>
 
 <style>
-  .boot {
+  .app {
+    display: flex;
+    flex-direction: column;
     height: 100vh;
-    display: grid;
-    place-content: center;
-    text-align: center;
-    gap: 0.5rem;
   }
-  h1 {
-    margin: 0;
-    font-size: 3rem;
-    letter-spacing: 0.35em;
-    color: var(--teal);
-    text-shadow: 0 0 24px rgba(45, 212, 191, 0.45);
-  }
-  p {
-    margin: 0;
-    color: var(--grey);
-    letter-spacing: 0.1em;
+  .body {
+    flex: 1 1 auto;
+    min-height: 0;
   }
 </style>
