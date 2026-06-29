@@ -31,6 +31,12 @@ pub fn get_usage() -> Result<crate::usage::Usage> {
     crate::usage::fetch_usage()
 }
 
+/// Claude Code の設定由来ステータス（モデル/エフォート/MCP）。
+#[tauri::command]
+pub fn get_claude_status(cwd: Option<String>) -> crate::status::ClaudeStatus {
+    crate::status::fetch_status(cwd)
+}
+
 /// pwsh を spawn し、出力 Channel を結線する。`on_output` はフロントが生成した
 /// バイナリ Channel（raw バイトが流れる）。
 #[tauri::command]

@@ -1,12 +1,16 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { get } from "svelte/store";
   import { getUsage, type Usage } from "../core/usage";
+  import { getClaudeStatus, type ClaudeStatus } from "../core/status";
+  import { cwd as cwdStore } from "../store/appStore";
 
   let usage = $state<Usage | null>(null);
+  let status = $state<ClaudeStatus | null>(null);
   let err = $state(false);
   let timer: number | undefined;
 
-  async function refresh() {
+  async function refreshUsage() {
     try {
       usage = await getUsage();
       err = false;
@@ -14,10 +18,21 @@
       err = true;
     }
   }
+  async function refreshStatus() {
+    try {
+      status = await getClaudeStatus(get(cwdStore) || undefined);
+    } catch {
+      /* settings 読めない時はサイドバーが欠けるだけ */
+    }
+  }
 
   onMount(() => {
-    refresh();
-    timer = window.setInterval(refresh, 30000);
+    refreshUsage();
+    refreshStatus();
+    timer = window.setInterval(() => {
+      refreshUsage();
+      refreshStatus();
+    }, 30000);
   });
   onDestroy(() => {
     if (timer) clearInterval(timer);
@@ -53,9 +68,17 @@
     {/if}
   </div>
 
-  <div class="sec hint" title="モデル/エフォート/MCP は Claude Code 連携が必要（#18 で対応予定）">
+  <div class="sec">
     <div class="label">CLAUDE</div>
-    <div class="muted">model / effort / MCP は連携待ち</div>
+    {#if status}
+      <div class="krow"><span>model</span><span class="kv">{status.model || "—"}</span></div>
+      <div class="krow"><span>effort</span><span class="kv">{status.effort || "—"}</span></div>
+      <div class="krow mcp" title={"アクティブ MCP（config由来）:\n" + status.mcp.join("\n")}>
+        <span>mcp</span><span class="kv">{status.mcp.length} <span class="caret">▾</span></span>
+      </div>
+    {:else}
+      <div class="muted">…</div>
+    {/if}
   </div>
 </aside>
 
@@ -114,6 +137,29 @@
     font-size: 0.6rem;
     color: var(--grey);
     opacity: 0.7;
+  }
+  .krow {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 0.72rem;
+    color: var(--grey);
+    margin-bottom: 5px;
+  }
+  .kv {
+    color: var(--fg);
+    font-size: 0.7rem;
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mcp {
+    cursor: help;
+  }
+  .mcp .caret {
+    color: var(--teal);
+    font-size: 0.6rem;
   }
   .muted {
     font-size: 0.66rem;

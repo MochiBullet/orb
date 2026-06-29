@@ -4,6 +4,7 @@ mod error;
 mod pty;
 mod shell;
 mod state;
+mod status;
 mod usage;
 
 use state::AppState;
@@ -23,6 +24,7 @@ pub fn run() {
             commands::get_config,
             commands::save_config,
             commands::get_usage,
+            commands::get_claude_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
