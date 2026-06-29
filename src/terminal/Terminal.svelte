@@ -27,6 +27,8 @@
   // コピペ操作のときだけ既定処理を止める（通常入力・無選択 Ctrl+C は素通し＝SIGINT）。
   function onCopyPaste(e: KeyboardEvent) {
     if (!e.ctrlKey) return;
+    if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); blocks?.jumpPrev(); return; }
+    if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); blocks?.jumpNext(); return; }
     const key = e.key.toLowerCase();
     if (key === "c" && (e.shiftKey || (term?.hasSelection() ?? false))) {
       const sel = term?.getSelection() ?? "";
@@ -169,13 +171,16 @@
     pointer-events: none;
     box-sizing: border-box;
     border-left: 3px solid transparent;
+    transition: border-color 0.15s;
   }
   .term :global(.orb-block.ok) {
-    border-left-color: rgba(45, 212, 191, 0.55);
+    border-left-color: rgba(45, 212, 191, 0.6);
+    box-shadow: inset 3px 0 10px -5px rgba(45, 212, 191, 0.6);
   }
   .term :global(.orb-block.fail) {
-    border-left-color: rgba(255, 92, 138, 0.7);
+    border-left-color: rgba(255, 92, 138, 0.75);
     background: rgba(255, 92, 138, 0.05);
+    box-shadow: inset 3px 0 10px -5px rgba(255, 92, 138, 0.6);
   }
   .term :global(.orb-block-badge) {
     position: absolute;

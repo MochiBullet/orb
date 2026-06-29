@@ -1,4 +1,5 @@
 import type { Terminal, IMarker, IDecoration, IDisposable } from "@xterm/xterm";
+import { cwd as cwdStore } from "../../store/appStore";
 
 /**
  * OSC 133/633 マーカーを解釈して Warp 風のコマンドブロック装飾を出すコントローラ。
@@ -12,6 +13,7 @@ export class CommandBlocks {
   private disposables: IDisposable[] = [];
   private decorations: IDecoration[] = [];
   private startMarker: IMarker | null = null;
+  private promptMarkers: IMarker[] = [];
   private finished = true;
   cwd = "";
   promptType = "";
@@ -50,6 +52,7 @@ export class CommandBlocks {
       this.decorate(this.startMarker, -1);
     }
     this.startMarker = this.term.registerMarker(0) ?? null;
+    if (this.startMarker) this.promptMarkers.push(this.startMarker);
     this.finished = false;
   }
 
@@ -65,8 +68,10 @@ export class CommandBlocks {
     if (eq === -1) return;
     const key = rest.slice(0, eq);
     const value = decodeOsc(rest.slice(eq + 1));
-    if (key === "Cwd") this.cwd = value;
-    else if (key === "PromptType") this.promptType = value;
+    if (key === "Cwd") {
+      this.cwd = value;
+      cwdStore.set(value);
+    } else if (key === "PromptType") this.promptType = value;
   }
 
   private decorate(marker: IMarker, code: number) {
@@ -91,11 +96,27 @@ export class CommandBlocks {
     });
   }
 
+  /** 直前/直後のプロンプト行へスクロール（Ctrl+↑ / Ctrl+↓）。 */
+  jumpPrev() {
+    const y = this.term.buffer.active.viewportY;
+    const lines = this.promptMarkers.map((m) => m.line).filter((l) => l >= 0).sort((a, b) => a - b);
+    const target = [...lines].reverse().find((l) => l < y);
+    if (target != null) this.term.scrollToLine(target);
+  }
+
+  jumpNext() {
+    const y = this.term.buffer.active.viewportY;
+    const lines = this.promptMarkers.map((m) => m.line).filter((l) => l >= 0).sort((a, b) => a - b);
+    const target = lines.find((l) => l > y);
+    if (target != null) this.term.scrollToLine(target);
+  }
+
   dispose() {
     for (const d of this.decorations) d.dispose();
     for (const d of this.disposables) d.dispose();
     this.decorations = [];
     this.disposables = [];
+    this.promptMarkers = [];
     this.startMarker = null;
   }
 }

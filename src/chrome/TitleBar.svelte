@@ -1,11 +1,24 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { cwd } from "../store/appStore";
 
   const appWindow = getCurrentWindow();
+
+  // フルパスは長いので末尾2セグメントだけ表示（例: projects/orb）。
+  function shortCwd(p: string): string {
+    if (!p) return "";
+    const parts = p.replace(/\\/g, "/").split("/").filter(Boolean);
+    return parts.slice(-2).join("/");
+  }
 </script>
 
 <div class="titlebar" data-tauri-drag-region>
-  <span class="brand" data-tauri-drag-region>orb</span>
+  <div class="left" data-tauri-drag-region>
+    <span class="brand" data-tauri-drag-region>orb</span>
+    {#if $cwd}
+      <span class="cwd" data-tauri-drag-region>{shortCwd($cwd)}</span>
+    {/if}
+  </div>
   <div class="controls">
     <button class="ctl" onclick={() => appWindow.minimize()} aria-label="minimize"
       >&#x2013;</button
@@ -31,12 +44,26 @@
     border-bottom: 1px solid rgba(45, 212, 191, 0.25);
     user-select: none;
   }
+  .left {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    min-width: 0;
+  }
   .brand {
     font-weight: 700;
     letter-spacing: 0.35em;
     font-size: 0.82rem;
     color: var(--teal);
     text-shadow: 0 0 12px rgba(45, 212, 191, 0.5);
+  }
+  .cwd {
+    font-size: 0.72rem;
+    color: var(--grey);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .controls {
     display: flex;
