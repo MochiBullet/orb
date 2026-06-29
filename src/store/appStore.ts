@@ -10,6 +10,9 @@ export const layout = writable<PaneNode | null>(null);
 /** フォーカス中のペイン ID（分割・クローズ・枠ハイライトの対象）。 */
 export const focusedPane = writable<number>(0);
 
+/** AI(claude)ペインの ID。Ctrl+L で選択テキストの送信先になる。null=AIペイン無し。 */
+export const aiPane = writable<number | null>(null);
+
 let paneCounter = 0;
 /** 単調増加のペイン ID を採番する。 */
 export function nextPaneId(): number {

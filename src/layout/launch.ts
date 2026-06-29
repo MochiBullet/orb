@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { nextPaneId, layout, focusedPane } from "../store/appStore";
+import { nextPaneId, layout, focusedPane, aiPane } from "../store/appStore";
 import { leaf, type PaneNode } from "./tree";
 
 export interface Project {
@@ -32,11 +32,13 @@ export function launchProject(p: Project): void {
 
   const tree: PaneNode = {
     kind: "split",
+    id: nextPaneId(),
     dir: "h",
     ratio: 0.4,
-    a: leaf(ai, `${cd(p.dir)}; claude --continue`),
+    a: leaf(ai, `${cd(p.dir)}; claude --continue`, "ai"),
     b: {
       kind: "split",
+      id: nextPaneId(),
       dir: "v",
       ratio: 0.62,
       a: leaf(dev, `${cd(devCwd)}; ${p.dev_cmd}`),
@@ -45,5 +47,6 @@ export function launchProject(p: Project): void {
   };
 
   layout.set(tree);
+  aiPane.set(ai);
   focusedPane.set(ai);
 }

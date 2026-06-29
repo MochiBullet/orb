@@ -36,22 +36,27 @@ fn config_dir() -> PathBuf {
 /// projects.toml を読む。無ければデフォルト案件を書き出して返す。
 pub fn load_projects() -> Vec<Project> {
     let path = config_dir().join("projects.toml");
-    if let Ok(text) = std::fs::read_to_string(&path) {
-        if let Ok(pf) = toml::from_str::<ProjectsFile>(&text) {
-            if !pf.project.is_empty() {
-                return pf.project;
+    match std::fs::read_to_string(&path) {
+        // ファイルが存在する: ユーザー設定を尊重し、デフォルトで上書きしない。
+        // 空リストは「意図的に空」として尊重、パース失敗時のみメモリ上の既定を返す
+        // （ファイルは触らずユーザーが直せるよう温存）。
+        Ok(text) => match toml::from_str::<ProjectsFile>(&text) {
+            Ok(pf) => pf.project,
+            Err(_) => default_projects(),
+        },
+        // ファイルが無い: 初回のみ既定を書き出して返す。
+        Err(_) => {
+            let defaults = default_projects();
+            let dir = config_dir();
+            let _ = std::fs::create_dir_all(&dir);
+            if let Ok(s) = toml::to_string_pretty(&ProjectsFile {
+                project: defaults.clone(),
+            }) {
+                let _ = std::fs::write(&path, s);
             }
+            defaults
         }
     }
-    let defaults = default_projects();
-    let dir = config_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    if let Ok(s) = toml::to_string_pretty(&ProjectsFile {
-        project: defaults.clone(),
-    }) {
-        let _ = std::fs::write(dir.join("projects.toml"), s);
-    }
-    defaults
 }
 
 fn default_projects() -> Vec<Project> {

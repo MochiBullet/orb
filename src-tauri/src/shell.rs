@@ -54,9 +54,11 @@ pub fn build_pwsh(initial_cmd: Option<&str>) -> Result<CommandBuilder> {
 
     // profile → integration の後に、案件ランチャー由来の初期コマンド（claude --continue
     // / npm run dev / lg 等）を続ける。-NoExit なので実行後も対話シェルが残る。
+    // パスのシングルクオートを '' へエスケープ（temp パスに ' が含まれても壊れないよう）。
+    let integration_arg = integration.display().to_string().replace('\'', "''");
     let mut script = format!(
         "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); . '{}'",
-        integration.display()
+        integration_arg
     );
     if let Some(c) = initial_cmd {
         if !c.is_empty() {

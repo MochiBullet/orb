@@ -7,9 +7,12 @@
   import { ClipboardAddon } from "@xterm/addon-clipboard";
   import { PtyClient } from "../core/pty";
   import { CommandBlocks } from "./blocks/osc";
-  import { focusedPane } from "../store/appStore";
+  import { focusedPane, aiPane } from "../store/appStore";
+  import { invoke } from "@tauri-apps/api/core";
+  import { get } from "svelte/store";
 
-  let { paneId, initialCmd }: { paneId: number; initialCmd?: string } = $props();
+  let { paneId, initialCmd, role }: { paneId: number; initialCmd?: string; role?: "shell" | "ai" } =
+    $props();
   const RESIZE_DEBOUNCE_MS = 150;
 
   let container: HTMLDivElement;
@@ -27,6 +30,20 @@
     term?.focus();
   }
 
+  // Ctrl+L: このペインの選択テキストを AI(claude)ペインの stdin へ送る（ペースト）。
+  function sendSelectionToAi() {
+    const target = get(aiPane);
+    if (target == null || target === paneId) return;
+    const sel = term?.getSelection() ?? "";
+    if (!sel) return;
+    void invoke("write_pty", { paneId: target, data: Array.from(encoder.encode(sel)) });
+  }
+
+  // フォーカスが自分に移ったら、枠グローだけでなく実際のキーボードフォーカスも端末へ移す。
+  $effect(() => {
+    if ($focusedPane === paneId) term?.focus();
+  });
+
   // コピペは attachCustomKeyEventHandler だと keydown/keypress の二重発火で入力が
   // 二重化するため使わない。container の keydown を capture phase で横取りする。
   function onCopyPaste(e: KeyboardEvent) {
@@ -34,6 +51,12 @@
     if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); blocks?.jumpPrev(); return; }
     if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); blocks?.jumpNext(); return; }
     const key = e.key.toLowerCase();
+    if (key === "l") {
+      e.preventDefault();
+      e.stopPropagation();
+      sendSelectionToAi();
+      return;
+    }
     if (key === "c" && (e.shiftKey || (term?.hasSelection() ?? false))) {
       const sel = term?.getSelection() ?? "";
       if (sel) {
@@ -149,6 +172,7 @@
 <div
   class="term"
   class:focused={$focusedPane === paneId}
+  class:ai={role === "ai"}
   bind:this={container}
   onpointerdown={focusThis}
   role="presentation"
@@ -165,6 +189,12 @@
   }
   .term.focused {
     box-shadow: inset 0 0 0 1px rgba(45, 212, 191, 0.45);
+  }
+  .term.ai {
+    box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.5);
+  }
+  .term.ai.focused {
+    box-shadow: inset 0 0 0 1.5px rgba(167, 139, 250, 0.75);
   }
   .term :global(.xterm-viewport)::-webkit-scrollbar {
     width: 10px;

@@ -32,7 +32,7 @@
       onClose();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      selected = Math.min(selected + 1, filtered.length - 1);
+      selected = Math.min(selected + 1, Math.max(filtered.length - 1, 0));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       selected = Math.max(selected - 1, 0);
