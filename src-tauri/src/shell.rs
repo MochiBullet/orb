@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use portable_pty::CommandBuilder;
 
@@ -34,12 +35,20 @@ fn find_pwsh() -> Option<PathBuf> {
 }
 
 /// 埋め込んだ shell-integration.ps1 を %TEMP%\orb\ に展開し、そのパスを返す。
+///
+/// 複数ペインを同時に起動しても temp への書き込みは一度だけ（OnceLock::get_or_init
+/// が最初の1回しかクロージャを走らせない＝同一ファイルへの同時書き込みレースを排除）。
+/// 書き込み失敗時もパスは返す（dot-source が失敗しても OSC が出ないだけで端末は動く）。
 fn write_integration_script() -> Result<PathBuf> {
-    let dir = std::env::temp_dir().join("orb");
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join("shell-integration.ps1");
-    std::fs::write(&path, SHELL_INTEGRATION)?;
-    Ok(path)
+    static INTEGRATION_PATH: OnceLock<PathBuf> = OnceLock::new();
+    let path = INTEGRATION_PATH.get_or_init(|| {
+        let dir = std::env::temp_dir().join("orb");
+        let path = dir.join("shell-integration.ps1");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(&path, SHELL_INTEGRATION);
+        path
+    });
+    Ok(path.clone())
 }
 
 /// orb の既定シェル起動コマンドを組み立てる。

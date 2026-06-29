@@ -26,17 +26,18 @@ export function splitPane(
   dir: "h" | "v",
   newPaneId: number,
   newSplitId: number,
+  newCmd?: string,
 ): PaneNode {
   if (node.kind === "leaf") {
     if (node.paneId === targetId) {
-      return { kind: "split", id: newSplitId, dir, ratio: 0.5, a: node, b: leaf(newPaneId) };
+      return { kind: "split", id: newSplitId, dir, ratio: 0.5, a: node, b: leaf(newPaneId, newCmd) };
     }
     return node;
   }
   return {
     ...node,
-    a: splitPane(node.a, targetId, dir, newPaneId, newSplitId),
-    b: splitPane(node.b, targetId, dir, newPaneId, newSplitId),
+    a: splitPane(node.a, targetId, dir, newPaneId, newSplitId, newCmd),
+    b: splitPane(node.b, targetId, dir, newPaneId, newSplitId, newCmd),
   };
 }
 

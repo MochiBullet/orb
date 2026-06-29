@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore } from "../store/appStore";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -111,9 +111,12 @@
   function doSplit(dir: "h" | "v") {
     const root = get(layout);
     if (!root) return;
+    // フォーカス中ペインの cwd を新ペインへ継承（同じディレクトリで開く）。
+    const cwd = get(cwdStore);
+    const newCmd = cwd ? `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'` : undefined;
     const newPaneId = nextPaneId();
     const newSplitId = nextPaneId();
-    layout.set(splitPane(root, get(focusedPane), dir, newPaneId, newSplitId));
+    layout.set(splitPane(root, get(focusedPane), dir, newPaneId, newSplitId, newCmd));
     focusedPane.set(newPaneId);
   }
 
