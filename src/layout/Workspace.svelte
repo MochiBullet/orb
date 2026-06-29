@@ -3,7 +3,6 @@
   import { get } from "svelte/store";
   import { layout, focusedPane, nextPaneId } from "../store/appStore";
   import {
-    leaf,
     splitPane,
     closePane,
     leafIds,
@@ -18,6 +17,7 @@
   } from "./tree";
   import Terminal from "../terminal/Terminal.svelte";
   import Launcher from "./Launcher.svelte";
+  import { ensureFirstTab, newTab, closeTab, activeTabId } from "./tabs";
 
   let showLauncher = $state(false);
   let wsEl: HTMLDivElement;
@@ -43,11 +43,7 @@
   });
 
   onMount(() => {
-    if (!get(layout)) {
-      const id = nextPaneId();
-      layout.set(leaf(id));
-      focusedPane.set(id);
-    }
+    ensureFirstTab();
     window.addEventListener("keydown", onKey, true);
   });
 
@@ -56,6 +52,17 @@
   function onKey(e: KeyboardEvent) {
     // モーダル表示中はグローバルショートカットを止める（背後のレイアウト破壊防止）。
     if (showLauncher) return;
+    // Ctrl+T 新タブ / Ctrl+W タブ閉じ
+    if (e.ctrlKey && !e.shiftKey && (e.key === "t" || e.key === "T")) {
+      e.preventDefault();
+      newTab();
+      return;
+    }
+    if (e.ctrlKey && !e.shiftKey && (e.key === "w" || e.key === "W")) {
+      e.preventDefault();
+      closeTab(get(activeTabId));
+      return;
+    }
     // Ctrl+P : 案件ランチャー
     if (e.ctrlKey && !e.shiftKey && (e.key === "p" || e.key === "P")) {
       e.preventDefault();
