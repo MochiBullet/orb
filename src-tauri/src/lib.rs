@@ -19,6 +19,7 @@ pub fn run() {
             commands::resize_pty,
             commands::close_pty,
             commands::list_projects,
+            commands::get_config,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

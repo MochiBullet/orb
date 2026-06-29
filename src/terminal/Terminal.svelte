@@ -9,13 +9,14 @@
   import { PtyClient } from "../core/pty";
   import { CommandBlocks } from "./blocks/osc";
   import { focusedPane, aiPane } from "../store/appStore";
+  import { config } from "../core/config";
   import { invoke } from "@tauri-apps/api/core";
   import { get } from "svelte/store";
 
   let { paneId, initialCmd, role }: { paneId: number; initialCmd?: string; role?: "shell" | "ai" } =
     $props();
   const RESIZE_DEBOUNCE_MS = 150;
-  const BASE_FONT = 13;
+  const cfg = get(config);
 
   let container: HTMLDivElement;
   let term: Terminal | undefined;
@@ -54,14 +55,14 @@
   // ctrlKey 付き wheel として届く。
   function zoom(delta: number) {
     if (!term) return;
-    const cur = term.options.fontSize ?? BASE_FONT;
+    const cur = term.options.fontSize ?? cfg.font_size;
     term.options.fontSize = Math.min(28, Math.max(8, cur + delta));
     fit?.fit();
     pty?.resize(term.cols, term.rows);
   }
   function resetZoom() {
     if (!term) return;
-    term.options.fontSize = BASE_FONT;
+    term.options.fontSize = cfg.font_size;
     fit?.fit();
     pty?.resize(term.cols, term.rows);
   }
@@ -113,9 +114,9 @@
 
   onMount(async () => {
     term = new Terminal({
-      fontFamily: '"Cascadia Code", "FiraCode Nerd Font", "Consolas", monospace',
-      fontSize: BASE_FONT,
-      scrollback: 1000,
+      fontFamily: cfg.font_family,
+      fontSize: cfg.font_size,
+      scrollback: cfg.scrollback,
       cursorBlink: true,
       allowProposedApi: true,
       theme: {

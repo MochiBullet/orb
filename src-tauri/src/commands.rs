@@ -1,7 +1,7 @@
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::State;
 
-use crate::config::{self, Project};
+use crate::config::{self, Config, Project};
 use crate::error::{AppError, Result};
 use crate::pty::PtyHandle;
 use crate::shell;
@@ -11,6 +11,12 @@ use crate::state::{AppState, PaneId};
 #[tauri::command]
 pub fn list_projects() -> Vec<Project> {
     config::load_projects()
+}
+
+/// config.toml（font/scrollback 等）。
+#[tauri::command]
+pub fn get_config() -> Config {
+    config::load_config()
 }
 
 /// pwsh を spawn し、出力 Channel を結線する。`on_output` はフロントが生成した

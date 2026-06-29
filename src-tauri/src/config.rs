@@ -21,6 +21,54 @@ struct ProjectsFile {
     project: Vec<Project>,
 }
 
+fn default_font_size() -> u16 {
+    13
+}
+fn default_font_family() -> String {
+    "\"Cascadia Code\", \"FiraCode Nerd Font\", \"Consolas\", monospace".into()
+}
+fn default_scrollback() -> u32 {
+    1000
+}
+
+/// orb 本体の設定（config.toml）。
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Config {
+    #[serde(default = "default_font_size")]
+    pub font_size: u16,
+    #[serde(default = "default_font_family")]
+    pub font_family: String,
+    #[serde(default = "default_scrollback")]
+    pub scrollback: u32,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            font_size: default_font_size(),
+            font_family: default_font_family(),
+            scrollback: default_scrollback(),
+        }
+    }
+}
+
+/// config.toml を読む。無ければデフォルトを書き出して返す（projects.toml と同じ方針）。
+pub fn load_config() -> Config {
+    let path = config_dir().join("config.toml");
+    match std::fs::read_to_string(&path) {
+        Ok(text) => toml::from_str::<Config>(&text).unwrap_or_default(),
+        Err(_) => {
+            let cfg = Config::default();
+            let dir = config_dir();
+            let _ = std::fs::create_dir_all(&dir);
+            if let Ok(s) = toml::to_string_pretty(&cfg) {
+                let _ = std::fs::write(&path, s);
+            }
+            cfg
+        }
+    }
+}
+
 /// $XDG_CONFIG_HOME/orb（未設定なら ~/.config/orb）。
 fn config_dir() -> PathBuf {
     if let Some(x) = std::env::var_os("XDG_CONFIG_HOME") {
