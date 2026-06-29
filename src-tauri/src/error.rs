@@ -17,6 +17,9 @@ pub enum AppError {
 
     #[error("usage fetch error: {0}")]
     Usage(String),
+
+    #[error("config error: {0}")]
+    Config(String),
 }
 
 impl Serialize for AppError {

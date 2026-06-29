@@ -19,6 +19,12 @@ pub fn get_config() -> Config {
     config::load_config()
 }
 
+/// 設定GUI からの保存。
+#[tauri::command]
+pub fn save_config(config: Config) -> Result<()> {
+    crate::config::save_config(&config)
+}
+
 /// Claude のトークン使用率（サイドバー用、ブロッキング HTTP は別スレッドで実行される）。
 #[tauri::command]
 pub fn get_usage() -> Result<crate::usage::Usage> {

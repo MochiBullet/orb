@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::{AppError, Result};
+
 /// 案件ランチャー1件分。warp の gen-warp-launch-configs.ps1 の $projects に対応。
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Project {
@@ -50,6 +52,15 @@ impl Default for Config {
             scrollback: default_scrollback(),
         }
     }
+}
+
+/// config.toml を書き出す（設定GUI からの保存）。
+pub fn save_config(cfg: &Config) -> Result<()> {
+    let dir = config_dir();
+    std::fs::create_dir_all(&dir)?;
+    let s = toml::to_string_pretty(cfg).map_err(|e| AppError::Config(e.to_string()))?;
+    std::fs::write(dir.join("config.toml"), s)?;
+    Ok(())
 }
 
 /// config.toml を読む。無ければデフォルトを書き出して返す（projects.toml と同じ方針）。

@@ -51,6 +51,16 @@
     if ($focusedPane === paneId) term?.focus();
   });
 
+  // 設定でフォントサイズが変わったら即反映（全ペイン）。
+  $effect(() => {
+    const fs = $config.font_size;
+    if (term && term.options.fontSize !== fs) {
+      term.options.fontSize = fs;
+      fit?.fit();
+      pty?.resize(term.cols, term.rows);
+    }
+  });
+
   // ピンチズーム / Ctrl+ホイール / Ctrl+0。WebView2 ではタッチパッドのピンチは
   // ctrlKey 付き wheel として届く。
   function zoom(delta: number) {

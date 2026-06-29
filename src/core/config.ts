@@ -16,6 +16,10 @@ const DEFAULT: OrbConfig = {
 /** ~/.config/orb/config.toml の内容。起動時に loadConfig() で埋める。 */
 export const config = writable<OrbConfig>(DEFAULT);
 
+export function saveConfig(c: OrbConfig): Promise<void> {
+  return invoke("save_config", { config: c });
+}
+
 export async function loadConfig(): Promise<void> {
   try {
     const c = await invoke<OrbConfig>("get_config");

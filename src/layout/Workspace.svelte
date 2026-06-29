@@ -19,8 +19,10 @@
   import { nextPaneId } from "../store/appStore";
   import Terminal from "../terminal/Terminal.svelte";
   import Launcher from "./Launcher.svelte";
+  import Settings from "../chrome/Settings.svelte";
 
   let showLauncher = $state(false);
+  let showSettings = $state(false);
   let wsEl: HTMLDivElement;
   const FULL: Rect = { x: 0, y: 0, w: 100, h: 100 };
 
@@ -65,7 +67,13 @@
   onDestroy(() => window.removeEventListener("keydown", onKey, true));
 
   function onKey(e: KeyboardEvent) {
-    if (showLauncher) return;
+    if (showLauncher || showSettings) return;
+    // Ctrl+, : 設定
+    if (e.ctrlKey && !e.shiftKey && e.key === ",") {
+      e.preventDefault();
+      showSettings = true;
+      return;
+    }
     if (e.ctrlKey && !e.shiftKey && (e.key === "t" || e.key === "T")) {
       e.preventDefault();
       newTab();
@@ -184,6 +192,10 @@
 
 {#if showLauncher}
   <Launcher onClose={() => (showLauncher = false)} />
+{/if}
+
+{#if showSettings}
+  <Settings onClose={() => (showSettings = false)} />
 {/if}
 
 <style>

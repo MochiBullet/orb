@@ -21,6 +21,7 @@ pub fn run() {
             commands::close_pty,
             commands::list_projects,
             commands::get_config,
+            commands::save_config,
             commands::get_usage,
         ])
         .build(tauri::generate_context!())
