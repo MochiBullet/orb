@@ -1,14 +1,15 @@
 import type { Terminal, IMarker, IDecoration, IDisposable } from "@xterm/xterm";
-import { cwd as cwdStore, focusedPane } from "../../store/appStore";
+import { cwd as cwdStore, focusedPane, aiPane } from "../../store/appStore";
 import { get } from "svelte/store";
+import { invoke } from "@tauri-apps/api/core";
 
 /**
  * OSC 133/633 マーカーを解釈して Warp 風のコマンドブロック装飾を出すコントローラ。
  *
- * - 単一 xterm グリッドは維持し、ブロック境界は decoration（DOM オーバーレイ）で乗せる
- *   ＝ TUI / IME / WebGL の堅牢さを保ったまま体験だけ再現する。
+ * - 単一 xterm グリッドは維持し、ブロック境界は decoration（DOM オーバーレイ）で乗せる。
  * - 代替画面（vim/lazygit/fzf 等）中は処理を完全停止（偽ブロック防止）。
  * - D（終了コード）欠落（Ctrl-C 等）は次の A で中断クローズする。
+ * - 各ブロックに hover ツールバー（コピー / AI へ送る）。
  */
 export class CommandBlocks {
   private disposables: IDisposable[] = [];
@@ -16,6 +17,7 @@ export class CommandBlocks {
   private startMarker: IMarker | null = null;
   private promptMarkers: IMarker[] = [];
   private finished = true;
+  private encoder = new TextEncoder();
   cwd = "";
   promptType = "";
 
@@ -28,13 +30,10 @@ export class CommandBlocks {
   }
 
   private handle(data: string): boolean {
-    // 代替画面（vim 等）中はブロック処理しない。OSC は握りつぶす（表示しない）。
     if (this.term.buffer.active.type === "alternate") return true;
-
     const sep = data.indexOf(";");
     const marker = sep === -1 ? data : data.slice(0, sep);
     const rest = sep === -1 ? "" : data.slice(sep + 1);
-
     switch (marker) {
       case "A":
         this.onPromptStart();
@@ -45,15 +44,13 @@ export class CommandBlocks {
       case "P":
         this.onProperty(rest);
         break;
-      // B / C / E は P1 の装飾には未使用（状態は A/D で足りる）。
     }
-    return true; // handled — 制御シーケンスなので端末には表示しない。
+    return true;
   }
 
   private onPromptStart() {
-    // 直前ブロックが D 無しで終わった（Ctrl-C 等）→ 中断としてクローズ。
     if (this.startMarker && !this.finished) {
-      this.decorate(this.startMarker, -1);
+      this.decorate(this.startMarker, -1, null);
     }
     this.startMarker = this.term.registerMarker(0) ?? null;
     if (this.startMarker) this.promptMarkers.push(this.startMarker);
@@ -63,7 +60,8 @@ export class CommandBlocks {
   private onFinished(rest: string) {
     if (!this.startMarker) return;
     const code = rest === "" ? 0 : parseInt(rest.split(";")[0], 10) || 0;
-    this.decorate(this.startMarker, code);
+    const endMarker = this.term.registerMarker(0);
+    this.decorate(this.startMarker, code, endMarker ?? null);
     this.finished = true;
   }
 
@@ -78,7 +76,33 @@ export class CommandBlocks {
     } else if (key === "PromptType") this.promptType = value;
   }
 
-  private decorate(marker: IMarker, code: number) {
+  /** start〜end 行のブロックテキストを取り出す。 */
+  private blockText(start: IMarker, end: IMarker | null): string {
+    const buf = this.term.buffer.active;
+    const s = start.line;
+    const e = end && end.line >= 0 ? end.line : s;
+    if (s < 0) return "";
+    const out: string[] = [];
+    for (let i = s; i <= e; i++) {
+      const line = buf.getLine(i);
+      if (line) out.push(line.translateToString(true));
+    }
+    return out.join("\n").replace(/\n+$/, "");
+  }
+
+  private copyBlock(start: IMarker, end: IMarker | null) {
+    const t = this.blockText(start, end);
+    if (t) void navigator.clipboard.writeText(t);
+  }
+
+  private sendBlockToAi(start: IMarker, end: IMarker | null) {
+    const target = get(aiPane);
+    if (target == null || target === this.paneId) return;
+    const t = this.blockText(start, end);
+    if (t) void invoke("write_pty", { paneId: target, data: Array.from(this.encoder.encode(t)) });
+  }
+
+  private decorate(marker: IMarker, code: number, endMarker: IMarker | null) {
     const ok = code === 0;
     const dec = this.term.registerDecoration({
       marker,
@@ -93,10 +117,33 @@ export class CommandBlocks {
       el.classList.toggle("fail", !ok);
       if (el.dataset.orbReady) return;
       el.dataset.orbReady = "1";
+
       const badge = document.createElement("span");
       badge.className = "orb-block-badge";
       badge.textContent = ok ? "✓" : code < 0 ? "⊘" : `✗ ${code}`;
       el.appendChild(badge);
+
+      const tools = document.createElement("span");
+      tools.className = "orb-block-tools";
+      const copyBtn = document.createElement("button");
+      copyBtn.textContent = "copy";
+      copyBtn.title = "ブロックをコピー";
+      copyBtn.onpointerdown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.copyBlock(marker, endMarker);
+      };
+      const aiBtn = document.createElement("button");
+      aiBtn.textContent = "→AI";
+      aiBtn.title = "ブロックを AI ペインへ送る";
+      aiBtn.onpointerdown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.sendBlockToAi(marker, endMarker);
+      };
+      tools.appendChild(copyBtn);
+      tools.appendChild(aiBtn);
+      el.appendChild(tools);
     });
   }
 

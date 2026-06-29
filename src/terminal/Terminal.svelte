@@ -332,4 +332,32 @@
   .term :global(.orb-block.fail .orb-block-badge) {
     color: #ff5c8a;
   }
+  /* ブロックの hover ツールバー（コピー / AI へ送る） */
+  .term :global(.orb-block-tools) {
+    position: absolute;
+    right: 56px;
+    top: 0;
+    display: flex;
+    gap: 4px;
+    opacity: 0.32;
+    transition: opacity 0.12s;
+    pointer-events: auto;
+  }
+  .term :global(.orb-block-tools:hover) {
+    opacity: 1;
+  }
+  .term :global(.orb-block-tools button) {
+    border: 1px solid rgba(45, 212, 191, 0.4);
+    background: #05100e;
+    color: var(--teal);
+    font-size: 9px;
+    line-height: 1.3;
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 0 5px;
+  }
+  .term :global(.orb-block-tools button:hover) {
+    background: rgba(45, 212, 191, 0.18);
+    color: var(--fg);
+  }
 </style>
