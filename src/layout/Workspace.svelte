@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, nextPaneId } from "../store/appStore";
+  import { layout, focusedPane } from "../store/appStore";
+  import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
     closePane,
@@ -15,17 +16,36 @@
     type Splitter,
     type PaneRole,
   } from "./tree";
+  import { nextPaneId } from "../store/appStore";
   import Terminal from "../terminal/Terminal.svelte";
   import Launcher from "./Launcher.svelte";
-  import { ensureFirstTab, newTab, closeTab, activeTabId } from "./tabs";
 
   let showLauncher = $state(false);
   let wsEl: HTMLDivElement;
-
-  // ツリーから geometry を導出する。Terminal は paneId キーで一度だけ生成され、
-  // 分割/クローズでは矩形(style)が変わるだけで unmount されない（PTY/scrollback が生き残る）。
   const FULL: Rect = { x: 0, y: 0, w: 100, h: 100 };
-  let ids = $derived(leafIds($layout));
+
+  // アクティブタブは最新の $layout、非アクティブは保存済み layout を使う。
+  function tabLayout(t: Tab) {
+    return t.id === $activeTabId ? $layout : t.layout;
+  }
+
+  // 全タブの全 leaf を一度に保持（タブ切替で Terminal を unmount させない＝PTY 生存）。
+  let allLeaves = $derived.by(() => {
+    const out: { tabId: number; id: number; initialCmd?: string; role?: PaneRole }[] = [];
+    for (const t of $tabs) {
+      const lay = tabLayout(t);
+      if (!lay) continue;
+      const infoMap = new Map<number, { initialCmd?: string; role?: PaneRole }>();
+      leafInfoMap(lay, infoMap);
+      for (const id of leafIds(lay)) {
+        const info = infoMap.get(id);
+        out.push({ tabId: t.id, id, initialCmd: info?.initialCmd, role: info?.role });
+      }
+    }
+    return out;
+  });
+
+  // 可視（アクティブ）タブの geometry。
   let rects = $derived.by(() => {
     const m = new Map<number, Rect>();
     if ($layout) computeRects($layout, FULL, m);
@@ -36,11 +56,6 @@
     if ($layout) computeSplitters($layout, FULL, a);
     return a;
   });
-  let info = $derived.by(() => {
-    const m = new Map<number, { initialCmd?: string; role?: PaneRole }>();
-    if ($layout) leafInfoMap($layout, m);
-    return m;
-  });
 
   onMount(() => {
     ensureFirstTab();
@@ -50,9 +65,7 @@
   onDestroy(() => window.removeEventListener("keydown", onKey, true));
 
   function onKey(e: KeyboardEvent) {
-    // モーダル表示中はグローバルショートカットを止める（背後のレイアウト破壊防止）。
     if (showLauncher) return;
-    // Ctrl+T 新タブ / Ctrl+W タブ閉じ
     if (e.ctrlKey && !e.shiftKey && (e.key === "t" || e.key === "T")) {
       e.preventDefault();
       newTab();
@@ -63,19 +76,16 @@
       closeTab(get(activeTabId));
       return;
     }
-    // Ctrl+P : 案件ランチャー
     if (e.ctrlKey && !e.shiftKey && (e.key === "p" || e.key === "P")) {
       e.preventDefault();
       showLauncher = true;
       return;
     }
-    // Ctrl+Tab / Ctrl+Shift+Tab : フォーカス巡回（端末予約の Ctrl+[ /] は使わない）
     if (e.ctrlKey && e.key === "Tab") {
       e.preventDefault();
       cycleFocus(e.shiftKey ? -1 : 1);
       return;
     }
-    // Ctrl+Shift+D 横分割 / E 縦分割 / W クローズ
     if (!e.ctrlKey || !e.shiftKey) return;
     const k = e.key.toLowerCase();
     if (k === "d") {
@@ -144,13 +154,17 @@
 </script>
 
 <div class="workspace" bind:this={wsEl}>
-  {#each ids as id (id)}
-    {@const rect = rects.get(id)}
-    {#if rect}
-      <div class="slot" style="left:{rect.x}%;top:{rect.y}%;width:{rect.w}%;height:{rect.h}%">
-        <Terminal paneId={id} initialCmd={info.get(id)?.initialCmd} role={info.get(id)?.role} />
-      </div>
-    {/if}
+  {#each allLeaves as lf (lf.id)}
+    {@const rect = lf.tabId === $activeTabId ? rects.get(lf.id) : undefined}
+    <div
+      class="slot"
+      class:hidden={lf.tabId !== $activeTabId}
+      style={rect
+        ? `left:${rect.x}%;top:${rect.y}%;width:${rect.w}%;height:${rect.h}%`
+        : ""}
+    >
+      <Terminal paneId={lf.id} initialCmd={lf.initialCmd} role={lf.role} />
+    </div>
   {/each}
   {#each splitters as s (s.id)}
     {@const sx = s.parent.x + s.parent.w * s.ratio}
@@ -182,6 +196,9 @@
   .slot {
     position: absolute;
     overflow: hidden;
+  }
+  .slot.hidden {
+    display: none;
   }
   .splitter {
     position: absolute;
