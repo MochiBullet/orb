@@ -1,4 +1,5 @@
 mod commands;
+mod config;
 mod error;
 mod pty;
 mod shell;
@@ -17,6 +18,7 @@ pub fn run() {
             commands::write_pty,
             commands::resize_pty,
             commands::close_pty,
+            commands::list_projects,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -1,10 +1,17 @@
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::State;
 
+use crate::config::{self, Project};
 use crate::error::{AppError, Result};
 use crate::pty::PtyHandle;
 use crate::shell;
 use crate::state::{AppState, PaneId};
+
+/// projects.toml の案件一覧（案件ランチャー用）。
+#[tauri::command]
+pub fn list_projects() -> Vec<Project> {
+    config::load_projects()
+}
 
 /// pwsh を spawn し、出力 Channel を結線する。`on_output` はフロントが生成した
 /// バイナリ Channel（raw バイトが流れる）。

@@ -4,6 +4,9 @@
   import { layout, focusedPane, nextPaneId } from "../store/appStore";
   import { leaf, splitPane, closePane, leafIds } from "./tree";
   import PaneView from "./PaneView.svelte";
+  import Launcher from "./Launcher.svelte";
+
+  let showLauncher = $state(false);
 
   onMount(() => {
     if (!get(layout)) {
@@ -17,6 +20,12 @@
   onDestroy(() => window.removeEventListener("keydown", onKey, true));
 
   function onKey(e: KeyboardEvent) {
+    // Ctrl+P : 案件ランチャーを開く
+    if (e.ctrlKey && !e.shiftKey && (e.key === "p" || e.key === "P")) {
+      e.preventDefault();
+      showLauncher = true;
+      return;
+    }
     // Ctrl+] / Ctrl+[ : フォーカスを次/前のペインへ巡回
     if (e.ctrlKey && !e.shiftKey && (e.key === "]" || e.key === "[")) {
       e.preventDefault();
@@ -68,6 +77,10 @@
   <div class="workspace">
     <PaneView node={$layout} />
   </div>
+{/if}
+
+{#if showLauncher}
+  <Launcher onClose={() => (showLauncher = false)} />
 {/if}
 
 <style>

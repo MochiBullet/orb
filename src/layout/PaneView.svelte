@@ -7,7 +7,7 @@
 </script>
 
 {#if node.kind === "leaf"}
-  <Terminal paneId={node.paneId} />
+  <Terminal paneId={node.paneId} initialCmd={node.initialCmd} />
 {:else}
   <SplitPane {node} />
 {/if}

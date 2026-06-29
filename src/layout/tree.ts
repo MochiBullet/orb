@@ -1,10 +1,10 @@
 /** ペインのレイアウトツリー（フロント権威）。leaf = 1 ペイン、split = 2 分割。 */
 export type PaneNode =
-  | { kind: "leaf"; paneId: number }
+  | { kind: "leaf"; paneId: number; initialCmd?: string }
   | { kind: "split"; dir: "h" | "v"; ratio: number; a: PaneNode; b: PaneNode };
 
-export function leaf(paneId: number): PaneNode {
-  return { kind: "leaf", paneId };
+export function leaf(paneId: number, initialCmd?: string): PaneNode {
+  return { kind: "leaf", paneId, initialCmd };
 }
 
 /** target leaf を分割し、「既存 + 新 leaf」の split に置き換える。 */
