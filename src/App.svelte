@@ -1,12 +1,12 @@
 <script lang="ts">
   import TitleBar from "./chrome/TitleBar.svelte";
-  import Terminal from "./terminal/Terminal.svelte";
+  import Workspace from "./layout/Workspace.svelte";
 </script>
 
 <div class="app">
   <TitleBar />
   <div class="body">
-    <Terminal />
+    <Workspace />
   </div>
 </div>
 

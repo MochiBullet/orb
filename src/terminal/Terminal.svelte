@@ -7,9 +7,9 @@
   import { ClipboardAddon } from "@xterm/addon-clipboard";
   import { PtyClient } from "../core/pty";
   import { CommandBlocks } from "./blocks/osc";
+  import { focusedPane } from "../store/appStore";
 
-  // P0 は 1 ペイン固定。ペイン分割は P2 で LayoutTree が採番する。
-  const PANE_ID = 0;
+  let { paneId, initialCmd }: { paneId: number; initialCmd?: string } = $props();
   const RESIZE_DEBOUNCE_MS = 150;
 
   let container: HTMLDivElement;
@@ -22,9 +22,13 @@
   let blocks: CommandBlocks | undefined;
   const encoder = new TextEncoder();
 
+  function focusThis() {
+    focusedPane.set(paneId);
+    term?.focus();
+  }
+
   // コピペは attachCustomKeyEventHandler だと keydown/keypress の二重発火で入力が
-  // 二重化するため使わない。container の keydown を capture phase で横取りし、
-  // コピペ操作のときだけ既定処理を止める（通常入力・無選択 Ctrl+C は素通し＝SIGINT）。
+  // 二重化するため使わない。container の keydown を capture phase で横取りする。
   function onCopyPaste(e: KeyboardEvent) {
     if (!e.ctrlKey) return;
     if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); blocks?.jumpPrev(); return; }
@@ -82,8 +86,6 @@
     term.loadAddon(new ClipboardAddon());
 
     term.open(container);
-
-    // コピペは capture phase の keydown で横取り（attachCustomKeyEventHandler は使わない）。
     container.addEventListener("keydown", onCopyPaste, true);
 
     // WebGL は open 後に attach。失敗時は canvas/DOM レンダラへフォールバック。
@@ -97,14 +99,12 @@
 
     fit.fit();
 
-    // OSC 133/633 を解釈してコマンドブロック装飾を出す（出力ストリームに乗る）。
-    blocks = new CommandBlocks(term);
+    blocks = new CommandBlocks(term, paneId);
 
-    pty = new PtyClient(PANE_ID);
+    pty = new PtyClient(paneId);
     try {
-      await pty.spawn(term.cols, term.rows, (bytes) => term?.write(bytes));
+      await pty.spawn(term.cols, term.rows, (bytes) => term?.write(bytes), initialCmd);
     } catch (e) {
-      // pwsh 未検出 / spawn 失敗をユーザーに可視化（無言の空白端末を防ぐ）。
       term.writeln("\x1b[31m[orb] PTY の起動に失敗しました: " + String(e) + "\x1b[0m");
       term.writeln(
         "\x1b[90mPowerShell 7 (pwsh.exe) が見つからない場合は、インストールするか PATH を通してください。\x1b[0m",
@@ -112,15 +112,12 @@
       return;
     }
 
-    // 破棄済みなら起動した PTY を畳んで終わる（async/onDestroy 競合対策）。
     if (disposed) {
       pty.close();
       return;
     }
 
-    // 入力結線は spawn 完了後に行う（起動 race による初期キー入力ロストを防ぐ）。
     term.onData((data) => pty?.write(encoder.encode(data)));
-    // 非 UTF-8 のバイナリ応答（マウスレポート等）は charCode を直マップで送る。
     term.onBinary((data) => {
       const bytes = new Uint8Array(data.length);
       for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xff;
@@ -149,7 +146,13 @@
   });
 </script>
 
-<div class="term" bind:this={container}></div>
+<div
+  class="term"
+  class:focused={$focusedPane === paneId}
+  bind:this={container}
+  onpointerdown={focusThis}
+  role="presentation"
+></div>
 
 <style>
   .term {
@@ -157,6 +160,11 @@
     height: 100%;
     padding: 6px 8px 4px;
     background: #000;
+    box-shadow: inset 0 0 0 1px transparent;
+    transition: box-shadow 0.12s;
+  }
+  .term.focused {
+    box-shadow: inset 0 0 0 1px rgba(45, 212, 191, 0.45);
   }
   .term :global(.xterm-viewport)::-webkit-scrollbar {
     width: 10px;

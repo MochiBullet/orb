@@ -1,5 +1,6 @@
 import type { Terminal, IMarker, IDecoration, IDisposable } from "@xterm/xterm";
-import { cwd as cwdStore } from "../../store/appStore";
+import { cwd as cwdStore, focusedPane } from "../../store/appStore";
+import { get } from "svelte/store";
 
 /**
  * OSC 133/633 マーカーを解釈して Warp 風のコマンドブロック装飾を出すコントローラ。
@@ -18,7 +19,10 @@ export class CommandBlocks {
   cwd = "";
   promptType = "";
 
-  constructor(private term: Terminal) {
+  constructor(
+    private term: Terminal,
+    private paneId: number,
+  ) {
     this.disposables.push(term.parser.registerOscHandler(633, (d) => this.handle(d)));
     this.disposables.push(term.parser.registerOscHandler(133, (d) => this.handle(d)));
   }
@@ -70,7 +74,7 @@ export class CommandBlocks {
     const value = decodeOsc(rest.slice(eq + 1));
     if (key === "Cwd") {
       this.cwd = value;
-      cwdStore.set(value);
+      if (get(focusedPane) === this.paneId) cwdStore.set(value);
     } else if (key === "PromptType") this.promptType = value;
   }
 

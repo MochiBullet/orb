@@ -5,8 +5,7 @@ import { invoke, Channel } from "@tauri-apps/api/core";
  * Rust の spawn_pty / write_pty / resize_pty / close_pty に橋渡しする。
  *
  * 出力は Tauri のバイナリ Channel（Rust 側は InvokeResponseBody::Raw を送る）。
- * 受信は ArrayBuffer なので Uint8Array に直して term.write へ流す。JSON 数値配列化を
- * 挟まないため高スループットで、マルチバイト UTF-8 分断による化けも起きない。
+ * 受信は ArrayBuffer なので Uint8Array に直して term.write へ流す。
  */
 export class PtyClient {
   private channel: Channel<ArrayBuffer> | null = null;
@@ -17,6 +16,7 @@ export class PtyClient {
     cols: number,
     rows: number,
     onData: (bytes: Uint8Array) => void,
+    initialCmd?: string,
   ): Promise<void> {
     const channel = new Channel<ArrayBuffer>();
     channel.onmessage = (msg) => onData(new Uint8Array(msg));
@@ -26,6 +26,7 @@ export class PtyClient {
       cols,
       rows,
       onOutput: channel,
+      initialCmd: initialCmd ?? null,
     });
   }
 

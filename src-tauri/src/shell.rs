@@ -48,17 +48,27 @@ fn write_integration_script() -> Result<PathBuf> {
 ///   bat/lazygit 等）を読ませる。profile が starship prompt を定義した「後」に
 ///   shell-integration.ps1 を dot-source することで、見た目を壊さず OSC を注入する。
 /// - 起動直後に出力エンコーディングを UTF-8（BOM なし）に統一して CP932 化けを防ぐ。
-pub fn build_pwsh() -> Result<CommandBuilder> {
+pub fn build_pwsh(initial_cmd: Option<&str>) -> Result<CommandBuilder> {
     let pwsh = find_pwsh().ok_or_else(|| AppError::ShellNotFound("pwsh.exe".into()))?;
     let integration = write_integration_script()?;
+
+    // profile → integration の後に、案件ランチャー由来の初期コマンド（claude --continue
+    // / npm run dev / lg 等）を続ける。-NoExit なので実行後も対話シェルが残る。
+    let mut script = format!(
+        "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); . '{}'",
+        integration.display()
+    );
+    if let Some(c) = initial_cmd {
+        if !c.is_empty() {
+            script.push_str("; ");
+            script.push_str(c);
+        }
+    }
 
     let mut cmd = CommandBuilder::new(pwsh);
     cmd.arg("-NoExit");
     cmd.arg("-Command");
-    cmd.arg(format!(
-        "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); . '{}'",
-        integration.display()
-    ));
+    cmd.arg(script);
     cmd.env("TERM", "xterm-256color");
 
     if let Some(home) = std::env::var_os("USERPROFILE") {
