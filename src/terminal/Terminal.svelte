@@ -17,6 +17,7 @@
   let pty: PtyClient | undefined;
   let observer: ResizeObserver | undefined;
   let resizeTimer: number | undefined;
+  let disposed = false;
   const encoder = new TextEncoder();
 
   onMount(async () => {
@@ -67,8 +68,31 @@
     fit.fit();
 
     pty = new PtyClient(PANE_ID);
+    try {
+      await pty.spawn(term.cols, term.rows, (bytes) => term?.write(bytes));
+    } catch (e) {
+      // pwsh 未検出 / spawn 失敗をユーザーに可視化（無言の空白端末を防ぐ）。
+      term.writeln("\x1b[31m[orb] PTY の起動に失敗しました: " + String(e) + "\x1b[0m");
+      term.writeln(
+        "\x1b[90mPowerShell 7 (pwsh.exe) が見つからない場合は、インストールするか PATH を通してください。\x1b[0m",
+      );
+      return;
+    }
+
+    // 破棄済みなら起動した PTY を畳んで終わる（async/onDestroy 競合対策）。
+    if (disposed) {
+      pty.close();
+      return;
+    }
+
+    // 入力結線は spawn 完了後に行う（起動 race による初期キー入力ロストを防ぐ）。
     term.onData((data) => pty?.write(encoder.encode(data)));
-    await pty.spawn(term.cols, term.rows, (bytes) => term?.write(bytes));
+    // 非 UTF-8 のバイナリ応答（マウスレポート等）は charCode を直マップで送る。
+    term.onBinary((data) => {
+      const bytes = new Uint8Array(data.length);
+      for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xff;
+      pty?.write(bytes);
+    });
 
     observer = new ResizeObserver(() => {
       if (resizeTimer) clearTimeout(resizeTimer);
@@ -82,6 +106,7 @@
   });
 
   onDestroy(() => {
+    disposed = true;
     if (resizeTimer) clearTimeout(resizeTimer);
     observer?.disconnect();
     pty?.close();
@@ -98,7 +123,6 @@
     padding: 6px 8px 4px;
     background: #000;
   }
-  /* xterm の viewport スクロールバーを teal 寄りに */
   .term :global(.xterm-viewport)::-webkit-scrollbar {
     width: 10px;
   }

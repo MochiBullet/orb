@@ -1,4 +1,4 @@
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::State;
 
 use crate::error::{AppError, Result};
@@ -7,18 +7,26 @@ use crate::shell;
 use crate::state::{AppState, PaneId};
 
 /// pwsh を spawn し、出力 Channel を結線する。`on_output` はフロントが生成した
-/// `Channel`（生バイトが流れる）。
+/// バイナリ Channel（raw バイトが流れる）。
 #[tauri::command]
 pub fn spawn_pty(
     state: State<'_, AppState>,
     pane_id: PaneId,
     cols: u16,
     rows: u16,
-    on_output: Channel<Vec<u8>>,
+    on_output: Channel<InvokeResponseBody>,
 ) -> Result<()> {
     let cmd = shell::build_pwsh()?;
     let handle = PtyHandle::spawn(cmd, cols, rows, on_output)?;
-    state.ptys.lock().unwrap().insert(pane_id, handle);
+    // ロックは map 更新の間だけ保持し、置き換えられた旧ハンドルの kill(=taskkill/join)
+    // はロックの外で行う（ロックを握ったまま join するのを避ける）。
+    let previous = {
+        let mut ptys = state.ptys.lock().unwrap();
+        ptys.insert(pane_id, handle)
+    };
+    if let Some(mut prev) = previous {
+        prev.kill();
+    }
     Ok(())
 }
 
@@ -38,7 +46,9 @@ pub fn resize_pty(state: State<'_, AppState>, pane_id: PaneId, cols: u16, rows: 
 
 #[tauri::command]
 pub fn close_pty(state: State<'_, AppState>, pane_id: PaneId) -> Result<()> {
-    if let Some(mut handle) = state.ptys.lock().unwrap().remove(&pane_id) {
+    // ロックは remove の間だけ。kill(taskkill/join) はロックの外で。
+    let removed = state.ptys.lock().unwrap().remove(&pane_id);
+    if let Some(mut handle) = removed {
         handle.kill();
     }
     Ok(())

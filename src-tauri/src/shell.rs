@@ -4,13 +4,27 @@ use portable_pty::CommandBuilder;
 
 use crate::error::{AppError, Result};
 
-/// PATH から pwsh.exe（PowerShell 7+）を探す。
+/// pwsh.exe（PowerShell 7+）を探す。まず PATH、次に標準インストール先。
+/// （legacy powershell.exe へはフォールバックしない＝IME/UTF-8 の都合で pwsh 必須）
 fn find_pwsh() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let cand = dir.join("pwsh.exe");
-        if cand.is_file() {
-            return Some(cand);
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let cand = dir.join("pwsh.exe");
+            if cand.is_file() {
+                return Some(cand);
+            }
+        }
+    }
+    // PATH に無くても標準の場所に入っていることが多い。
+    for key in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+        if let Some(pf) = std::env::var_os(key) {
+            let cand = PathBuf::from(pf)
+                .join("PowerShell")
+                .join("7")
+                .join("pwsh.exe");
+            if cand.is_file() {
+                return Some(cand);
+            }
         }
     }
     None
