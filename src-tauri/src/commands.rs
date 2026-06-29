@@ -19,6 +19,12 @@ pub fn get_config() -> Config {
     config::load_config()
 }
 
+/// Claude のトークン使用率（サイドバー用、ブロッキング HTTP は別スレッドで実行される）。
+#[tauri::command]
+pub fn get_usage() -> Result<crate::usage::Usage> {
+    crate::usage::fetch_usage()
+}
+
 /// pwsh を spawn し、出力 Channel を結線する。`on_output` はフロントが生成した
 /// バイナリ Channel（raw バイトが流れる）。
 #[tauri::command]

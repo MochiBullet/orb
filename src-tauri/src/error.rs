@@ -14,6 +14,9 @@ pub enum AppError {
 
     #[error("shell not found: {0}")]
     ShellNotFound(String),
+
+    #[error("usage fetch error: {0}")]
+    Usage(String),
 }
 
 impl Serialize for AppError {

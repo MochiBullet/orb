@@ -68,7 +68,9 @@
   }
   function onWheel(e: WheelEvent) {
     if (!e.ctrlKey) return;
+    // xterm のスクロールに食われないよう、ズーム時は capture 段で握りつぶす。
     e.preventDefault();
+    e.stopPropagation();
     zoom(e.deltaY < 0 ? 1 : -1);
   }
 
@@ -150,7 +152,7 @@
 
     term.open(container);
     container.addEventListener("keydown", onCopyPaste, true);
-    container.addEventListener("wheel", onWheel, { passive: false });
+    container.addEventListener("wheel", onWheel, { passive: false, capture: true });
 
     try {
       const webgl = new WebglAddon();
@@ -202,7 +204,7 @@
     disposed = true;
     if (resizeTimer) clearTimeout(resizeTimer);
     container?.removeEventListener("keydown", onCopyPaste, true);
-    container?.removeEventListener("wheel", onWheel);
+    container?.removeEventListener("wheel", onWheel, { capture: true });
     observer?.disconnect();
     blocks?.dispose();
     pty?.close();
