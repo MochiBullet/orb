@@ -1,0 +1,30 @@
+/* orb — base / reset. テーマトークンの完全版は P0 で tokens.css に展開する。 */
+:root {
+  --black: #000000;
+  --dark: #0a1a17;
+  --surface: #173832;
+  --teal: #2dd4bf;
+  --mint: #6ee7b7;
+  --violet: #a78bfa;
+  --fg: #e6fffa;
+  --grey: #8ba8a3;
+  --red: #ff5c8a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--black);
+  color: var(--fg);
+  font-family: "Cascadia Code", "FiraCode Nerd Font", "Consolas", monospace;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
