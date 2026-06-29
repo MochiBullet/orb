@@ -96,6 +96,8 @@
     const key = e.key.toLowerCase();
     if (key === "f") { e.preventDefault(); e.stopPropagation(); openSearch(); return; }
     if (key === "0") { e.preventDefault(); e.stopPropagation(); resetZoom(); return; }
+    if (key === "=" || key === "+") { e.preventDefault(); e.stopPropagation(); zoom(1); return; }
+    if (key === "-") { e.preventDefault(); e.stopPropagation(); zoom(-1); return; }
     if (key === "l") { e.preventDefault(); e.stopPropagation(); sendSelectionToAi(); return; }
     if (key === "c" && (e.shiftKey || (term?.hasSelection() ?? false))) {
       const sel = term?.getSelection() ?? "";
