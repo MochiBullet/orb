@@ -1,6 +1,13 @@
 import { get, writable } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
-import { layout, focusedPane, aiPane, nextPaneId } from "../store/appStore";
+import {
+  layout,
+  focusedPane,
+  aiPane,
+  nextPaneId,
+  peekPaneCounter,
+  setPaneCounter,
+} from "../store/appStore";
 import { leaf, leafIds, type PaneNode } from "./tree";
 
 /** 1 タブ = 独立したレイアウトツリー＋フォーカス＋AIペイン。 */
@@ -34,6 +41,36 @@ function loadTab(t: Tab) {
   aiPane.set(t.ai);
 }
 
+// ===== セッション永続化（再起動でタブ＆レイアウトを復元。PTY は新規 spawn） =====
+const SESSION_KEY = "orb.session";
+let saveTimer: number | undefined;
+
+function saveSession() {
+  try {
+    const aid = get(activeTabId);
+    const snap = get(tabs).map((t) =>
+      t.id === aid
+        ? { ...t, layout: get(layout), focused: get(focusedPane), ai: get(aiPane) }
+        : t,
+    );
+    if (!snap.length) return;
+    localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({ tabs: snap, active: aid, counter: peekPaneCounter() }),
+    );
+  } catch {
+    /* localStorage 不可でも動作は継続 */
+  }
+}
+function scheduleSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(saveSession, 500);
+}
+layout.subscribe(scheduleSave);
+tabs.subscribe(scheduleSave);
+activeTabId.subscribe(scheduleSave);
+focusedPane.subscribe(scheduleSave);
+
 function makeTab(lay?: PaneNode): Tab {
   const id = nextPaneId();
   if (lay) {
@@ -44,9 +81,25 @@ function makeTab(lay?: PaneNode): Tab {
   return { id, layout: leaf(leafId), focused: leafId, ai: null };
 }
 
-/** 初回マウント時に最初のタブを用意する。 */
+/** 初回マウント時に最初のタブを用意する。前回セッションがあれば復元する。 */
 export function ensureFirstTab() {
   if (get(tabs).length > 0) return;
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (raw) {
+      const data = JSON.parse(raw) as { tabs: Tab[]; active: number; counter: number };
+      if (data?.tabs?.length) {
+        setPaneCounter(data.counter ?? 0); // ID 衝突を防ぐ
+        tabs.set(data.tabs);
+        const active = data.tabs.find((t) => t.id === data.active) ?? data.tabs[0];
+        activeTabId.set(active.id);
+        loadTab(active);
+        return;
+      }
+    }
+  } catch {
+    /* 壊れたセッションは無視して新規 */
+  }
   const t = makeTab();
   tabs.set([t]);
   activeTabId.set(t.id);

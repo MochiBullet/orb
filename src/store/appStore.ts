@@ -37,6 +37,14 @@ let paneCounter = 0;
 export function nextPaneId(): number {
   return ++paneCounter;
 }
+/** セッション保存時に現在のカウンタを覗く。 */
+export function peekPaneCounter(): number {
+  return paneCounter;
+}
+/** セッション復元時、保存済み最大 ID 以上にカウンタを進める（ID 衝突防止）。 */
+export function setPaneCounter(n: number) {
+  if (n > paneCounter) paneCounter = n;
+}
 
 /** orb 起動時刻（稼働時間表示用）。 */
 export const startedAt = Date.now();
