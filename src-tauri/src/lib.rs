@@ -14,6 +14,7 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState::default())
         .setup(|_app| {
             // 初回のみ設定ファイルを seed（読み取りコマンドから書き込み副作用を分離）。

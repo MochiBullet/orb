@@ -6,11 +6,13 @@
   import { Unicode11Addon } from "@xterm/addon-unicode11";
   import { ClipboardAddon } from "@xterm/addon-clipboard";
   import { SearchAddon } from "@xterm/addon-search";
+  import { WebLinksAddon } from "@xterm/addon-web-links";
   import { PtyClient } from "../core/pty";
   import { CommandBlocks } from "./blocks/osc";
   import { focusedPane, aiPane } from "../store/appStore";
   import { config } from "../core/config";
   import { invoke } from "@tauri-apps/api/core";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { get } from "svelte/store";
 
   let { paneId, initialCmd, role }: { paneId: number; initialCmd?: string; role?: "shell" | "ai" } =
@@ -161,6 +163,9 @@
     term.loadAddon(new ClipboardAddon());
     search = new SearchAddon();
     term.loadAddon(search);
+
+    // クリック可能URL: 出力中の http/https をクリックで既定ブラウザで開く。
+    term.loadAddon(new WebLinksAddon((_e, uri) => void openUrl(uri)));
 
     term.open(container);
     container.addEventListener("keydown", onCopyPaste, true);

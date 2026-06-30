@@ -1,7 +1,8 @@
 import type { Terminal, IMarker, IDecoration, IDisposable } from "@xterm/xterm";
-import { aiPane, setPaneCwd } from "../../store/appStore";
+import { aiPane, setPaneCwd, focusedPane } from "../../store/appStore";
 import { get } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
+import { sendNotification } from "@tauri-apps/plugin-notification";
 
 /**
  * OSC 133/633 マーカーを解釈して Warp 風のコマンドブロック装飾を出すコントローラ。
@@ -20,6 +21,9 @@ export class CommandBlocks {
   private encoder = new TextEncoder();
   cwd = "";
   promptType = "";
+  private cmdStart = 0;
+  /** この時間(ms)以上かかったコマンドだけ完了通知の対象にする。 */
+  private static NOTIFY_MS = 6000;
 
   constructor(
     private term: Terminal,
@@ -55,6 +59,7 @@ export class CommandBlocks {
     this.startMarker = this.term.registerMarker(0) ?? null;
     if (this.startMarker) this.promptMarkers.push(this.startMarker);
     this.finished = false;
+    this.cmdStart = Date.now();
   }
 
   private onFinished(rest: string) {
@@ -63,6 +68,19 @@ export class CommandBlocks {
     const endMarker = this.term.registerMarker(0);
     this.decorate(this.startMarker, code, endMarker ?? null);
     this.finished = true;
+    this.notifyIfBackground(code);
+  }
+
+  /** 非フォーカスのペインで長時間コマンドが終わったら OS 通知（バイブコーディングの待ち時間用）。 */
+  private notifyIfBackground(code: number) {
+    const elapsed = Date.now() - this.cmdStart;
+    if (this.cmdStart === 0 || elapsed < CommandBlocks.NOTIFY_MS) return;
+    if (get(focusedPane) === this.paneId) return; // 今見ているペインは通知しない
+    const secs = Math.round(elapsed / 1000);
+    void sendNotification({
+      title: code === 0 ? "orb ✓ コマンド完了" : `orb ✗ 失敗 (exit ${code})`,
+      body: `${secs}秒 — ${this.cwd || "(orb)"}`,
+    });
   }
 
   private onProperty(rest: string) {

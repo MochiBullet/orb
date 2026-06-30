@@ -23,6 +23,7 @@
 
   let showLauncher = $state(false);
   let showSettings = $state(false);
+  let zoomedPane = $state<number | null>(null);
   let wsEl: HTMLDivElement;
   const FULL: Rect = { x: 0, y: 0, w: 100, h: 100 };
 
@@ -50,10 +51,15 @@
   // 可視（アクティブ）タブの geometry。
   let rects = $derived.by(() => {
     const m = new Map<number, Rect>();
+    if (zoomedPane != null) {
+      m.set(zoomedPane, FULL); // ズーム中はそのペインだけ全面
+      return m;
+    }
     if ($layout) computeRects($layout, FULL, m);
     return m;
   });
   let splitters = $derived.by(() => {
+    if (zoomedPane != null) return []; // ズーム中はスプリッタ非表示
     const a: Splitter[] = [];
     if ($layout) computeSplitters($layout, FULL, a);
     return a;
@@ -105,10 +111,15 @@
     } else if (k === "w") {
       e.preventDefault();
       doClose();
+    } else if (k === "z") {
+      e.preventDefault();
+      const f = get(focusedPane);
+      zoomedPane = zoomedPane === f ? null : f; // フォーカスペインの全面化トグル
     }
   }
 
   function doSplit(dir: "h" | "v") {
+    zoomedPane = null;
     const root = get(layout);
     if (!root) return;
     // フォーカス中ペインの cwd を新ペインへ継承（同じディレクトリで開く）。
@@ -121,6 +132,7 @@
   }
 
   function doClose() {
+    zoomedPane = null;
     const root = get(layout);
     if (!root || leafIds(root).length <= 1) return;
     const f = get(focusedPane);
