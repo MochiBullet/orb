@@ -22,6 +22,8 @@
   import Settings from "../chrome/Settings.svelte";
   import CommandPalette, { type PaletteAction } from "../chrome/CommandPalette.svelte";
   import { grid2x2, columns3, columns2, mainStack } from "./presets";
+  import { invoke } from "@tauri-apps/api/core";
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
 
   let showLauncher = $state(false);
   let zoomedPane = $state<number | null>(null);
@@ -32,6 +34,29 @@
   let miniWelcome = $state(false);
   let miniTimer: number | undefined;
   let welcomeUnsub: (() => void) | undefined;
+
+  // ファイル/フォルダのドラッグ&ドロップ添付（VIBE_IDEAS #6）。起動時の操作は不要＝
+  // ドロップ時だけ動く。ペイン単位だと全ペインで多重発火するので Workspace で1回だけ受ける。
+  let dragUnlisten: (() => void) | undefined;
+  const dropEncoder = new TextEncoder();
+  function quotePath(p: string): string {
+    return /\s/.test(p) ? `"${p}"` : p;
+  }
+  function relToCwd(abs: string, base: string): string {
+    if (base && abs.toLowerCase().startsWith(base.toLowerCase())) {
+      const r = abs.slice(base.length).replace(/^[\\/]+/, "");
+      return r || abs;
+    }
+    return abs;
+  }
+  // フォーカス中ペインへ、cwd 相対化したパスを挿入（Enter は送らず人が確認して使う）。
+  function handleDrop(paths: string[]) {
+    const target = get(focusedPane);
+    if (target == null || !paths?.length) return;
+    const base = get(cwdStore);
+    const text = paths.map((p) => quotePath(relToCwd(p, base))).join(" ") + " ";
+    void invoke("write_pty", { paneId: target, data: Array.from(dropEncoder.encode(text)) });
+  }
 
   // アクティブタブは最新の $layout、非アクティブは保存済み layout を使う。
   function tabLayout(t: Tab) {
@@ -75,6 +100,13 @@
   onMount(() => {
     ensureFirstTab();
     window.addEventListener("keydown", onKey, true);
+    // ファイル D&D（#6）。Tauri が OS ドロップのフルパスを届ける（HTML drag は不可）。
+    void getCurrentWebview()
+      .onDragDropEvent((e) => {
+        if (e.payload.type === "drop") handleDrop(e.payload.paths);
+      })
+      .then((un) => (dragUnlisten = un))
+      .catch(() => {});
     // 新規タブ作成のたびに小 welcome（初回 subscribe の即時発火はスキップ）。
     let first = true;
     welcomeUnsub = tabWelcome.subscribe(() => {
@@ -92,6 +124,7 @@
     window.removeEventListener("keydown", onKey, true);
     if (miniTimer) clearTimeout(miniTimer);
     welcomeUnsub?.();
+    dragUnlisten?.();
   });
 
   function onKey(e: KeyboardEvent) {
