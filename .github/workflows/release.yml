@@ -1,0 +1,58 @@
+name: release
+
+# v1.1.0 のようなタグを push すると、Windows 版をビルドして GitHub Release に
+# インストーラ（NSIS .exe / MSI）を添付する。初回は draft で作られるので、
+# 中身を確認してから「Publish」すれば公開される。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      # tauri-action が `tauri build`（フロント=pnpm build → Rust release → バンドル）を
+      # 実行し、生成された NSIS / MSI を Release にアップロードする。
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: orb ${{ github.ref_name }}
+          releaseBody: |
+            ## orb ${{ github.ref_name }}
+
+            下の Assets から Windows 用インストーラ（NSIS `.exe` / MSI）を
+            ダウンロードしてください。PowerShell 7 と WebView2 ランタイムが必要です。
+          releaseDraft: true
+          prerelease: false
