@@ -8,6 +8,7 @@ import {
   peekPaneCounter,
   setPaneCounter,
   tabWelcome,
+  primeScrollbackRestore,
 } from "../store/appStore";
 import { leaf, leafIds, type PaneNode } from "./tree";
 
@@ -95,12 +96,14 @@ export function ensureFirstTab() {
         const active = data.tabs.find((t) => t.id === data.active) ?? data.tabs[0];
         activeTabId.set(active.id);
         loadTab(active);
+        primeScrollbackRestore(true); // セッション復元成立＝各ペインの過去ログ復元を解禁
         return;
       }
     }
   } catch {
     /* 壊れたセッションは無視して新規 */
   }
+  primeScrollbackRestore(false); // 新規起動＝前回の scrollback は復元せず掃除する
   const t = makeTab();
   tabs.set([t]);
   activeTabId.set(t.id);
