@@ -20,7 +20,7 @@
       {/if}
     </button>
   {/each}
-  <button class="newtab" onclick={newTab} aria-label="new tab">&#x2b;</button>
+  <button class="newtab" onclick={() => newTab()} aria-label="new tab">&#x2b;</button>
 </div>
 
 <style>

@@ -20,8 +20,11 @@
   import Terminal from "../terminal/Terminal.svelte";
   import Launcher from "./Launcher.svelte";
   import Settings from "../chrome/Settings.svelte";
+  import CommandPalette, { type PaletteAction } from "../chrome/CommandPalette.svelte";
+  import { grid2x2, columns3, columns2, mainStack } from "./presets";
 
   let showLauncher = $state(false);
+  let showPalette = $state(false);
   let zoomedPane = $state<number | null>(null);
   let wsEl: HTMLDivElement;
   const FULL: Rect = { x: 0, y: 0, w: 100, h: 100 };
@@ -72,7 +75,7 @@
   onDestroy(() => window.removeEventListener("keydown", onKey, true));
 
   function onKey(e: KeyboardEvent) {
-    if (showLauncher || get(showSettings)) return;
+    if (showLauncher || showPalette || get(showSettings)) return;
     // Ctrl+, : 設定
     if (e.ctrlKey && !e.shiftKey && e.key === ",") {
       e.preventDefault();
@@ -112,13 +115,40 @@
       doClose();
     } else if (k === "z") {
       e.preventDefault();
-      const f = get(focusedPane);
-      zoomedPane = zoomedPane === f ? null : f; // フォーカスペインの全面化トグル
+      zoomFocused();
     } else if (k === "b") {
       e.preventDefault();
       sidebarSide.update((s) => (s === "right" ? "left" : "right")); // サイドバー左右トグル
+    } else if (k === "p") {
+      e.preventDefault();
+      showPalette = true; // コマンドパレット (Ctrl+Shift+P)
     }
   }
+
+  function zoomFocused() {
+    const f = get(focusedPane);
+    zoomedPane = zoomedPane === f ? null : f; // フォーカスペインの全面化トグル
+  }
+
+  const paletteActions: PaletteAction[] = [
+    { label: "レイアウト: 2x2 グリッド", hint: "新タブ", run: () => newTab(grid2x2()) },
+    { label: "レイアウト: 3カラム", hint: "新タブ", run: () => newTab(columns3()) },
+    { label: "レイアウト: 2カラム", hint: "新タブ", run: () => newTab(columns2()) },
+    { label: "レイアウト: 主＋副スタック", hint: "新タブ", run: () => newTab(mainStack()) },
+    { label: "ペイン: 横分割", hint: "Ctrl+Shift+D", run: () => doSplit("h") },
+    { label: "ペイン: 縦分割", hint: "Ctrl+Shift+E", run: () => doSplit("v") },
+    { label: "ペイン: 閉じる", hint: "Ctrl+Shift+W", run: () => doClose() },
+    { label: "ペイン: ズーム切替", hint: "Ctrl+Shift+Z", run: () => zoomFocused() },
+    { label: "タブ: 新規", hint: "Ctrl+T", run: () => newTab() },
+    { label: "タブ: 閉じる", hint: "Ctrl+W", run: () => closeTab(get(activeTabId)) },
+    {
+      label: "サイドバー: 左右入替",
+      hint: "Ctrl+Shift+B",
+      run: () => sidebarSide.update((s) => (s === "right" ? "left" : "right")),
+    },
+    { label: "設定を開く", hint: "Ctrl+,", run: () => showSettings.set(true) },
+    { label: "案件ランチャー", hint: "Ctrl+P", run: () => (showLauncher = true) },
+  ];
 
   function doSplit(dir: "h" | "v") {
     zoomedPane = null;
@@ -213,6 +243,10 @@
 
 {#if $showSettings}
   <Settings onClose={() => showSettings.set(false)} />
+{/if}
+
+{#if showPalette}
+  <CommandPalette actions={paletteActions} onClose={() => (showPalette = false)} />
 {/if}
 
 <style>

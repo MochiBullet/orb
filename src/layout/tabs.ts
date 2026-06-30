@@ -33,8 +33,12 @@ function loadTab(t: Tab) {
   aiPane.set(t.ai);
 }
 
-function makeTab(): Tab {
+function makeTab(lay?: PaneNode): Tab {
   const id = nextPaneId();
+  if (lay) {
+    const ids = leafIds(lay);
+    return { id, layout: lay, focused: ids[0] ?? nextPaneId(), ai: null };
+  }
   const leafId = nextPaneId();
   return { id, layout: leaf(leafId), focused: leafId, ai: null };
 }
@@ -48,9 +52,9 @@ export function ensureFirstTab() {
   loadTab(t);
 }
 
-export function newTab() {
+export function newTab(lay?: PaneNode) {
   saveActive();
-  const t = makeTab();
+  const t = makeTab(lay);
   tabs.update((ts) => [...ts, t]);
   activeTabId.set(t.id);
   loadTab(t);
