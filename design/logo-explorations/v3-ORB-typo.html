@@ -1,0 +1,157 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#040406; font-family:'Syncopate',sans-serif; }
+  .stage { display:flex; flex-direction:column; gap:8px; padding:40px 48px 56px; }
+  .panel { padding:30px 36px; border-radius:14px; background:radial-gradient(120% 140% at 50% 0%, #0a0e12 0%, #040406 70%); border:1px solid rgba(45,212,191,.08); }
+  h3 { color:#5eead4; font-size:11px; font-weight:700; letter-spacing:.28em; margin:0 0 20px; text-transform:uppercase; }
+  .logo { display:block; }
+  .a { width:430px; height:150px; }
+  .cap { color:#5b6b78; font-size:11px; letter-spacing:.06em; margin-top:14px; font-family:'Space Grotesk',sans-serif; }
+  .mini { display:flex; align-items:center; gap:30px; margin-top:18px; }
+</style>
+</head>
+<body>
+
+<!-- ===================== 共有 defs ===================== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Aurora オーブ本体 -->
+    <radialGradient id="orbCore" cx="36%" cy="30%" r="84%">
+      <stop offset="0%" stop-color="#e6fffb"/>
+      <stop offset="24%" stop-color="#5eead4"/>
+      <stop offset="54%" stop-color="#2dd4bf"/>
+      <stop offset="82%" stop-color="#5b7cf0"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </radialGradient>
+    <radialGradient id="irid" cx="68%" cy="74%" r="58%">
+      <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.85"/>
+      <stop offset="55%" stop-color="#7c5cfa" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#a78bfa" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="tealViolet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5eead4"/>
+      <stop offset="50%" stop-color="#2dd4bf"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="chrome" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f0fffd"/>
+      <stop offset="32%" stop-color="#7fe9da"/>
+      <stop offset="50%" stop-color="#2dd4bf"/>
+      <stop offset="68%" stop-color="#6d63d8"/>
+      <stop offset="100%" stop-color="#c9bdfb"/>
+    </linearGradient>
+    <linearGradient id="holo" x1="0" y1="0" x2="1" y2="0.4">
+      <stop offset="0%" stop-color="#5eead4"/>
+      <stop offset="35%" stop-color="#7dd3fc"/>
+      <stop offset="60%" stop-color="#c4b5fd"/>
+      <stop offset="100%" stop-color="#f0abfc"/>
+    </linearGradient>
+
+    <!-- 多層ネオングロー -->
+    <filter id="neon" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="1.4" result="g1"/>
+      <feGaussianBlur stdDeviation="5" result="g2"/>
+      <feMerge><feMergeNode in="g2"/><feMergeNode in="g1"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="soft" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+    <filter id="bevel" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.2" result="blur"/>
+      <feSpecularLighting in="blur" surfaceScale="3" specularConstant="0.9" specularExponent="18" lighting-color="#ffffff" result="spec">
+        <fePointLight x="-40" y="-60" z="120"/>
+      </feSpecularLighting>
+      <feComposite in="spec" in2="SourceAlpha" operator="in" result="specClip"/>
+      <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="specClip"/></feMerge>
+    </filter>
+
+    <!-- HUD グリッド & スキャンライン -->
+    <pattern id="grid" width="22" height="22" patternUnits="userSpaceOnUse">
+      <path d="M22 0H0V22" fill="none" stroke="#2dd4bf" stroke-width="0.5" opacity="0.35"/>
+    </pattern>
+    <pattern id="scan" width="3" height="3" patternUnits="userSpaceOnUse">
+      <rect width="3" height="1" fill="#0bf" opacity="0.18"/>
+    </pattern>
+
+    <!-- オーブ（軌道つき・再利用） -->
+    <g id="orb">
+      <circle r="40" fill="#2dd4bf" opacity="0.38" filter="url(#soft)"/>
+      <ellipse rx="60" ry="18.5" fill="none" stroke="url(#tealViolet)" stroke-width="2.4" opacity="0.5" transform="rotate(-18)" filter="url(#soft)"/>
+      <circle r="37" fill="url(#orbCore)"/>
+      <circle r="37" fill="url(#irid)"/>
+      <path d="M-57,18 A60,18.5 0 0 1 57,-18" fill="none" stroke="url(#tealViolet)" stroke-width="2" opacity="0.95" transform="rotate(-18)"/>
+      <ellipse cx="-13" cy="-15" rx="13" ry="7.5" fill="#fff" opacity="0.45"/>
+      <circle cx="-16" cy="-18" r="3" fill="#fff" opacity="0.8"/>
+    </g>
+  </defs>
+</svg>
+
+<div class="stage">
+
+  <!-- ===== 案1: NEON HUD ===== -->
+  <div class="panel">
+    <h3>1 — Neon HUD</h3>
+    <svg viewBox="0 0 430 150" class="logo a">
+      <rect x="0" y="0" width="430" height="150" fill="url(#grid)" opacity="0.25"/>
+      <rect x="0" y="0" width="430" height="150" fill="url(#scan)"/>
+      <!-- HUD コーナー -->
+      <g stroke="#2dd4bf" stroke-width="2" fill="none" opacity="0.55">
+        <path d="M14,14 h26 M14,14 v26"/>
+        <path d="M416,14 h-26 M416,14 v26"/>
+        <path d="M14,136 h26 M14,136 v-26"/>
+        <path d="M416,136 h-26 M416,136 v-26"/>
+      </g>
+      <g transform="translate(78,75)"><use href="#orb"/></g>
+      <!-- 色収差グリッチ（teal / violet ずらし）+ メインのネオンアウトライン -->
+      <g font-family="Syncopate" font-weight="700" font-size="86" letter-spacing="2">
+        <text x="171" y="104" fill="#a78bfa" opacity="0.55">RB</text>
+        <text x="165" y="104" fill="#2dd4bf" opacity="0.55">RB</text>
+        <text x="168" y="104" fill="#061015" stroke="url(#tealViolet)" stroke-width="2.2" filter="url(#neon)">RB</text>
+      </g>
+    </svg>
+    <div class="cap">ターミナル直系。HUDブラケット＋スキャンライン＋色収差グリッチ＋ネオンチューブ輪郭。O＝Auroraオーブ</div>
+  </div>
+
+  <!-- ===== 案2: CHROME HOLOGRAPHIC ===== -->
+  <div class="panel">
+    <h3>2 — Chrome Holographic</h3>
+    <svg viewBox="0 0 430 150" class="logo a">
+      <ellipse cx="215" cy="75" rx="200" ry="60" fill="url(#holo)" opacity="0.10" filter="url(#soft)"/>
+      <g transform="translate(78,75)"><use href="#orb"/></g>
+      <g font-family="Syncopate" font-weight="700" font-size="86" letter-spacing="2">
+        <text x="168" y="104" fill="url(#holo)" opacity="0.4" filter="url(#soft)">RB</text>
+        <text x="168" y="104" fill="url(#chrome)" filter="url(#bevel)">RB</text>
+      </g>
+    </svg>
+    <div class="cap">Y2K クローム×ホログラフィック。金属ベベル＋虹彩反射で立体感。高級ガジェット感</div>
+  </div>
+
+  <!-- ===== 案3: AURORA SOLID ===== -->
+  <div class="panel">
+    <h3>3 — Aurora Solid</h3>
+    <svg viewBox="0 0 430 150" class="logo a">
+      <g transform="translate(78,75)"><use href="#orb"/></g>
+      <g font-family="Syncopate" font-weight="700" font-size="86" letter-spacing="2">
+        <text x="168" y="104" fill="url(#tealViolet)" opacity="0.5" filter="url(#soft)">RB</text>
+        <text x="168" y="104" fill="url(#tealViolet)" filter="url(#neon)">RB</text>
+        <text x="159" y="56" font-size="20" fill="#a78bfa" opacity="0.7">✦</text>
+      </g>
+    </svg>
+    <div class="cap">オーブと一体のAuroraグラデ塗り＋多層グロー。一番ブランド統一感が高い王道リッチ</div>
+    <div class="mini">
+      <svg viewBox="-50 -50 100 100" width="56" height="56"><use href="#orb"/></svg>
+      <svg viewBox="-50 -50 100 100" width="34" height="34"><circle r="37" fill="url(#orbCore)"/><circle r="37" fill="url(#irid)"/><ellipse cx="-13" cy="-15" rx="13" ry="7.5" fill="#fff" opacity="0.45"/></svg>
+      <svg viewBox="-50 -50 100 100" width="20" height="20"><circle r="37" fill="url(#orbCore)"/><circle r="37" fill="url(#irid)"/></svg>
+      <span style="color:#5b6b78;font-size:11px;font-family:'Space Grotesk',sans-serif">← アプリアイコン 56/34/20px</span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

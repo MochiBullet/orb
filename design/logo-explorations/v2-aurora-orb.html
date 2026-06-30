@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#000; font-family:'Space Grotesk',sans-serif; }
+  .stage { display:flex; flex-wrap:wrap; gap:48px; padding:56px; align-items:center; }
+  .panel { display:flex; flex-direction:column; gap:22px; align-items:center; }
+  h3 { color:#5eead4; font-size:12px; font-weight:600; letter-spacing:.16em; margin:0; text-transform:uppercase; }
+  .sizes { display:flex; align-items:flex-end; gap:26px; }
+  .s128 { width:128px; height:128px; }
+  .s64 { width:64px; height:64px; }
+  .s32 { width:32px; height:32px; }
+  .s20 { width:20px; height:20px; }
+  .cap { color:#64748b; font-size:11px; letter-spacing:.04em; }
+  /* タイトルバー実寸プレビュー */
+  .titlebar { display:flex; align-items:center; gap:9px; background:linear-gradient(90deg,#000,#061712 50%,#000); padding:7px 14px; border-bottom:1px solid rgba(45,212,191,.25); border-radius:5px; }
+  .titlebar .word { color:#e6fffa; font-size:14px; font-weight:600; letter-spacing:.14em; }
+  /* 横ロゴ（ワードマーク） */
+  .wordmark { display:flex; align-items:center; gap:13px; }
+  .wordmark .word { font-size:38px; font-weight:600; letter-spacing:.12em;
+    background:linear-gradient(92deg,#5eead4,#2dd4bf 45%,#a78bfa); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .light { background:#e9eef0; }
+  .light h3 { color:#0f766e; }
+  .light .cap { color:#475569; }
+</style>
+</head>
+<body>
+
+<!-- ===== SVG シンボル定義（共有 defs） ===== -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <radialGradient id="orbCore" cx="37%" cy="31%" r="82%">
+      <stop offset="0%" stop-color="#d7fdf5"/>
+      <stop offset="26%" stop-color="#5eead4"/>
+      <stop offset="56%" stop-color="#2dd4bf"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </radialGradient>
+    <radialGradient id="irid" cx="66%" cy="72%" r="55%">
+      <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#a78bfa" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5eead4"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <filter id="glow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softglow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="2"/>
+    </filter>
+
+    <!-- フル版（軌道リングあり・アプリアイコン用） -->
+    <g id="orbFull">
+      <circle cx="50" cy="50" r="32" fill="#2dd4bf" opacity="0.40" filter="url(#softglow)"/>
+      <ellipse cx="50" cy="50" rx="45" ry="14.5" fill="none" stroke="url(#ring)" stroke-width="2" opacity="0.55" transform="rotate(-20 50 50)" filter="url(#softglow)"/>
+      <circle cx="50" cy="50" r="30" fill="url(#orbCore)"/>
+      <circle cx="50" cy="50" r="30" fill="url(#irid)"/>
+      <ellipse cx="50" cy="50" rx="45" ry="14.5" fill="none" stroke="url(#ring)" stroke-width="1.6" opacity="0.9" transform="rotate(-20 50 50)"/>
+      <ellipse cx="40" cy="35" rx="10.5" ry="6" fill="#fff" opacity="0.42"/>
+      <circle cx="38" cy="33" r="2.3" fill="#fff" opacity="0.75"/>
+    </g>
+
+    <!-- ミニ版（軌道なし・小サイズ/タイトルバー用） -->
+    <g id="orbMini">
+      <circle cx="50" cy="50" r="33" fill="#2dd4bf" opacity="0.45" filter="url(#softglow)"/>
+      <circle cx="50" cy="50" r="31" fill="url(#orbCore)"/>
+      <circle cx="50" cy="50" r="31" fill="url(#irid)"/>
+      <ellipse cx="40" cy="35" rx="11" ry="6.5" fill="#fff" opacity="0.42"/>
+      <circle cx="38" cy="33" r="2.5" fill="#fff" opacity="0.78"/>
+    </g>
+  </defs>
+</svg>
+
+<div class="stage">
+  <div class="panel">
+    <h3>App Icon (orbit)</h3>
+    <div class="sizes">
+      <svg viewBox="0 0 100 100" class="s128"><use href="#orbFull"/></svg>
+      <svg viewBox="0 0 100 100" class="s64"><use href="#orbFull"/></svg>
+      <svg viewBox="0 0 100 100" class="s32"><use href="#orbMini"/></svg>
+    </div>
+    <div class="cap">256 / 64 / 32px — Aurora mesh + iridescent + orbit ring</div>
+  </div>
+
+  <div class="panel">
+    <h3>Wordmark</h3>
+    <div class="wordmark">
+      <svg viewBox="0 0 100 100" class="s64"><use href="#orbFull"/></svg>
+      <span class="word">orb</span>
+    </div>
+    <div class="titlebar">
+      <svg viewBox="0 0 100 100" class="s20"><use href="#orbMini"/></svg>
+      <span class="word">orb</span>
+    </div>
+    <div class="cap">Space Grotesk + teal→violet グラデ文字 / 実寸タイトルバー</div>
+  </div>
+</div>
+
+<div class="stage light">
+  <div class="panel">
+    <h3>On Light (contrast check)</h3>
+    <div class="sizes">
+      <svg viewBox="0 0 100 100" class="s64"><use href="#orbFull"/></svg>
+      <svg viewBox="0 0 100 100" class="s32"><use href="#orbMini"/></svg>
+    </div>
+    <div class="cap">明背景でも視認できるか</div>
+  </div>
+</div>
+
+</body>
+</html>

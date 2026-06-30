@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@500;600;700&family=Chakra+Petch:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --teal:#2dd4bf; --mint:#5eead4; --violet:#a78bfa; }
+  * { margin:0; box-sizing:border-box; }
+  body { background:#040406; }
+  .panel { padding:46px 56px; border-bottom:1px solid rgba(45,212,191,.06);
+    background:radial-gradient(120% 160% at 30% 0%, #0a0e12 0%, #040406 72%); position:relative; }
+  h3 { color:var(--mint); font-size:11px; font-weight:700; letter-spacing:.3em; text-transform:uppercase; font-family:'Space Grotesk',sans-serif; margin-bottom:30px; }
+  .cap { color:#5b6b78; font-size:11px; letter-spacing:.05em; margin-top:26px; font-family:'Space Grotesk',sans-serif; }
+
+  .wrap { position:relative; display:inline-block; }
+
+  /* ===== A: Space Grotesk — Aurora Clean ===== */
+  .a {
+    font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:130px; line-height:.9; letter-spacing:-.01em;
+    background:linear-gradient(96deg,#7ff3e2 0%, var(--teal) 42%, #6f7bf7 72%, var(--violet) 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter:drop-shadow(0 0 14px rgba(45,212,191,.55)) drop-shadow(0 0 36px rgba(167,139,250,.4));
+  }
+  .a-dot { /* o の中の微光 */ }
+
+  /* ===== B: Orbitron — Neon HUD outline ===== */
+  .b-stage { position:relative; }
+  .b {
+    font-family:'Orbitron',sans-serif; font-weight:700; font-size:118px; letter-spacing:.02em;
+    color:#06140f;
+    -webkit-text-stroke:2px var(--teal);
+    filter:drop-shadow(0 0 8px var(--teal)) drop-shadow(0 0 22px rgba(45,212,191,.7)) drop-shadow(0 0 2px var(--violet));
+  }
+  .b-scan { position:absolute; inset:-20px -10px; pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(11,191,255,.10) 0 1px, transparent 1px 4px); mix-blend-mode:screen; }
+  .b-bracket { position:absolute; pointer-events:none; }
+
+  /* ===== C: Chakra Petch — Chrome + RGB glitch ===== */
+  .c-stage { position:relative; display:inline-block; }
+  .c-base, .c-r, .c-b {
+    font-family:'Chakra Petch',sans-serif; font-weight:700; font-size:122px; letter-spacing:.01em; line-height:1;
+  }
+  .c-base {
+    background:linear-gradient(180deg,#f4fffd 6%, #7fe9da 34%, var(--teal) 52%, #6d63d8 72%, #cbbdfb 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter:drop-shadow(0 2px 1px rgba(0,0,0,.6));
+  }
+  .c-r, .c-b { position:absolute; top:0; left:0; }
+  .c-r { color:var(--teal); mix-blend-mode:screen; transform:translate(-3px,1px); opacity:.55; filter:blur(.4px); }
+  .c-b { color:var(--violet); mix-blend-mode:screen; transform:translate(3px,-1px); opacity:.55; filter:blur(.4px); }
+  .c-glow { position:absolute; inset:0;
+    font-family:'Chakra Petch',sans-serif; font-weight:700; font-size:122px; letter-spacing:.01em; line-height:1;
+    color:var(--teal); filter:blur(16px); opacity:.5; }
+</style>
+</head>
+<body>
+
+  <div class="panel">
+    <h3>A — Space Grotesk · Aurora Clean</h3>
+    <div class="wrap"><div class="a">orb</div></div>
+    <div class="cap">王道リッチ。Auroraグラデ＋二段ネオングロー。可読性◎・縮小に最強・上品</div>
+  </div>
+
+  <div class="panel">
+    <h3>B — Orbitron · Neon HUD outline</h3>
+    <div class="b-stage wrap">
+      <div class="b">orb</div>
+      <div class="b-scan"></div>
+      <svg class="b-bracket" style="inset:-18px -14px;width:calc(100% + 28px);height:calc(100% + 36px)" viewBox="0 0 400 180" preserveAspectRatio="none">
+        <g stroke="#2dd4bf" stroke-width="2.5" fill="none" opacity="0.6">
+          <path d="M4,4 h30 M4,4 v30"/><path d="M396,4 h-30 M396,4 v30"/>
+          <path d="M4,176 h30 M4,176 v-30"/><path d="M396,176 h-30 M396,176 v-30"/>
+        </g>
+      </svg>
+    </div>
+    <div class="cap">サイバー全振り。Orbitron(=orbit連想)のネオンチューブ輪郭＋スキャンライン＋HUDブラケット。ターミナル直系</div>
+  </div>
+
+  <div class="panel">
+    <h3>C — Chakra Petch · Chrome + RGB glitch</h3>
+    <div class="c-stage">
+      <div class="c-glow">orb</div>
+      <div class="c-r">orb</div>
+      <div class="c-b">orb</div>
+      <div class="c-base">orb</div>
+    </div>
+    <div class="cap">エッジ・高級。クローム金属グラデ＋RGB色収差グリッチ（teal/violet分離）。一番"作り込んだ"質感</div>
+  </div>
+
+</body>
+</html>
