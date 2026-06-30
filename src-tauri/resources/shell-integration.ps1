@@ -11,6 +11,12 @@ $global:__orb_si_loaded = $true
 # PSReadLine の ListView 警告（狭い/低いペインで連発）を含む警告出力を抑制する。
 $global:WarningPreference = 'SilentlyContinue'
 
+# profile が PSReadLine をロード済みなら、起動直後に InlineView へ固定して
+# profile の ListView 設定を上書きする（prompt 内の毎回強制と二段構え）。
+if (Get-Module PSReadLine) {
+    try { Set-PSReadLineOption -PredictionViewStyle InlineView -ErrorAction SilentlyContinue } catch {}
+}
+
 $global:__orb_si = @{
     OriginalPrompt = $function:prompt
     LastHistoryId  = -1
