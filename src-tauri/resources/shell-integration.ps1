@@ -8,6 +8,9 @@
 if ($global:__orb_si_loaded) { return }
 $global:__orb_si_loaded = $true
 
+# PSReadLine の ListView 警告（狭い/低いペインで連発）を含む警告出力を抑制する。
+$global:WarningPreference = 'SilentlyContinue'
+
 $global:__orb_si = @{
     OriginalPrompt = $function:prompt
     LastHistoryId  = -1
@@ -71,6 +74,12 @@ function global:prompt {
 
     $h = Get-History -Count 1
     if ($h) { $global:__orb_si.LastHistoryId = $h.Id }
+
+    # PSReadLine は対話開始時に遅延ロードされ、起動時の設定が空振りすることがある。
+    # prompt ごとに InlineView を強制し、ListView の「画面が小さい」警告を完全に根絶する。
+    if (Get-Module PSReadLine) {
+        try { Set-PSReadLineOption -PredictionViewStyle InlineView -ErrorAction SilentlyContinue } catch {}
+    }
 
     return $out
 }
