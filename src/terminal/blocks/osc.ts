@@ -1,5 +1,5 @@
 import type { Terminal, IMarker, IDecoration, IDisposable } from "@xterm/xterm";
-import { aiPane, setPaneCwd, focusedPane } from "../../store/appStore";
+import { aiPane, setPaneCwd, focusedPane, dnd } from "../../store/appStore";
 import { get } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
 import { sendNotification } from "@tauri-apps/plugin-notification";
@@ -76,6 +76,7 @@ export class CommandBlocks {
     const elapsed = Date.now() - this.cmdStart;
     if (this.cmdStart === 0 || elapsed < CommandBlocks.NOTIFY_MS) return;
     if (get(focusedPane) === this.paneId) return; // 今見ているペインは通知しない
+    if (get(dnd) && code === 0) return; // フォーカスモード(#20): 成功通知は出さない（失敗は昇格）
     const secs = Math.round(elapsed / 1000);
     void sendNotification({
       title: code === 0 ? "orb ✓ コマンド完了" : `orb ✗ 失敗 (exit ${code})`,

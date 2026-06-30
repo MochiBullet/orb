@@ -25,6 +25,30 @@ export const paletteMode = writable<"search" | "help">("search");
 /** ブロードキャスト入力。ON の間、フォーカスペインへの入力を全ペインへ複製する。 */
 export const broadcast = writable(false);
 
+/** localStorage に永続する真偽ストア（トグルは一度設定すれば以後そのまま）。 */
+function persistedBool(key: string, fallback: boolean) {
+  let init = fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw != null) init = raw === "1";
+  } catch {
+    /* localStorage 不可でも既定で動作 */
+  }
+  const store = writable(init);
+  store.subscribe((v) => {
+    try {
+      localStorage.setItem(key, v ? "1" : "0");
+    } catch {
+      /* 保存失敗は無視 */
+    }
+  });
+  return store;
+}
+
+/** フォーカスモード(DND, VIBE_IDEAS #20)。ON の間は成功通知を抑制し、失敗だけ昇格する。
+ *  永続なので「起動のたびに有効化」は不要＝一度 ON にすれば以後そのまま。 */
+export const dnd = persistedBool("orb.dnd", false);
+
 /** 起動時オープニング（WELCOME ORB スプラッシュ）の表示状態。App 起動時 / パレットの再生から true。 */
 export const showSplash = writable(false);
 

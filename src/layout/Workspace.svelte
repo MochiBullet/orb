@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, showSplash, tabWelcome } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, showSplash, tabWelcome, dnd } from "../store/appStore";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -179,6 +179,9 @@
       e.preventDefault();
       paletteMode.set("search");
       showPalette.set(true); // コマンドパレット (Ctrl+Shift+P)
+    } else if (k === "n") {
+      e.preventDefault();
+      dnd.update((d) => !d); // フォーカスモード(DND)切替 (Ctrl+Shift+N)
     }
   }
 
@@ -203,6 +206,11 @@
       label: "ブロードキャスト入力: 切替",
       hint: "全ペイン同時入力",
       run: () => broadcast.update((b) => !b),
+    },
+    {
+      label: "通知: フォーカスモード(DND) 切替",
+      hint: "Ctrl+Shift+N",
+      run: () => dnd.update((d) => !d),
     },
     {
       label: "サイドバー: 左右入替",
@@ -318,6 +326,10 @@
       <div class="mini-welcome" aria-hidden="true"><span>welcome</span></div>
     {/key}
   {/if}
+
+  {#if $dnd}
+    <div class="dnd-badge" title="フォーカスモード: 成功通知オフ・失敗のみ通知 (Ctrl+Shift+N)">🔕 focus</div>
+  {/if}
 </div>
 
 {#if showLauncher}
@@ -389,6 +401,23 @@
   }
   .splitter:hover {
     background: rgba(45, 212, 191, 0.45);
+  }
+
+  /* フォーカスモード(DND)中の常時バッジ（左下・操作は透過）。状態を見失わないための目印。 */
+  .dnd-badge {
+    position: absolute;
+    left: 12px;
+    bottom: 10px;
+    z-index: 8;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: #05100e;
+    border: 1px solid rgba(167, 139, 250, 0.5);
+    color: var(--violet, #a78bfa);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+    box-shadow: 0 2px 12px -6px rgba(167, 139, 250, 0.5);
   }
 
   /* 新規タブで一瞬出る小さな welcome（中央・自動フェード・操作は透過）。 */
