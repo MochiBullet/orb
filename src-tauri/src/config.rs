@@ -35,6 +35,12 @@ fn default_scrollback() -> u32 {
 fn default_accent() -> String {
     "#2dd4bf".into()
 }
+fn default_bg_image() -> String {
+    String::new()
+}
+fn default_bg_dim() -> f32 {
+    0.6
+}
 
 /// orb 本体の設定（config.toml）。
 #[derive(Serialize, Deserialize, Clone)]
@@ -47,6 +53,10 @@ pub struct Config {
     pub scrollback: u32,
     #[serde(default = "default_accent")]
     pub accent: String,
+    #[serde(default = "default_bg_image")]
+    pub bg_image: String,
+    #[serde(default = "default_bg_dim")]
+    pub bg_dim: f32,
 }
 
 impl Default for Config {
@@ -56,6 +66,8 @@ impl Default for Config {
             font_family: default_font_family(),
             scrollback: default_scrollback(),
             accent: default_accent(),
+            bg_image: default_bg_image(),
+            bg_dim: default_bg_dim(),
         }
     }
 }

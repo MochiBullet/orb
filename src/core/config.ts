@@ -6,6 +6,8 @@ export interface OrbConfig {
   font_family: string;
   scrollback: number;
   accent: string;
+  bg_image: string;
+  bg_dim: number;
 }
 
 const DEFAULT: OrbConfig = {
@@ -13,6 +15,8 @@ const DEFAULT: OrbConfig = {
   font_family: '"Cascadia Code", "FiraCode Nerd Font", "Consolas", monospace',
   scrollback: 1000,
   accent: "#2dd4bf",
+  bg_image: "",
+  bg_dim: 0.6,
 };
 
 /** ~/.config/orb/config.toml の内容。起動時に loadConfig() で埋める。 */
