@@ -55,6 +55,12 @@
     if ($focusedPane === paneId && !$showSettings) term?.focus();
   });
 
+  // 別ウィンドウから orb に戻ると xterm の textarea が左上にリセットされて浮くため、
+  // ウィンドウ復帰時にフォーカスペインを再フォーカスして位置を戻す。
+  function onWinFocus() {
+    if (get(focusedPane) === paneId && !get(showSettings)) term?.focus();
+  }
+
   // 設定でフォントサイズが変わったら即反映（全ペイン）。
   $effect(() => {
     const fs = $config.font_size;
@@ -172,6 +178,7 @@
     term.open(container);
     container.addEventListener("keydown", onCopyPaste, true);
     container.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    window.addEventListener("focus", onWinFocus);
 
     try {
       const webgl = new WebglAddon();
@@ -224,6 +231,7 @@
     if (resizeTimer) clearTimeout(resizeTimer);
     container?.removeEventListener("keydown", onCopyPaste, true);
     container?.removeEventListener("wheel", onWheel, { capture: true });
+    window.removeEventListener("focus", onWinFocus);
     observer?.disconnect();
     blocks?.dispose();
     pty?.close();
