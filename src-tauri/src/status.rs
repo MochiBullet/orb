@@ -12,14 +12,42 @@ pub struct ClaudeStatus {
     pub mcp: Vec<String>,
 }
 
-fn claude_dir() -> PathBuf {
+fn home_dir() -> PathBuf {
     std::env::var_os("USERPROFILE")
         .map(PathBuf::from)
         .unwrap_or_default()
-        .join(".claude")
 }
 
-/// settings.json の model / effortLevel と、MCP（core 固定 + cwd の .mcp.json）を集める。
+fn claude_dir() -> PathBuf {
+    home_dir().join(".claude")
+}
+
+/// 表示用の短縮名（cloudflare-* -> cf-*, context7 -> ctx7）。
+fn short_mcp(name: &str) -> String {
+    if let Some(rest) = name.strip_prefix("cloudflare-") {
+        return format!("cf-{rest}");
+    }
+    if name == "context7" {
+        return "ctx7".to_string();
+    }
+    name.to_string()
+}
+
+/// user スコープの MCP サーバ名を ~/.claude.json の mcpServers から読む（実 config 由来）。
+/// 44KB 程度のファイルだが 30s 間隔の取得なので毎回読んで問題ない。
+fn user_mcp() -> Vec<String> {
+    let path = home_dir().join(".claude.json");
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+            if let Some(servers) = json["mcpServers"].as_object() {
+                return servers.keys().cloned().collect();
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// settings.json の model / effortLevel と、実 MCP 構成（user スコープ + cwd の .mcp.json）を集める。
 /// 読めない項目は空で返す（端末は動き続ける＝サイドバーが欠けるだけ）。
 pub fn fetch_status(cwd: Option<String>) -> ClaudeStatus {
     let mut model = String::new();
@@ -32,15 +60,26 @@ pub fn fetch_status(cwd: Option<String>) -> ClaudeStatus {
         }
     }
 
-    // MCP: 常時 on の core（context7 + cloudflare）+ プロジェクト .mcp.json。
-    let mut mcp = vec!["ctx7".to_string(), "cf".to_string()];
+    // MCP: 実 config 由来。user スコープ（~/.claude.json）+ プロジェクト .mcp.json を
+    // 短縮名で重複排除しつつ列挙（ハードコードはしない＝実際に有効な構成を映す）。
+    let mut seen = std::collections::HashSet::new();
+    let mut mcp = Vec::new();
+    for name in user_mcp() {
+        let s = short_mcp(&name);
+        if seen.insert(s.clone()) {
+            mcp.push(s);
+        }
+    }
     if let Some(dir) = cwd {
         let proj = PathBuf::from(dir).join(".mcp.json");
         if let Ok(text) = std::fs::read_to_string(&proj) {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                 if let Some(servers) = json["mcpServers"].as_object() {
                     for name in servers.keys() {
-                        mcp.push(name.replace("cloudflare-", "cf-"));
+                        let s = short_mcp(name);
+                        if seen.insert(s.clone()) {
+                            mcp.push(s);
+                        }
                     }
                 }
             }

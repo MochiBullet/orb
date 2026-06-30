@@ -9,7 +9,7 @@
 
   let usage = $state<Usage | null>(null);
   let status = $state<ClaudeStatus | null>(null);
-  let err = $state(false);
+  let usageStale = $state(false); // 直近の取得が失敗＝直前の値を表示中（ゲージは消さない）
   let now = $state(Date.now());
   let wsOpen = $state(false);
   let branch = $state<string | null>(null);
@@ -30,9 +30,11 @@
   async function refreshUsage() {
     try {
       usage = await getUsage();
-      err = false;
+      usageStale = false;
     } catch {
-      err = true;
+      // 取得失敗：直前の usage を保持し、ゲージは消さない（少し薄くするだけ）。
+      // 初回未取得（usage===null）の時だけプレースホルダ「…」が出る。
+      usageStale = true;
     }
   }
   async function refreshStatus() {
@@ -43,9 +45,19 @@
     }
   }
 
-  onMount(() => {
-    refreshUsage();
+  // 初回はトークン更新レース（claude --continue 直後の 401）を避けるため、
+  // 値が入るまで数回だけ短間隔で再試行する。以後は 30s 間隔。
+  async function initialLoad() {
     refreshStatus();
+    for (let i = 0; i < 4 && !usage; i++) {
+      await refreshUsage();
+      if (usage) break;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+
+  onMount(() => {
+    void initialLoad();
     timer = window.setInterval(() => {
       refreshUsage();
       refreshStatus();
@@ -96,18 +108,18 @@
   <div class="sec">
     <div class="label">TOKENS</div>
     {#if usage}
-      <div class="meter">
-        <div class="row"><span>5h</span><span class="pct" class:hot={usage.five_hour > 80}>{Math.round(usage.five_hour)}%</span></div>
-        <div class="bar"><div class="fill" class:hot={usage.five_hour > 80} style="width:{Math.min(100, usage.five_hour)}%"></div></div>
-        <div class="reset">reset {fmtReset(usage.five_reset)}</div>
+      <div class="meters" class:stale={usageStale} title={usageStale ? "最新の取得に失敗：直前の値を表示中" : ""}>
+        <div class="meter">
+          <div class="row"><span>5h</span><span class="pct" class:hot={usage.five_hour > 80}>{Math.round(usage.five_hour)}%</span></div>
+          <div class="bar"><div class="fill" class:hot={usage.five_hour > 80} style="width:{Math.min(100, usage.five_hour)}%"></div></div>
+          <div class="reset">reset {fmtReset(usage.five_reset)}</div>
+        </div>
+        <div class="meter">
+          <div class="row"><span>7d</span><span class="pct">{Math.round(usage.seven_day)}%</span></div>
+          <div class="bar"><div class="fill" style="width:{Math.min(100, usage.seven_day)}%"></div></div>
+          <div class="reset">reset {fmtResetDate(usage.seven_reset)}</div>
+        </div>
       </div>
-      <div class="meter">
-        <div class="row"><span>7d</span><span class="pct">{Math.round(usage.seven_day)}%</span></div>
-        <div class="bar"><div class="fill" style="width:{Math.min(100, usage.seven_day)}%"></div></div>
-        <div class="reset">reset {fmtResetDate(usage.seven_reset)}</div>
-      </div>
-    {:else if err}
-      <div class="muted">取得失敗</div>
     {:else}
       <div class="muted">…</div>
     {/if}
@@ -170,6 +182,13 @@
     letter-spacing: 0.18em;
     color: var(--teal);
     margin-bottom: 8px;
+  }
+  .meters {
+    transition: opacity 0.3s;
+  }
+  /* 最新取得に失敗している間は薄く＝消さずに直前値を見せる（ちらつき防止）。 */
+  .meters.stale {
+    opacity: 0.5;
   }
   .meter {
     margin-bottom: 10px;

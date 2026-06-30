@@ -81,6 +81,9 @@ pub fn build_pwsh(initial_cmd: Option<&str>) -> Result<CommandBuilder> {
     cmd.arg("-Command");
     cmd.arg(script);
     cmd.env("TERM", "xterm-256color");
+    // orb 内で動いている目印。子プロセス（pwsh→claude→statusline.ps1）が継承し、
+    // Claude Code のステータスラインがサイドバーと重複する情報を省略できる。
+    cmd.env("ORB", "1");
 
     if let Some(home) = std::env::var_os("USERPROFILE") {
         cmd.cwd(home);
