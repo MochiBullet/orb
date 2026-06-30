@@ -1,8 +1,13 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getVersion } from "@tauri-apps/api/app";
   import { cwd, showSettings } from "../store/appStore";
 
   const appWindow = getCurrentWindow();
+
+  // tauri.conf.json の version（about/設定ロゴ横に表示）。
+  let version = $state("");
+  getVersion().then((v) => (version = v)).catch(() => {});
 
   // フルパスは長いので末尾2セグメントだけ表示（例: projects/orb）。
   function shortCwd(p: string): string {
@@ -20,6 +25,7 @@
     {/if}
   </div>
   <div class="controls">
+    {#if version}<span class="ver" title="orb version">v{version}</span>{/if}
     <button class="ctl gear" onclick={() => showSettings.set(true)} aria-label="settings"
       >&#x2699;</button
     >
@@ -70,7 +76,19 @@
   }
   .controls {
     display: flex;
+    align-items: center;
     height: 100%;
+  }
+  .ver {
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    font-family: var(--mono, inherit);
+    font-size: 0.66rem;
+    letter-spacing: 0.04em;
+    color: var(--grey);
+    opacity: 0.7;
+    user-select: none;
   }
   .ctl {
     width: 46px;
