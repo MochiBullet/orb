@@ -66,6 +66,7 @@
     if ($layout) computeSplitters($layout, FULL, a);
     return a;
   });
+  let paneCount = $derived($layout ? leafIds($layout).length : 0);
 
   onMount(() => {
     ensureFirstTab();
@@ -169,13 +170,16 @@
   }
 
   function doClose() {
+    closePaneById(get(focusedPane));
+  }
+
+  function closePaneById(paneId: number) {
     zoomedPane = null;
     const root = get(layout);
     if (!root || leafIds(root).length <= 1) return;
-    const f = get(focusedPane);
-    const sib = siblingFirstLeaf(root, f);
-    const next = closePane(root, f);
-    layout.set(next);
+    const sib = siblingFirstLeaf(root, paneId);
+    const next = closePane(root, paneId);
+    layout.set(next); // Terminal が unmount され onDestroy で PTY を kill
     if (sib != null) {
       focusedPane.set(sib);
     } else {
@@ -224,6 +228,16 @@
         : ""}
     >
       <Terminal paneId={lf.id} initialCmd={lf.initialCmd} role={lf.role} />
+      {#if paneCount > 1 && lf.tabId === $activeTabId}
+        <button
+          class="pane-x"
+          onpointerdown={(e) => {
+            e.stopPropagation();
+            closePaneById(lf.id);
+          }}
+          aria-label="close pane">&#x2715;</button
+        >
+      {/if}
     </div>
   {/each}
   {#each splitters as s (s.id)}
@@ -267,6 +281,31 @@
   }
   .slot.hidden {
     display: none;
+  }
+  .slot:hover .pane-x {
+    opacity: 0.65;
+  }
+  .pane-x {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    z-index: 6;
+    width: 18px;
+    height: 18px;
+    border: 0;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.5);
+    color: var(--grey);
+    font-size: 0.6rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s, color 0.12s, background 0.12s;
+  }
+  .pane-x:hover {
+    opacity: 1 !important;
+    color: var(--red);
+    background: rgba(255, 92, 138, 0.2);
   }
   .splitter {
     position: absolute;

@@ -65,6 +65,19 @@
       return "";
     }
   }
+  function fmtResetDate(iso: string): string {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      return (
+        d.toLocaleDateString([], { month: "numeric", day: "numeric" }) +
+        " " +
+        d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      );
+    } catch {
+      return "";
+    }
+  }
   function fmtUptime(ms: number): string {
     const s = Math.floor(ms / 1000);
     if (s < 60) return `${s}s`;
@@ -91,6 +104,7 @@
       <div class="meter">
         <div class="row"><span>7d</span><span class="pct">{Math.round(usage.seven_day)}%</span></div>
         <div class="bar"><div class="fill" style="width:{Math.min(100, usage.seven_day)}%"></div></div>
+        <div class="reset">reset {fmtResetDate(usage.seven_reset)}</div>
       </div>
     {:else if err}
       <div class="muted">取得失敗</div>
