@@ -1,28 +1,24 @@
 <script lang="ts">
   import { get } from "svelte/store";
   import { config, saveConfig, type OrbConfig } from "../core/config";
-  import { open } from "@tauri-apps/plugin-dialog";
 
   let { onClose }: { onClose: () => void } = $props();
 
-  const original = get(config);
-  let draft = $state<OrbConfig>({ ...original });
+  let draft = $state<OrbConfig>({ ...get(config) });
   let saving = $state(false);
 
   const PRESETS = ["#2dd4bf", "#a78bfa", "#38bdf8", "#fbbf24", "#fb7185", "#4ade80"];
 
-  // ライブプレビュー: ドラフトを config へ即反映（theme.ts と端末透過が連動して見える）。
-  $effect(() => config.set({ ...draft }));
-
-  function blurActive() {
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-  }
+  // ライブプレビュー: ドラフトのアクセント色を即 --teal に反映。
+  $effect(() => {
+    document.documentElement.style.setProperty("--teal", draft.accent || "#2dd4bf");
+  });
 
   async function save() {
-    blurActive();
     saving = true;
     try {
-      await saveConfig(draft); // config は $effect で既に draft
+      await saveConfig(draft);
+      config.set({ ...draft }); // theme.ts が購読して確定適用
       onClose();
     } finally {
       saving = false;
@@ -30,20 +26,9 @@
   }
 
   function cancel() {
-    blurActive();
-    config.set(original); // プレビューを保存前へ戻す
+    // プレビューを保存前の値へ戻す。
+    document.documentElement.style.setProperty("--teal", get(config).accent || "#2dd4bf");
     onClose();
-  }
-
-  async function pickImage() {
-    const f = await open({
-      multiple: false,
-      filters: [{ name: "画像", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"] }],
-    });
-    if (typeof f === "string") draft.bg_image = f;
-  }
-  function fileName(p: string): string {
-    return p.replace(/\\/g, "/").split("/").pop() || p;
   }
 </script>
 
@@ -78,24 +63,7 @@
         <input type="color" bind:value={draft.accent} aria-label="custom accent" />
       </span>
     </label>
-    <label>
-      <span>背景画像</span>
-      <span class="bg-row">
-        <button class="pick" onclick={pickImage}>
-          {draft.bg_image ? fileName(draft.bg_image) : "画像を選択…"}
-        </button>
-        {#if draft.bg_image}
-          <button class="clear" onclick={() => (draft.bg_image = "")} aria-label="クリア">&#x2715;</button>
-        {/if}
-      </span>
-    </label>
-    {#if draft.bg_image}
-      <label>
-        <span>暗幕 {Math.round(draft.bg_dim * 100)}%</span>
-        <input type="range" min="0" max="0.9" step="0.05" bind:value={draft.bg_dim} />
-      </label>
-    {/if}
-    <div class="note">フォント・アクセント・背景は即反映 / スクロールバックは新しいペインから</div>
+    <div class="note">フォント・アクセント色は即反映 / スクロールバックは新しいペインから反映</div>
 
     <div class="btns">
       <button onclick={cancel}>キャンセル</button>
@@ -116,7 +84,7 @@
     z-index: 120;
   }
   .panel {
-    width: min(440px, 88vw);
+    width: min(420px, 86vw);
     background: #05100e;
     border: 1px solid rgba(45, 212, 191, 0.4);
     border-radius: 10px;
@@ -142,7 +110,7 @@
   }
   input {
     flex: 1;
-    max-width: 250px;
+    max-width: 230px;
     background: #000;
     border: 1px solid rgba(45, 212, 191, 0.25);
     border-radius: 5px;
@@ -155,15 +123,12 @@
   input:focus {
     border-color: rgba(45, 212, 191, 0.6);
   }
-  input[type="range"] {
-    padding: 0;
-  }
   .accent-row {
     display: flex;
     align-items: center;
     gap: 6px;
     flex: 1;
-    max-width: 250px;
+    max-width: 230px;
     justify-content: flex-end;
   }
   .swatch {
@@ -185,40 +150,6 @@
     border: 1px solid rgba(45, 212, 191, 0.25);
     border-radius: 4px;
     background: none;
-    cursor: pointer;
-  }
-  .bg-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: 1;
-    max-width: 250px;
-    justify-content: flex-end;
-  }
-  .pick {
-    border: 1px solid rgba(45, 212, 191, 0.3);
-    background: #000;
-    color: var(--fg);
-    font-family: inherit;
-    font-size: 0.74rem;
-    padding: 4px 10px;
-    border-radius: 5px;
-    cursor: pointer;
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .pick:hover {
-    border-color: var(--teal);
-  }
-  .clear {
-    border: 1px solid rgba(255, 92, 138, 0.3);
-    background: transparent;
-    color: var(--red);
-    font-size: 0.66rem;
-    padding: 3px 7px;
-    border-radius: 5px;
     cursor: pointer;
   }
   .note {

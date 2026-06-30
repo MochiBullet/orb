@@ -72,14 +72,6 @@
     }
   });
 
-  // 背景画像の有無で端末背景の透過を切替（画像時は透明にして .app の背景を透かす）。
-  $effect(() => {
-    const bg = $config.bg_image ? "rgba(0,0,0,0)" : "#000000";
-    if (term && term.options.theme?.background !== bg) {
-      term.options.theme = { ...term.options.theme, background: bg };
-    }
-  });
-
   // ピンチズーム / Ctrl+ホイール / Ctrl+0。WebView2 ではタッチパッドのピンチは
   // ctrlKey 付き wheel として届く。
   function zoom(delta: number) {
@@ -152,9 +144,8 @@
       scrollback: cfg.scrollback,
       cursorBlink: true,
       allowProposedApi: true,
-      allowTransparency: true,
       theme: {
-        background: cfg.bg_image ? "rgba(0,0,0,0)" : "#000000",
+        background: "#000000",
         foreground: "#e6fffa",
         cursor: "#2dd4bf",
         cursorAccent: "#000000",
