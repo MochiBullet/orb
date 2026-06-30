@@ -13,6 +13,9 @@ export const focusedPane = writable<number>(0);
 /** AI(claude)ペインの ID。Ctrl+L で選択テキストの送信先になる。null=AIペイン無し。 */
 export const aiPane = writable<number | null>(null);
 
+/** 設定パネルの表示状態（TitleBar の歯車 / Ctrl+, から開く）。 */
+export const showSettings = writable(false);
+
 /** ペインごとの cwd レジストリ。focus 切替時に旧ペイン値が残置しないよう、
  *  OSC Cwd を全ペイン分ここに溜め、focus 中ペインの値を cwd ストアへ即反映する。 */
 const cwdRegistry = new Map<number, string>();

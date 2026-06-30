@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings } from "../store/appStore";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -22,7 +22,6 @@
   import Settings from "../chrome/Settings.svelte";
 
   let showLauncher = $state(false);
-  let showSettings = $state(false);
   let zoomedPane = $state<number | null>(null);
   let wsEl: HTMLDivElement;
   const FULL: Rect = { x: 0, y: 0, w: 100, h: 100 };
@@ -73,11 +72,11 @@
   onDestroy(() => window.removeEventListener("keydown", onKey, true));
 
   function onKey(e: KeyboardEvent) {
-    if (showLauncher || showSettings) return;
+    if (showLauncher || get(showSettings)) return;
     // Ctrl+, : 設定
     if (e.ctrlKey && !e.shiftKey && e.key === ",") {
       e.preventDefault();
-      showSettings = true;
+      showSettings.set(true);
       return;
     }
     if (e.ctrlKey && !e.shiftKey && (e.key === "t" || e.key === "T")) {
@@ -212,8 +211,8 @@
   <Launcher onClose={() => (showLauncher = false)} />
 {/if}
 
-{#if showSettings}
-  <Settings onClose={() => (showSettings = false)} />
+{#if $showSettings}
+  <Settings onClose={() => showSettings.set(false)} />
 {/if}
 
 <style>

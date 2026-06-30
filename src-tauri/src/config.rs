@@ -32,6 +32,9 @@ fn default_font_family() -> String {
 fn default_scrollback() -> u32 {
     1000
 }
+fn default_accent() -> String {
+    "#2dd4bf".into()
+}
 
 /// orb 本体の設定（config.toml）。
 #[derive(Serialize, Deserialize, Clone)]
@@ -42,6 +45,8 @@ pub struct Config {
     pub font_family: String,
     #[serde(default = "default_scrollback")]
     pub scrollback: u32,
+    #[serde(default = "default_accent")]
+    pub accent: String,
 }
 
 impl Default for Config {
@@ -50,6 +55,7 @@ impl Default for Config {
             font_size: default_font_size(),
             font_family: default_font_family(),
             scrollback: default_scrollback(),
+            accent: default_accent(),
         }
     }
 }

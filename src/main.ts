@@ -4,6 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import "./styles/app.css";
 import App from "./App.svelte";
 import { loadConfig } from "./core/config";
+import "./core/theme";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 
 // top-level await はビルド target(es2020)で不可なので即時 async 関数に包む。

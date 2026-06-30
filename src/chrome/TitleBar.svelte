@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { cwd } from "../store/appStore";
+  import { cwd, showSettings } from "../store/appStore";
 
   const appWindow = getCurrentWindow();
 
@@ -20,6 +20,9 @@
     {/if}
   </div>
   <div class="controls">
+    <button class="ctl gear" onclick={() => showSettings.set(true)} aria-label="settings"
+      >&#x2699;</button
+    >
     <button class="ctl" onclick={() => appWindow.minimize()} aria-label="minimize"
       >&#x2013;</button
     >
@@ -77,11 +80,18 @@
     color: var(--grey);
     font-size: 0.8rem;
     cursor: pointer;
-    transition: background 0.12s, color 0.12s;
+    transition: background 0.12s, color 0.12s, transform 0.25s;
   }
   .ctl:hover {
     background: rgba(45, 212, 191, 0.12);
     color: var(--fg);
+  }
+  .ctl.gear {
+    font-size: 0.98rem;
+  }
+  .ctl.gear:hover {
+    color: var(--teal);
+    transform: rotate(60deg);
   }
   .ctl.close:hover {
     background: rgba(255, 92, 138, 0.2);

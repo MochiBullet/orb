@@ -5,12 +5,14 @@ export interface OrbConfig {
   font_size: number;
   font_family: string;
   scrollback: number;
+  accent: string;
 }
 
 const DEFAULT: OrbConfig = {
   font_size: 13,
   font_family: '"Cascadia Code", "FiraCode Nerd Font", "Consolas", monospace',
   scrollback: 1000,
+  accent: "#2dd4bf",
 };
 
 /** ~/.config/orb/config.toml の内容。起動時に loadConfig() で埋める。 */
