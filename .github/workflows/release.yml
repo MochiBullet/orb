@@ -52,7 +52,18 @@ jobs:
           releaseBody: |
             ## orb ${{ github.ref_name }}
 
-            下の Assets から Windows 用インストーラ（NSIS `.exe` / MSI）を
-            ダウンロードしてください。PowerShell 7 と WebView2 ランタイムが必要です。
+            下の Assets から、インストーラ（NSIS `.exe` / MSI）または
+            ポータブル版（`orb-x86_64-pc-windows-msvc.exe`）をダウンロードしてください。
+            PowerShell 7 と WebView2 ランタイムが必要です。
           releaseDraft: true
           prerelease: false
+
+      # 手動DL / cargo-binstall 用に、フロント埋め込み済みのポータブル exe も添付する
+      # （インストーラ不要で単体起動できる版）。
+      - name: Attach portable exe
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          Copy-Item src-tauri/target/release/orb.exe orb-x86_64-pc-windows-msvc.exe
+          gh release upload ${{ github.ref_name }} orb-x86_64-pc-windows-msvc.exe --clobber

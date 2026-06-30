@@ -8,6 +8,49 @@
 
 ---
 
+## インストール
+
+> Windows 専用。実行には **PowerShell 7 (`pwsh`)** と **WebView2 ランタイム**（Win10/11 は標準）が必要です。
+
+### 1. 手動ダウンロード（おすすめ）
+
+[Releases](https://github.com/MochiBullet/orb/releases) から取得：
+
+- **インストーラ** — `orb_*_x64-setup.exe`（NSIS）または `*.msi`
+- **ポータブル版** — `orb-x86_64-pc-windows-msvc.exe`（インストール不要・単体起動）
+
+### 2. cargo-binstall（prebuilt を取得）
+
+```sh
+cargo binstall orb
+```
+
+Releases のポータブル exe を `~/.cargo/bin` へ展開します（ビルド不要）。
+※ GUI（フロント／WebView）を伴うため `cargo install orb` には非対応です。
+
+### 3. winget
+
+```sh
+winget install MochiBullet.orb
+```
+
+（[winget-pkgs](https://github.com/microsoft/winget-pkgs) への登録後に利用可能）
+
+### 4. ソースからビルド
+
+```sh
+git clone https://github.com/MochiBullet/orb
+cd orb
+pnpm install
+pnpm tauri build
+# インストーラ → src-tauri/target/release/bundle/
+# ポータブル exe → src-tauri/target/release/orb.exe
+```
+
+詳しい前提・開発手順は [開発](#開発) を参照。
+
+---
+
 ## 技術スタック
 
 | 層 | 採用 |

@@ -1,9 +1,18 @@
 [package]
 name = "orb"
 version = "1.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "A Rust/Tauri vibe-coding terminal"
+authors = ["MochiBullet"]
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/MochiBullet/orb"
+
+# cargo-binstall: prebuilt のポータブル exe を Release から取得してインストールする。
+# release ワークフローが orb-<target>.exe を各リリースに添付する前提。
+[package.metadata.binstall]
+pkg-url = "https://github.com/MochiBullet/orb/releases/download/v{ version }/orb-{ target }{ binary-ext }"
+bin-dir = "orb{ binary-ext }"
+pkg-fmt = "bin"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
