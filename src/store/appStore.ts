@@ -19,6 +19,9 @@ export const showSettings = writable(false);
 /** コマンドパレットの表示状態（ヘッダーの検索欄 / Ctrl+Shift+P から開く）。 */
 export const showPalette = writable(false);
 
+/** パレットを開く初期モード。ヘッダーの ⓘ から開くと "help"（取扱説明）で開く。 */
+export const paletteMode = writable<"search" | "help">("search");
+
 /** ブロードキャスト入力。ON の間、フォーカスペインへの入力を全ペインへ複製する。 */
 export const broadcast = writable(false);
 

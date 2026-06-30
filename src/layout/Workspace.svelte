@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, broadcast } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast } from "../store/appStore";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -121,6 +121,7 @@
       sidebarSide.update((s) => (s === "right" ? "left" : "right")); // サイドバー左右トグル
     } else if (k === "p") {
       e.preventDefault();
+      paletteMode.set("search");
       showPalette.set(true); // コマンドパレット (Ctrl+Shift+P)
     }
   }
@@ -264,7 +265,7 @@
 {/if}
 
 {#if $showPalette}
-  <CommandPalette actions={paletteActions} onClose={() => showPalette.set(false)} />
+  <CommandPalette actions={paletteActions} initialMode={$paletteMode} onClose={() => showPalette.set(false)} />
 {/if}
 
 <style>

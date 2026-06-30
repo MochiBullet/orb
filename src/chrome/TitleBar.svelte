@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getVersion } from "@tauri-apps/api/app";
-  import { cwd, showSettings, showPalette } from "../store/appStore";
+  import { cwd, showSettings, showPalette, paletteMode } from "../store/appStore";
 
   const appWindow = getCurrentWindow();
 
@@ -25,16 +25,24 @@
     {/if}
   </div>
 
-  <button
-    class="hsearch"
-    onclick={() => showPalette.set(true)}
-    aria-label="コマンド検索"
-    title="コマンド検索 (Ctrl+Shift+P)"
-  >
-    <span class="hs-ico" aria-hidden="true">&#x2315;</span>
-    <span class="hs-ph">コマンドを検索…</span>
-    <span class="hs-kbd">Ctrl+Shift+P</span>
-  </button>
+  <div class="hcenter">
+    <button
+      class="hsearch"
+      onclick={() => { paletteMode.set("search"); showPalette.set(true); }}
+      aria-label="コマンド検索"
+      title="コマンド検索 (Ctrl+Shift+P)"
+    >
+      <span class="hs-ico" aria-hidden="true">&#x2315;</span>
+      <span class="hs-ph">コマンドを検索…</span>
+      <span class="hs-kbd">Ctrl+Shift+P</span>
+    </button>
+    <button
+      class="hinfo"
+      onclick={() => { paletteMode.set("help"); showPalette.set(true); }}
+      aria-label="取扱説明・ショートカット一覧"
+      title="取扱説明・ショートカット一覧"
+    >&#9432;</button>
+  </div>
 
   <div class="controls">
     {#if version}<span class="ver" title="orb version">v{version}</span>{/if}
@@ -86,15 +94,22 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  /* always-visible command search in the header; click opens the palette */
+  /* header center: always-visible command search + 取扱説明(ⓘ) */
+  .hcenter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 1 420px;
+    min-width: 90px;
+    margin: 0 16px;
+  }
   .hsearch {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex: 0 1 380px;
-    min-width: 90px;
+    flex: 1 1 auto;
+    min-width: 0;
     height: 24px;
-    margin: 0 16px;
     padding: 0 10px;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(45, 212, 191, 0.18);
@@ -108,6 +123,24 @@
   .hsearch:hover {
     background: rgba(45, 212, 191, 0.08);
     border-color: rgba(45, 212, 191, 0.4);
+  }
+  .hinfo {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border: 1px solid rgba(45, 212, 191, 0.18);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--teal);
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .hinfo:hover {
+    background: rgba(45, 212, 191, 0.14);
+    border-color: var(--teal);
+    color: var(--fg);
   }
   .hs-ico {
     flex: 0 0 auto;

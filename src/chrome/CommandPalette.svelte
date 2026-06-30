@@ -1,16 +1,22 @@
 <script lang="ts">
+  import { untrack } from "svelte";
+
   export interface PaletteAction {
     label: string;
     hint?: string;
     run: () => void;
   }
 
-  let { actions, onClose }: { actions: PaletteAction[]; onClose: () => void } = $props();
+  let {
+    actions,
+    onClose,
+    initialMode = "search",
+  }: { actions: PaletteAction[]; onClose: () => void; initialMode?: "search" | "help" } = $props();
 
   let query = $state("");
   let sel = $state(0);
   let input = $state<HTMLInputElement | undefined>(undefined);
-  let mode = $state<"search" | "help">("search");
+  let mode = $state<"search" | "help">(untrack(() => initialMode));
 
   let filtered = $derived(
     query.trim() ? actions.filter((a) => fuzzy(a.label, query)) : actions,
