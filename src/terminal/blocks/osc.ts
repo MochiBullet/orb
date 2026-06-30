@@ -120,6 +120,18 @@ export class CommandBlocks {
     if (t) void invoke("write_pty", { paneId: target, data: Array.from(this.encoder.encode(t)) });
   }
 
+  /** 失敗ブロック（exit≠0）を「これ直して」依頼として AI ペインへ送る（VIBE_IDEAS #2）。
+   *  コマンド＋出力＋exit＋cwd を枠付きで現役エージェントの stdin へ。自動送信はせず確認は人に委ねる。 */
+  private fixWithAi(start: IMarker, end: IMarker | null, code: number) {
+    const target = get(aiPane);
+    if (target == null || target === this.paneId) return;
+    const block = this.blockText(start, end);
+    if (!block) return;
+    const ctx = this.cwd ? ` (cwd: ${this.cwd})` : "";
+    const msg = `次のコマンドが exit ${code} で失敗しました${ctx}。原因を説明して、修正案（必要なら修正後のコマンド）を出して:\n\n${block}\n`;
+    void invoke("write_pty", { paneId: target, data: Array.from(this.encoder.encode(msg)) });
+  }
+
   private decorate(marker: IMarker, code: number, endMarker: IMarker | null) {
     const ok = code === 0;
     const dec = this.term.registerDecoration({
@@ -161,6 +173,18 @@ export class CommandBlocks {
       };
       tools.appendChild(copyBtn);
       tools.appendChild(aiBtn);
+      // 失敗ブロックだけ「🔧 fix」（VIBE_IDEAS #2）。中断(⊘ code<0)・成功には出さない。
+      if (!ok && code > 0) {
+        const fixBtn = document.createElement("button");
+        fixBtn.textContent = "🔧 fix";
+        fixBtn.title = "失敗の原因と修正を AI ペインに頼む";
+        fixBtn.onpointerdown = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.fixWithAi(marker, endMarker, code);
+        };
+        tools.appendChild(fixBtn);
+      }
       el.appendChild(tools);
     });
   }
