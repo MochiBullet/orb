@@ -88,6 +88,19 @@ pub fn build_pwsh(initial_cmd: Option<&str>) -> Result<CommandBuilder> {
     // Claude Code のステータスラインがサイドバーと重複する情報を省略できる。
     cmd.env("ORB", "1");
 
+    // 念には念を（多重防御）: spawn 直前にも Claude Code の子セッション印を子環境から除去する。
+    // run() 先頭の sanitize_inherited_env が将来のリファクタで消えても、ここで必ず止める。
+    // portable-pty の env_remove は base env（std::env から継承した分）のエントリも確実に削除する。
+    for key in std::env::vars_os()
+        .map(|(k, _)| k)
+        .filter(|k| {
+            k.to_str()
+                .is_some_and(|s| s == "CLAUDECODE" || s.starts_with("CLAUDE_CODE_"))
+        })
+    {
+        cmd.env_remove(key);
+    }
+
     if let Some(home) = std::env::var_os("USERPROFILE") {
         cmd.cwd(home);
     }
