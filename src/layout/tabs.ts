@@ -7,6 +7,7 @@ import {
   nextPaneId,
   peekPaneCounter,
   setPaneCounter,
+  tabWelcome,
 } from "../store/appStore";
 import { leaf, leafIds, type PaneNode } from "./tree";
 
@@ -112,6 +113,7 @@ export function newTab(lay?: PaneNode) {
   tabs.update((ts) => [...ts, t]);
   activeTabId.set(t.id);
   loadTab(t);
+  tabWelcome.update((n) => n + 1); // 新規タブで小さな welcome を出す
 }
 
 export function switchTab(id: number) {

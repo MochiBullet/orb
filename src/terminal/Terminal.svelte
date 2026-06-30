@@ -13,6 +13,7 @@
     focusedPane,
     aiPane,
     showSettings,
+    showSplash,
     layout,
     broadcast,
     registerTermClear,
@@ -22,6 +23,7 @@
   import { config } from "../core/config";
   import { invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { get } from "svelte/store";
 
   let { paneId, initialCmd, role }: { paneId: number; initialCmd?: string; role?: "shell" | "ai" } =
@@ -43,7 +45,16 @@
   let searchInput = $state<HTMLInputElement | undefined>(undefined);
   let termReady = $state(false);
   let ligatureJoinerId: number | undefined;
+  let scrolledUp = $state(false);
   const encoder = new TextEncoder();
+
+  // スクロールで履歴を遡っているか判定（「↓ 最下部」ボタンの表示制御）。
+  // 代替画面（vim/lazygit 等）では出さない。
+  function updateScrollState() {
+    if (!term) return;
+    const buf = term.buffer.active;
+    scrolledUp = buf.type !== "alternate" && buf.viewportY < buf.baseY;
+  }
 
   // プログラミング合字。@xterm/addon-ligatures は font-finder(Node FS) 依存で
   // WebView では動かないため、依存なしで character joiner に主要シーケンスを手動登録し、
@@ -104,13 +115,36 @@
   // 設定パネルを閉じた瞬間も（$showSettings が false になったら）端末へ戻す
   // ＝設定内の input にフォーカスが残って入力が吸われるのを防ぐ。
   $effect(() => {
-    if ($focusedPane === paneId && !$showSettings) term?.focus();
+    // スプラッシュ表示中は端末にフォーカスしない＝Enter で閉じた瞬間に確実に戻す。
+    if ($focusedPane === paneId && !$showSettings && !$showSplash) term?.focus();
   });
 
-  // 別ウィンドウから orb に戻ると xterm の textarea が左上にリセットされて浮くため、
-  // ウィンドウ復帰時にフォーカスペインを再フォーカスして位置を戻す。
-  function onWinFocus() {
-    if (get(focusedPane) === paneId && !get(showSettings)) term?.focus();
+  // ウィンドウ復帰時、フォーカスペインの端末へ確実にフォーカスを戻す。
+  // WebView2 では DOM の window "focus" が alt-tab 復帰で発火しないことがあるため、
+  // Tauri ネイティブの onFocusChanged を主軸にする。復帰直後はフォーカス受付が
+  // 間に合わないことがあるので次フレームで focus する。
+  let unlistenWinFocus: (() => void) | undefined;
+  // IME 変換中フラグ。変換中の再フォーカスは未確定文字（合成）を壊すため抑止する。
+  let composing = false;
+  function onCompStart() {
+    composing = true;
+  }
+  function onCompEnd() {
+    composing = false;
+  }
+  function refocusIfMine() {
+    if (disposed || composing) return;
+    const ok = () =>
+      get(focusedPane) === paneId && !get(showSettings) && !get(showSplash);
+    if (!ok()) return;
+    // 既に自分の端末にフォーカスがあるなら触らない。IME 候補ウィンドウ出現等で
+    // 焦点が外れていないのに focus() を呼ぶと日本語変換が中断されるのを防ぐ。
+    if (document.activeElement === term?.textarea) return;
+    requestAnimationFrame(() => {
+      if (disposed || composing || !ok()) return;
+      if (document.activeElement === term?.textarea) return;
+      term?.focus();
+    });
   }
 
   // 設定でフォントサイズが変わったら即反映（全ペイン）。
@@ -246,7 +280,20 @@
     container.addEventListener("wheel", onWheel, { passive: false, capture: true });
     container.addEventListener("mouseup", onMouseUp);
     container.addEventListener("contextmenu", onContextMenu);
-    window.addEventListener("focus", onWinFocus);
+    container.addEventListener("compositionstart", onCompStart);
+    container.addEventListener("compositionend", onCompEnd);
+    // ウィンドウ復帰でフォーカス復活（Tauri ネイティブを主軸 + DOM/可視性は保険）。
+    window.addEventListener("focus", refocusIfMine);
+    document.addEventListener("visibilitychange", refocusIfMine);
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused) refocusIfMine();
+      })
+      .then((un) => {
+        if (disposed) un();
+        else unlistenWinFocus = un;
+      })
+      .catch(() => {});
 
     // Ctrl+Shift+K / パレットの「画面クリア」からこのペインを消去できるよう登録。
     registerTermClear(paneId, () => term?.clear());
@@ -265,6 +312,9 @@
 
     // 合字 $effect の初回登録を解禁（term.open 済みでないと joiner を張れない）。
     termReady = true;
+
+    // スクロール状態を追従（「↓ 最下部」ボタンの出し入れ。term.dispose で自動解除）。
+    term.onScroll(() => updateScrollState());
 
     pty = new PtyClient(paneId);
     try {
@@ -318,7 +368,11 @@
     container?.removeEventListener("wheel", onWheel, { capture: true });
     container?.removeEventListener("mouseup", onMouseUp);
     container?.removeEventListener("contextmenu", onContextMenu);
-    window.removeEventListener("focus", onWinFocus);
+    container?.removeEventListener("compositionstart", onCompStart);
+    container?.removeEventListener("compositionend", onCompEnd);
+    window.removeEventListener("focus", refocusIfMine);
+    document.removeEventListener("visibilitychange", refocusIfMine);
+    unlistenWinFocus?.();
     observer?.disconnect();
     blocks?.dispose();
     pty?.close();
@@ -351,6 +405,21 @@
         aria-label="close search">&#x2715;</button
       >
     </div>
+  {/if}
+
+  {#if scrolledUp}
+    <button
+      class="scroll-bottom"
+      onpointerdown={(e) => {
+        e.preventDefault();
+        term?.scrollToBottom();
+        scrolledUp = false;
+        focusThis();
+      }}
+      title="最下部（入力欄）へ戻る"
+    >
+      &#x2193; 最下部
+    </button>
   {/if}
 </div>
 
@@ -421,6 +490,44 @@
   }
   .search-bar .sx:hover {
     color: var(--red);
+  }
+
+  /* スクロールで履歴を遡っている間だけ右下に出る「↓ 最下部へ戻る」ボタン。 */
+  .scroll-bottom {
+    position: absolute;
+    right: 14px;
+    bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    background: #05100e;
+    border: 1px solid rgba(45, 212, 191, 0.5);
+    border-radius: 999px;
+    box-shadow: 0 4px 18px -6px rgba(45, 212, 191, 0.5);
+    color: var(--teal);
+    font-family: inherit;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    z-index: 9;
+    animation: sb-in 0.14s ease-out;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  .scroll-bottom:hover {
+    background: rgba(45, 212, 191, 0.16);
+    border-color: var(--teal);
+    color: var(--fg);
+  }
+  @keyframes sb-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
 
   /* コマンドブロック（OSC 133/633 の decoration オーバーレイ） */

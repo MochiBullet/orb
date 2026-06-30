@@ -25,20 +25,18 @@
     matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   let leaving = $state(false);
-  let holdTimer: number | undefined;
   let outTimer: number | undefined;
 
   function dismiss() {
     if (leaving) return;
     leaving = true;
-    // 自動解除タイマーと、消費済みのキーリスナを即座に外す。
-    if (holdTimer) clearTimeout(holdTimer);
+    // 消費済みのキーリスナを即外す（以降の入力は端末へ通す）。
     window.removeEventListener("keydown", onKey, true);
     // フェードアウト後に実体を消す（reduce 時は即）。
     outTimer = window.setTimeout(() => showSplash.set(false), reduce ? 0 : 420);
   }
 
-  // 「press any key」: 最初の1打でスキップ（そのキーは消費）。
+  // 任意キー（またはクリック）で開始。その1打は消費して端末へは渡さない。
   function onKey(e: KeyboardEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -46,29 +44,21 @@
   }
 
   onMount(() => {
-    holdTimer = window.setTimeout(dismiss, reduce ? 900 : 1700);
     window.addEventListener("keydown", onKey, true);
   });
   onDestroy(() => {
-    if (holdTimer) clearTimeout(holdTimer);
     if (outTimer) clearTimeout(outTimer);
     window.removeEventListener("keydown", onKey, true);
   });
 </script>
 
-<div
-  class="splash"
-  class:leaving
-  class:reduce
-  role="presentation"
-  onpointerdown={dismiss}
->
+<div class="splash" class:leaving class:reduce role="presentation" onpointerdown={dismiss}>
   {#if !reduce}<div class="scan" aria-hidden="true"></div>{/if}
   <div class="inner">
     <pre class="aa welcome" aria-hidden="true">{WELCOME_ART}</pre>
     <pre class="aa orb" aria-label="WELCOME ORB">{ORB_ART}</pre>
     <div class="tagline">vibe-coding terminal</div>
-    <div class="hint">press any key</div>
+    <div class="hint">press any key to start</div>
   </div>
 </div>
 
@@ -132,8 +122,8 @@
     letter-spacing: 0.28em;
     text-transform: uppercase;
     color: var(--grey, #8ba8a3);
-    opacity: 0.55;
-    animation: blink 1.4s ease-in-out infinite;
+    opacity: 0.7;
+    animation: blink 1.6s ease-in-out infinite;
   }
   /* compositor-only な薄いスキャンライン（1回スイープ）。 */
   .scan {

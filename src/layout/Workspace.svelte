@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, showSplash } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, showSplash, tabWelcome } from "../store/appStore";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -27,6 +27,11 @@
   let zoomedPane = $state<number | null>(null);
   let wsEl: HTMLDivElement;
   const FULL: Rect = { x: 0, y: 0, w: 100, h: 100 };
+
+  // 新規タブで一瞬出る小さな welcome。
+  let miniWelcome = $state(false);
+  let miniTimer: number | undefined;
+  let welcomeUnsub: (() => void) | undefined;
 
   // アクティブタブは最新の $layout、非アクティブは保存済み layout を使う。
   function tabLayout(t: Tab) {
@@ -70,9 +75,24 @@
   onMount(() => {
     ensureFirstTab();
     window.addEventListener("keydown", onKey, true);
+    // 新規タブ作成のたびに小 welcome（初回 subscribe の即時発火はスキップ）。
+    let first = true;
+    welcomeUnsub = tabWelcome.subscribe(() => {
+      if (first) {
+        first = false;
+        return;
+      }
+      if (miniTimer) clearTimeout(miniTimer);
+      miniWelcome = true;
+      miniTimer = window.setTimeout(() => (miniWelcome = false), 1400);
+    });
   });
 
-  onDestroy(() => window.removeEventListener("keydown", onKey, true));
+  onDestroy(() => {
+    window.removeEventListener("keydown", onKey, true);
+    if (miniTimer) clearTimeout(miniTimer);
+    welcomeUnsub?.();
+  });
 
   function onKey(e: KeyboardEvent) {
     if (showLauncher || get(showPalette) || get(showSettings)) return;
@@ -259,6 +279,12 @@
       tabindex="-1"
     ></div>
   {/each}
+
+  {#if miniWelcome}
+    {#key $tabWelcome}
+      <div class="mini-welcome" aria-hidden="true"><span>welcome</span></div>
+    {/key}
+  {/if}
 </div>
 
 {#if showLauncher}
@@ -330,5 +356,61 @@
   }
   .splitter:hover {
     background: rgba(45, 212, 191, 0.45);
+  }
+
+  /* 新規タブで一瞬出る小さな welcome（中央・自動フェード・操作は透過）。 */
+  .mini-welcome {
+    position: absolute;
+    inset: 0;
+    z-index: 7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .mini-welcome span {
+    font-size: 1.2rem;
+    letter-spacing: 0.42em;
+    text-transform: lowercase;
+    color: var(--teal, #2dd4bf);
+    text-shadow:
+      0 0 10px rgba(45, 212, 191, 0.6),
+      0 0 24px rgba(45, 212, 191, 0.3);
+    will-change: transform, opacity;
+    animation: mini-welcome 1.4s ease both;
+  }
+  @keyframes mini-welcome {
+    0% {
+      opacity: 0;
+      transform: translateY(6px) scale(0.96);
+    }
+    18% {
+      opacity: 1;
+      transform: none;
+    }
+    76% {
+      opacity: 1;
+      transform: none;
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1.02);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mini-welcome span {
+      animation-duration: 1.4s;
+      animation-name: mini-welcome-fade;
+    }
+  }
+  @keyframes mini-welcome-fade {
+    0%,
+    100% {
+      opacity: 0;
+    }
+    20%,
+    76% {
+      opacity: 1;
+    }
   }
 </style>

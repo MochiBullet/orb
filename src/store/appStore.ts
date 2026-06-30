@@ -28,6 +28,10 @@ export const broadcast = writable(false);
 /** 起動時オープニング（WELCOME ORB スプラッシュ）の表示状態。App 起動時 / パレットの再生から true。 */
 export const showSplash = writable(false);
 
+/** 新規タブ作成のたびに増えるカウンタ。Workspace が購読して小さな welcome を一瞬出す。
+ *  初回タブ/セッション復元（ensureFirstTab）では増やさない＝起動スプラッシュと二重で出さない。 */
+export const tabWelcome = writable(0);
+
 /** ペインごとの画面クリア関数レジストリ（paneId→term.clear）。
  *  Terminal が mount/destroy で登録解除し、Workspace の Ctrl+Shift+K / パレットから呼ぶ。 */
 const termClearRegistry = new Map<number, () => void>();
