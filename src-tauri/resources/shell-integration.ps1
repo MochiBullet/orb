@@ -12,6 +12,13 @@ $global:__orb_si = @{
     OriginalPrompt = $function:prompt
     LastHistoryId  = -1
     HasPSReadLine  = $null -ne (Get-Module -Name PSReadLine)
+    OrigPredStyle  = $null
+    PredStyle      = $null
+}
+
+# 元の PredictionViewStyle を記憶（狭ペインでの自動退避＆復元に使う）。
+if ($global:__orb_si.HasPSReadLine) {
+    try { $global:__orb_si.OrigPredStyle = (Get-PSReadLineOption).PredictionViewStyle } catch {}
 }
 
 $global:__orb_ESC = [char]0x1b
@@ -63,6 +70,16 @@ function global:prompt {
 
     $h = Get-History -Count 1
     if ($h) { $global:__orb_si.LastHistoryId = $h.Id }
+
+    # 狭いペイン(幅<50)では PSReadLine の ListView 予測が警告を連発するため
+    # InlineView に退避する（元が ListView の人のみ。幅が戻れば ListView を復元＝好みを壊さない）。
+    if ($global:__orb_si.HasPSReadLine -and $global:__orb_si.OrigPredStyle -eq 'ListView') {
+        $want = if ($Host.UI.RawUI.WindowSize.Width -lt 50) { 'InlineView' } else { 'ListView' }
+        if ($global:__orb_si.PredStyle -ne $want) {
+            try { Set-PSReadLineOption -PredictionViewStyle $want -ErrorAction SilentlyContinue } catch {}
+            $global:__orb_si.PredStyle = $want
+        }
+    }
 
     return $out
 }
