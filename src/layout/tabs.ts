@@ -9,6 +9,7 @@ export interface Tab {
   layout: PaneNode | null;
   focused: number;
   ai: number | null;
+  name?: string;
 }
 
 export const tabs = writable<Tab[]>([]);
@@ -68,6 +69,11 @@ export function switchTab(id: number) {
     activeTabId.set(id);
     loadTab(t);
   }
+}
+
+/** タブ名を変更（空文字なら既定の "tab N" 表示へ戻す）。 */
+export function renameTab(id: number, name: string) {
+  tabs.update((ts) => ts.map((t) => (t.id === id ? { ...t, name: name.trim() || undefined } : t)));
 }
 
 export function closeTab(id: number) {
