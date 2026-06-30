@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { Terminal } from "@xterm/xterm";
+  import type { ILink } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
   import { WebglAddon } from "@xterm/addon-webgl";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
@@ -49,6 +50,7 @@
   let blocks: CommandBlocks | undefined;
   let serializeAddon: SerializeAddon | undefined;
   let scrollbackTimer: number | undefined;
+  let linkProvider: { dispose(): void } | undefined;
   let showSearch = $state(false);
   let searchQuery = $state("");
   let searchInput = $state<HTMLInputElement | undefined>(undefined);
@@ -118,6 +120,18 @@
     const sel = term?.getSelection() ?? "";
     if (!sel) return;
     void invoke("write_pty", { paneId: target, data: Array.from(encoder.encode(sel)) });
+  }
+
+  // semantic history（VIBE_IDEAS #37）: 出力中の `src/foo.ts:42` 形をクリックで開く。
+  // 拡張子は英字始まり限定（`1.2.3:4` 等の誤マッチを避ける）。可視行のみ正規表現＝perf 影響ゼロ。
+  const FILE_LINE_RE = /(?:[\w.\-]+[/\\])*[\w.\-]+\.[A-Za-z][\w]{0,7}:\d+(?::\d+)?/g;
+  // クリックされた `path:line(:col)` をペインの cwd 基準で解決してエディタへ。
+  function openFileLine(token: string) {
+    const m = /^(.*?):(\d+)(?::\d+)?$/.exec(token);
+    if (!m) return;
+    void invoke("open_in_editor", { cwd: blocks?.cwd || null, path: m[1], line: parseInt(m[2], 10) }).catch(
+      (e) => logError(`open_in_editor failed: ${String(e)}`),
+    );
   }
 
   // フォーカスが自分に移ったら実際のキーボードフォーカスも端末へ。
@@ -376,6 +390,32 @@
     term.loadAddon(new WebLinksAddon((_e, uri) => void openUrl(uri)));
 
     term.open(container);
+
+    // file:line リンク（#37）。WebLinksAddon(URL) とは別パターンなので併存させる。
+    linkProvider = term.registerLinkProvider({
+      provideLinks(y: number, callback: (links: ILink[] | undefined) => void) {
+        const line = term?.buffer.active.getLine(y - 1);
+        if (!line) {
+          callback(undefined);
+          return;
+        }
+        const text = line.translateToString(true);
+        const links: ILink[] = [];
+        FILE_LINE_RE.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = FILE_LINE_RE.exec(text)) !== null) {
+          const token = m[0];
+          const x = m.index + 1;
+          links.push({
+            text: token,
+            range: { start: { x, y }, end: { x: x + token.length - 1, y } },
+            activate: () => openFileLine(token),
+          });
+        }
+        callback(links.length ? links : undefined);
+      },
+    });
+
     container.addEventListener("keydown", onCopyPaste, true);
     container.addEventListener("wheel", onWheel, { passive: false, capture: true });
     container.addEventListener("mouseup", onMouseUp);
@@ -507,6 +547,7 @@
     unlistenWinFocus?.();
     observer?.disconnect();
     io?.disconnect();
+    linkProvider?.dispose();
     blocks?.dispose();
     pty?.close();
     term?.dispose();

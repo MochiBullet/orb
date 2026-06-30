@@ -60,6 +60,7 @@ pub fn run() {
             commands::get_usage,
             commands::get_claude_status,
             commands::get_git_branch,
+            commands::open_in_editor,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

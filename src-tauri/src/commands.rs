@@ -60,6 +60,44 @@ pub fn get_git_branch(cwd: Option<String>) -> Option<String> {
     }
 }
 
+/// 出力中の `path:line` リンク（VIBE_IDEAS #37 semantic history）をクリックしたとき、
+/// ペインの cwd 基準で解決してエディタの該当行を開く。
+/// 既定は Zed（`zed <path>:<line>`）。zed が PATH に無い/失敗時は OS 既定アプリで開く（行ジャンプ無し）。
+/// regex の誤マッチで存在しないパスが来ることもあるので、その場合は黙って無視する。
+#[tauri::command]
+pub fn open_in_editor(cwd: Option<String>, path: String, line: Option<u32>) -> Result<()> {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let p = std::path::Path::new(&path);
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::path::Path::new(&cwd.unwrap_or_default()).join(p)
+    };
+    if !abs.exists() {
+        return Ok(());
+    }
+    let abs_str = abs.to_string_lossy().to_string();
+    let target = match line {
+        Some(l) => format!("{abs_str}:{l}"),
+        None => abs_str.clone(),
+    };
+    // まず Zed（行ジャンプ対応）。PATH に無ければ spawn が Err になるのでフォールバックへ。
+    if std::process::Command::new("zed")
+        .arg(&target)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .is_ok()
+    {
+        return Ok(());
+    }
+    // フォールバック: OS 既定アプリで開く（cmd start。行ジャンプは無し）。
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", abs_str.as_str()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()?;
+    Ok(())
+}
+
 /// pwsh を spawn し、出力 Channel を結線する。`on_output` はフロントが生成した
 /// バイナリ Channel（raw バイトが流れる）。
 #[tauri::command]
