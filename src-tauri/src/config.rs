@@ -35,6 +35,12 @@ fn default_scrollback() -> u32 {
 fn default_accent() -> String {
     "#2dd4bf".into()
 }
+fn default_ligatures() -> bool {
+    true
+}
+fn default_show_opening() -> bool {
+    true
+}
 
 /// orb 本体の設定（config.toml）。
 #[derive(Serialize, Deserialize, Clone)]
@@ -47,6 +53,12 @@ pub struct Config {
     pub scrollback: u32,
     #[serde(default = "default_accent")]
     pub accent: String,
+    /// プログラミング合字（=> != -> 等）を character joiner で繋げて表示。
+    #[serde(default = "default_ligatures")]
+    pub ligatures: bool,
+    /// 起動時の WELCOME ORB オープニング（スプラッシュ）を表示。
+    #[serde(default = "default_show_opening")]
+    pub show_opening: bool,
 }
 
 impl Default for Config {
@@ -56,6 +68,8 @@ impl Default for Config {
             font_family: default_font_family(),
             scrollback: default_scrollback(),
             accent: default_accent(),
+            ligatures: default_ligatures(),
+            show_opening: default_show_opening(),
         }
     }
 }

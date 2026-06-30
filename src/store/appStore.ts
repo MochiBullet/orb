@@ -25,6 +25,23 @@ export const paletteMode = writable<"search" | "help">("search");
 /** ブロードキャスト入力。ON の間、フォーカスペインへの入力を全ペインへ複製する。 */
 export const broadcast = writable(false);
 
+/** 起動時オープニング（WELCOME ORB スプラッシュ）の表示状態。App 起動時 / パレットの再生から true。 */
+export const showSplash = writable(false);
+
+/** ペインごとの画面クリア関数レジストリ（paneId→term.clear）。
+ *  Terminal が mount/destroy で登録解除し、Workspace の Ctrl+Shift+K / パレットから呼ぶ。 */
+const termClearRegistry = new Map<number, () => void>();
+export function registerTermClear(paneId: number, fn: () => void) {
+  termClearRegistry.set(paneId, fn);
+}
+export function unregisterTermClear(paneId: number) {
+  termClearRegistry.delete(paneId);
+}
+/** 指定ペインの画面をクリア（スクロールバックを消去）。 */
+export function clearPane(paneId: number) {
+  termClearRegistry.get(paneId)?.();
+}
+
 /** ペインごとの cwd レジストリ。focus 切替時に旧ペイン値が残置しないよう、
  *  OSC Cwd を全ペイン分ここに溜め、focus 中ペインの値を cwd ストアへ即反映する。 */
 const cwdRegistry = new Map<number, string>();

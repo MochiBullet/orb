@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, showSplash } from "../store/appStore";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -116,6 +116,9 @@
     } else if (k === "z") {
       e.preventDefault();
       zoomFocused();
+    } else if (k === "k") {
+      e.preventDefault();
+      clearPane(get(focusedPane)); // フォーカスペインの画面クリア（Ctrl+K は PSReadLine 温存のため Shift 付き）
     } else if (k === "b") {
       e.preventDefault();
       sidebarSide.update((s) => (s === "right" ? "left" : "right")); // サイドバー左右トグル
@@ -140,6 +143,7 @@
     { label: "ペイン: 縦分割", hint: "Ctrl+Shift+E", run: () => doSplit("v") },
     { label: "ペイン: 閉じる", hint: "Ctrl+Shift+W", run: () => doClose() },
     { label: "ペイン: ズーム切替", hint: "Ctrl+Shift+Z", run: () => zoomFocused() },
+    { label: "ターミナル: 画面クリア", hint: "Ctrl+Shift+K", run: () => clearPane(get(focusedPane)) },
     { label: "タブ: 新規", hint: "Ctrl+T", run: () => newTab() },
     { label: "タブ: 閉じる", hint: "Ctrl+W", run: () => closeTab(get(activeTabId)) },
     {
@@ -154,6 +158,7 @@
     },
     { label: "設定を開く", hint: "Ctrl+,", run: () => showSettings.set(true) },
     { label: "案件ランチャー", hint: "Ctrl+P", run: () => (showLauncher = true) },
+    { label: "オープニング: 再生", hint: "WELCOME ORB", run: () => showSplash.set(true) },
   ];
 
   function doSplit(dir: "h" | "v") {

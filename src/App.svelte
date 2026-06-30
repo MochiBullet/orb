@@ -1,9 +1,18 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+  import { get } from "svelte/store";
   import TitleBar from "./chrome/TitleBar.svelte";
   import TabBar from "./chrome/TabBar.svelte";
   import Sidebar from "./chrome/Sidebar.svelte";
   import Workspace from "./layout/Workspace.svelte";
-  import { sidebarSide } from "./store/appStore";
+  import Splash from "./chrome/Splash.svelte";
+  import { sidebarSide, showSplash } from "./store/appStore";
+  import { config } from "./core/config";
+
+  // 起動時オープニング（設定 show_opening が false なら出さない）。
+  onMount(() => {
+    if (get(config).show_opening !== false) showSplash.set(true);
+  });
 </script>
 
 <div class="app">
@@ -16,6 +25,10 @@
     <Sidebar />
   </div>
 </div>
+
+{#if $showSplash}
+  <Splash />
+{/if}
 
 <style>
   .app {

@@ -63,7 +63,15 @@
         <input type="color" bind:value={draft.accent} aria-label="custom accent" />
       </span>
     </label>
-    <div class="note">フォント・アクセント色は即反映 / スクロールバックは新しいペインから反映</div>
+    <label class="toggle">
+      <span>合字 (=&gt; != -&gt; 等)</span>
+      <input type="checkbox" bind:checked={draft.ligatures} />
+    </label>
+    <label class="toggle">
+      <span>起動時オープニング (WELCOME ORB)</span>
+      <input type="checkbox" bind:checked={draft.show_opening} />
+    </label>
+    <div class="note">フォント・アクセント色・合字は保存で反映 / スクロールバックは新しいペインから反映</div>
 
     <div class="btns">
       <button onclick={cancel}>キャンセル</button>
@@ -150,6 +158,18 @@
     border: 1px solid rgba(45, 212, 191, 0.25);
     border-radius: 4px;
     background: none;
+    cursor: pointer;
+  }
+  .toggle {
+    cursor: pointer;
+  }
+  .toggle input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    max-width: 16px;
+    padding: 0;
+    accent-color: var(--teal);
     cursor: pointer;
   }
   .note {

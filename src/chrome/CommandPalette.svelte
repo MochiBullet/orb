@@ -83,6 +83,7 @@
     { keys: "Ctrl+Shift+D / E", desc: "ペイン 横分割 / 縦分割" },
     { keys: "Ctrl+Shift+W", desc: "ペインを閉じる" },
     { keys: "Ctrl+Shift+Z", desc: "ペインをズーム（全面）切替" },
+    { keys: "Ctrl+Shift+K", desc: "ターミナルの画面をクリア" },
     { keys: "Ctrl+Shift+B", desc: "サイドバー左右入替" },
     { keys: "Ctrl+↑ / Ctrl+↓", desc: "コマンドブロックを上下ジャンプ" },
     { keys: "Ctrl+F", desc: "ターミナル内を検索" },

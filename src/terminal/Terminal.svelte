@@ -9,7 +9,15 @@
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { PtyClient } from "../core/pty";
   import { CommandBlocks } from "./blocks/osc";
-  import { focusedPane, aiPane, showSettings, layout, broadcast } from "../store/appStore";
+  import {
+    focusedPane,
+    aiPane,
+    showSettings,
+    layout,
+    broadcast,
+    registerTermClear,
+    unregisterTermClear,
+  } from "../store/appStore";
   import { leafIds } from "../layout/tree";
   import { config } from "../core/config";
   import { invoke } from "@tauri-apps/api/core";
@@ -33,7 +41,50 @@
   let showSearch = $state(false);
   let searchQuery = $state("");
   let searchInput = $state<HTMLInputElement | undefined>(undefined);
+  let termReady = $state(false);
+  let ligatureJoinerId: number | undefined;
   const encoder = new TextEncoder();
+
+  // プログラミング合字。@xterm/addon-ligatures は font-finder(Node FS) 依存で
+  // WebView では動かないため、依存なしで character joiner に主要シーケンスを手動登録し、
+  // フォント(Cascadia Code 等)側の合字グリフを描画させる。長い順にマッチさせる。
+  const LIGATURES = [
+    "<==>", "<-->", "<==", "==>", "<--", "-->", "===", "!==", "=/=", "<=>",
+    "<=", "=>", ">=", "==", "!=", "->", "<-", "::", ":=", "|>", "<|",
+    "&&", "||", "++", "--", "...", "..", "</", "/>", "</>", "=~", "<>", "|=",
+  ].sort((a, b) => b.length - a.length);
+
+  // line のテキストから合字シーケンスの [start, end) 範囲（非重複・昇順）を返す。
+  function ligatureJoiner(text: string): [number, number][] {
+    const ranges: [number, number][] = [];
+    let i = 0;
+    while (i < text.length) {
+      let hit = false;
+      for (const lig of LIGATURES) {
+        if (text.startsWith(lig, i)) {
+          ranges.push([i, i + lig.length]);
+          i += lig.length;
+          hit = true;
+          break;
+        }
+      }
+      if (!hit) i++;
+    }
+    return ranges;
+  }
+
+  // 選択コピー: マウスアップ時に選択があればクリップボードへ（PuTTY/Linux 流儀）。
+  function onMouseUp() {
+    const sel = term?.getSelection();
+    if (sel) void navigator.clipboard.writeText(sel);
+  }
+  // 右クリックでペースト（クリップボードの内容を PTY へ）。
+  function onContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    void navigator.clipboard.readText().then((t) => {
+      if (t) pty?.write(encoder.encode(t));
+    });
+  }
 
   function focusThis() {
     focusedPane.set(paneId);
@@ -69,6 +120,20 @@
       term.options.fontSize = fs;
       fit?.fit();
       pty?.resize(term.cols, term.rows);
+    }
+  });
+
+  // 合字の ON/OFF（設定の保存で反映）。termReady になってから初回登録も行う。
+  $effect(() => {
+    const on = $config.ligatures;
+    if (!termReady || !term) return;
+    if (on && ligatureJoinerId === undefined) {
+      ligatureJoinerId = term.registerCharacterJoiner(ligatureJoiner);
+      term.refresh(0, term.rows - 1);
+    } else if (!on && ligatureJoinerId !== undefined) {
+      term.deregisterCharacterJoiner(ligatureJoinerId);
+      ligatureJoinerId = undefined;
+      term.refresh(0, term.rows - 1);
     }
   });
 
@@ -179,7 +244,12 @@
     term.open(container);
     container.addEventListener("keydown", onCopyPaste, true);
     container.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    container.addEventListener("mouseup", onMouseUp);
+    container.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("focus", onWinFocus);
+
+    // Ctrl+Shift+K / パレットの「画面クリア」からこのペインを消去できるよう登録。
+    registerTermClear(paneId, () => term?.clear());
 
     try {
       const webgl = new WebglAddon();
@@ -192,6 +262,9 @@
     fit.fit();
 
     blocks = new CommandBlocks(term, paneId);
+
+    // 合字 $effect の初回登録を解禁（term.open 済みでないと joiner を張れない）。
+    termReady = true;
 
     pty = new PtyClient(paneId);
     try {
@@ -240,8 +313,11 @@
   onDestroy(() => {
     disposed = true;
     if (resizeTimer) clearTimeout(resizeTimer);
+    unregisterTermClear(paneId);
     container?.removeEventListener("keydown", onCopyPaste, true);
     container?.removeEventListener("wheel", onWheel, { capture: true });
+    container?.removeEventListener("mouseup", onMouseUp);
+    container?.removeEventListener("contextmenu", onContextMenu);
     window.removeEventListener("focus", onWinFocus);
     observer?.disconnect();
     blocks?.dispose();

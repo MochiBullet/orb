@@ -19,7 +19,7 @@
 
 <div class="titlebar" data-tauri-drag-region>
   <div class="left" data-tauri-drag-region>
-    <span class="brand" data-tauri-drag-region>orb</span>
+    <span class="brand" data-tauri-drag-region>ORB</span>
     {#if $cwd}
       <span class="cwd" data-tauri-drag-region>{shortCwd($cwd)}</span>
     {/if}
