@@ -3,12 +3,20 @@
   import { get } from "svelte/store";
   import { getUsage, type Usage } from "../core/usage";
   import { getClaudeStatus, type ClaudeStatus } from "../core/status";
-  import { cwd as cwdStore } from "../store/appStore";
+  import { cwd as cwdStore, layout, startedAt, sidebarSide } from "../store/appStore";
+  import { tabs } from "../layout/tabs";
+  import { leafIds } from "../layout/tree";
 
   let usage = $state<Usage | null>(null);
   let status = $state<ClaudeStatus | null>(null);
   let err = $state(false);
+  let now = $state(Date.now());
+  let wsOpen = $state(false);
   let timer: number | undefined;
+  let clock: number | undefined;
+
+  let paneCount = $derived($layout ? leafIds($layout).length : 0);
+  let uptime = $derived(fmtUptime(now - startedAt));
 
   async function refreshUsage() {
     try {
@@ -33,9 +41,11 @@
       refreshUsage();
       refreshStatus();
     }, 30000);
+    clock = window.setInterval(() => (now = Date.now()), 10000);
   });
   onDestroy(() => {
     if (timer) clearInterval(timer);
+    if (clock) clearInterval(clock);
   });
 
   function fmtReset(iso: string): string {
@@ -46,9 +56,21 @@
       return "";
     }
   }
+  function fmtUptime(ms: number): string {
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m`;
+    return `${Math.floor(m / 60)}h${m % 60}m`;
+  }
+  function shortCwd(p: string): string {
+    if (!p) return "—";
+    const parts = p.replace(/\\/g, "/").split("/").filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : p;
+  }
 </script>
 
-<aside class="sidebar">
+<aside class="sidebar" class:left={$sidebarSide === "left"}>
   <div class="sec">
     <div class="label">TOKENS</div>
     {#if usage}
@@ -73,11 +95,29 @@
     {#if status}
       <div class="krow"><span>model</span><span class="kv">{status.model || "—"}</span></div>
       <div class="krow"><span>effort</span><span class="kv">{status.effort || "—"}</span></div>
-      <div class="krow mcp" title={"アクティブ MCP（config由来）:\n" + status.mcp.join("\n")}>
+      <div class="krow mcp" title={"MCP（config由来）:\n" + status.mcp.join("\n")}>
         <span>mcp</span><span class="kv">{status.mcp.length} <span class="caret">▾</span></span>
       </div>
+      {#if status.mcp.length}
+        <div class="chips">
+          {#each status.mcp as m}<span class="chip">{m}</span>{/each}
+        </div>
+      {/if}
     {:else}
       <div class="muted">…</div>
+    {/if}
+  </div>
+
+  <div class="sec ws-sec">
+    <button class="ws-toggle" onclick={() => (wsOpen = !wsOpen)} aria-expanded={wsOpen}>
+      <span class="label">WORKSPACE</span>
+      <span class="tri">{wsOpen ? "▽" : "△"}</span>
+    </button>
+    {#if wsOpen}
+      <div class="krow"><span>cwd</span><span class="kv" title={$cwdStore}>{shortCwd($cwdStore)}</span></div>
+      <div class="krow"><span>tabs</span><span class="kv">{$tabs.length}</span></div>
+      <div class="krow"><span>panes</span><span class="kv">{paneCount}</span></div>
+      <div class="krow"><span>uptime</span><span class="kv">{uptime}</span></div>
     {/if}
   </div>
 </aside>
@@ -94,6 +134,10 @@
     flex-direction: column;
     gap: 16px;
     overflow-y: auto;
+  }
+  .sidebar.left {
+    border-left: none;
+    border-right: 1px solid rgba(45, 212, 191, 0.2);
   }
   .label {
     font-size: 0.62rem;
@@ -160,6 +204,43 @@
   .mcp .caret {
     color: var(--teal);
     font-size: 0.6rem;
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .chip {
+    font-size: 0.58rem;
+    color: var(--teal);
+    background: rgba(45, 212, 191, 0.1);
+    border: 1px solid rgba(45, 212, 191, 0.22);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+  .ws-sec {
+    margin-top: auto;
+  }
+  .ws-toggle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  .ws-toggle .label {
+    margin-bottom: 0;
+  }
+  .ws-toggle .tri {
+    color: var(--teal);
+    font-size: 0.7rem;
+  }
+  .ws-toggle:hover .tri {
+    text-shadow: 0 0 6px rgba(45, 212, 191, 0.7);
   }
   .muted {
     font-size: 0.66rem;

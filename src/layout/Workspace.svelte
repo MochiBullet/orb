@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide } from "../store/appStore";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -115,6 +115,9 @@
       e.preventDefault();
       const f = get(focusedPane);
       zoomedPane = zoomedPane === f ? null : f; // フォーカスペインの全面化トグル
+    } else if (k === "b") {
+      e.preventDefault();
+      sidebarSide.update((s) => (s === "right" ? "left" : "right")); // サイドバー左右トグル
     }
   }
 

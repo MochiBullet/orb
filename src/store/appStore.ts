@@ -31,3 +31,20 @@ let paneCounter = 0;
 export function nextPaneId(): number {
   return ++paneCounter;
 }
+
+/** orb 起動時刻（稼働時間表示用）。 */
+export const startedAt = Date.now();
+
+/** サイドバーの左右位置（localStorage 永続、既定は右）。 */
+const savedSide =
+  typeof localStorage !== "undefined"
+    ? (localStorage.getItem("orb.sidebarSide") as "left" | "right" | null)
+    : null;
+export const sidebarSide = writable<"left" | "right">(savedSide ?? "right");
+sidebarSide.subscribe((s) => {
+  try {
+    localStorage.setItem("orb.sidebarSide", s);
+  } catch {
+    /* localStorage 不可でも動く */
+  }
+});
