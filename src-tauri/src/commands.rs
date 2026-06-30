@@ -1,3 +1,5 @@
+use std::os::windows::process::CommandExt;
+
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::State;
 
@@ -35,6 +37,27 @@ pub fn get_usage() -> Result<crate::usage::Usage> {
 #[tauri::command]
 pub fn get_claude_status(cwd: Option<String>) -> crate::status::ClaudeStatus {
     crate::status::fetch_status(cwd)
+}
+
+/// cwd の git ブランチ名（サイドバー用）。git 不在・非リポジトリ・detached は None。
+#[tauri::command]
+pub fn get_git_branch(cwd: Option<String>) -> Option<String> {
+    let dir = cwd?;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let out = std::process::Command::new("git")
+        .args(["-C", &dir, "rev-parse", "--abbrev-ref", "HEAD"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() || s == "HEAD" {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 /// pwsh を spawn し、出力 Channel を結線する。`on_output` はフロントが生成した

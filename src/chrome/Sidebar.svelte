@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
   import { getUsage, type Usage } from "../core/usage";
-  import { getClaudeStatus, type ClaudeStatus } from "../core/status";
+  import { getClaudeStatus, getGitBranch, type ClaudeStatus } from "../core/status";
   import { cwd as cwdStore, layout, startedAt, sidebarSide } from "../store/appStore";
   import { tabs } from "../layout/tabs";
   import { leafIds } from "../layout/tree";
@@ -12,11 +12,20 @@
   let err = $state(false);
   let now = $state(Date.now());
   let wsOpen = $state(false);
+  let branch = $state<string | null>(null);
   let timer: number | undefined;
   let clock: number | undefined;
 
   let paneCount = $derived($layout ? leafIds($layout).length : 0);
   let uptime = $derived(fmtUptime(now - startedAt));
+
+  // cwd が変わるたび git ブランチを取得（非リポジトリ・detached は null）。
+  $effect(() => {
+    const c = $cwdStore;
+    getGitBranch(c || undefined)
+      .then((b) => (branch = b))
+      .catch(() => (branch = null));
+  });
 
   async function refreshUsage() {
     try {
@@ -115,6 +124,9 @@
     </button>
     {#if wsOpen}
       <div class="krow"><span>cwd</span><span class="kv" title={$cwdStore}>{shortCwd($cwdStore)}</span></div>
+      {#if branch}
+        <div class="krow"><span>branch</span><span class="kv">{branch}</span></div>
+      {/if}
       <div class="krow"><span>tabs</span><span class="kv">{$tabs.length}</span></div>
       <div class="krow"><span>panes</span><span class="kv">{paneCount}</span></div>
       <div class="krow"><span>uptime</span><span class="kv">{uptime}</span></div>

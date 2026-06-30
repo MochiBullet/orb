@@ -32,6 +32,7 @@ pub fn run() {
             commands::save_config,
             commands::get_usage,
             commands::get_claude_status,
+            commands::get_git_branch,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

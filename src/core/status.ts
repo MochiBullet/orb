@@ -9,3 +9,7 @@ export interface ClaudeStatus {
 export function getClaudeStatus(cwd?: string): Promise<ClaudeStatus> {
   return invoke("get_claude_status", { cwd: cwd ?? null });
 }
+
+export function getGitBranch(cwd?: string): Promise<string | null> {
+  return invoke("get_git_branch", { cwd: cwd ?? null });
+}
