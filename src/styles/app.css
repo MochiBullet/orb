@@ -28,3 +28,9 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
+
+/* xterm の IME 用ヘルパ textarea。WebGL/レイアウト次第で左上に可視化されることが
+   あるため確実に透明化（入力・IME はこの textarea 経由なので消さず透明にするだけ）。 */
+.xterm-helper-textarea {
+  opacity: 0 !important;
+}

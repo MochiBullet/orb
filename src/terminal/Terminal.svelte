@@ -9,7 +9,7 @@
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { PtyClient } from "../core/pty";
   import { CommandBlocks } from "./blocks/osc";
-  import { focusedPane, aiPane } from "../store/appStore";
+  import { focusedPane, aiPane, showSettings } from "../store/appStore";
   import { config } from "../core/config";
   import { invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -49,8 +49,10 @@
   }
 
   // フォーカスが自分に移ったら実際のキーボードフォーカスも端末へ。
+  // 設定パネルを閉じた瞬間も（$showSettings が false になったら）端末へ戻す
+  // ＝設定内の input にフォーカスが残って入力が吸われるのを防ぐ。
   $effect(() => {
-    if ($focusedPane === paneId) term?.focus();
+    if ($focusedPane === paneId && !$showSettings) term?.focus();
   });
 
   // 設定でフォントサイズが変わったら即反映（全ペイン）。
