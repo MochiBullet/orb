@@ -81,6 +81,9 @@ pub fn build_pwsh(initial_cmd: Option<&str>) -> Result<CommandBuilder> {
     cmd.arg("-Command");
     cmd.arg(script);
     cmd.env("TERM", "xterm-256color");
+    // 24bit truecolor を有効化。xterm.js(WebGL) は truecolor を描画できるが、
+    // bat/eza/starship/vim 等は COLORTERM を見て truecolor を出すか決めるため明示する。
+    cmd.env("COLORTERM", "truecolor");
     // orb 内で動いている目印。子プロセス（pwsh→claude→statusline.ps1）が継承し、
     // Claude Code のステータスラインがサイドバーと重複する情報を省略できる。
     cmd.env("ORB", "1");

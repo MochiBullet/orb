@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, broadcast } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, broadcast } from "../store/appStore";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -24,7 +24,6 @@
   import { grid2x2, columns3, columns2, mainStack } from "./presets";
 
   let showLauncher = $state(false);
-  let showPalette = $state(false);
   let zoomedPane = $state<number | null>(null);
   let wsEl: HTMLDivElement;
   const FULL: Rect = { x: 0, y: 0, w: 100, h: 100 };
@@ -76,7 +75,7 @@
   onDestroy(() => window.removeEventListener("keydown", onKey, true));
 
   function onKey(e: KeyboardEvent) {
-    if (showLauncher || showPalette || get(showSettings)) return;
+    if (showLauncher || get(showPalette) || get(showSettings)) return;
     // Ctrl+, : 設定
     if (e.ctrlKey && !e.shiftKey && e.key === ",") {
       e.preventDefault();
@@ -122,7 +121,7 @@
       sidebarSide.update((s) => (s === "right" ? "left" : "right")); // サイドバー左右トグル
     } else if (k === "p") {
       e.preventDefault();
-      showPalette = true; // コマンドパレット (Ctrl+Shift+P)
+      showPalette.set(true); // コマンドパレット (Ctrl+Shift+P)
     }
   }
 
@@ -264,8 +263,8 @@
   <Settings onClose={() => showSettings.set(false)} />
 {/if}
 
-{#if showPalette}
-  <CommandPalette actions={paletteActions} onClose={() => (showPalette = false)} />
+{#if $showPalette}
+  <CommandPalette actions={paletteActions} onClose={() => showPalette.set(false)} />
 {/if}
 
 <style>

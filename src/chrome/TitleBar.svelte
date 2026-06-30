@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getVersion } from "@tauri-apps/api/app";
-  import { cwd, showSettings } from "../store/appStore";
+  import { cwd, showSettings, showPalette } from "../store/appStore";
 
   const appWindow = getCurrentWindow();
 
@@ -24,6 +24,18 @@
       <span class="cwd" data-tauri-drag-region>{shortCwd($cwd)}</span>
     {/if}
   </div>
+
+  <button
+    class="hsearch"
+    onclick={() => showPalette.set(true)}
+    aria-label="コマンド検索"
+    title="コマンド検索 (Ctrl+Shift+P)"
+  >
+    <span class="hs-ico" aria-hidden="true">&#x2315;</span>
+    <span class="hs-ph">コマンドを検索…</span>
+    <span class="hs-kbd">Ctrl+Shift+P</span>
+  </button>
+
   <div class="controls">
     {#if version}<span class="ver" title="orb version">v{version}</span>{/if}
     <button class="ctl gear" onclick={() => showSettings.set(true)} aria-label="settings"
@@ -73,6 +85,51 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* always-visible command search in the header; click opens the palette */
+  .hsearch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 1 380px;
+    min-width: 90px;
+    height: 24px;
+    margin: 0 16px;
+    padding: 0 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(45, 212, 191, 0.18);
+    border-radius: 6px;
+    color: var(--grey);
+    font-family: inherit;
+    font-size: 0.72rem;
+    cursor: text;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .hsearch:hover {
+    background: rgba(45, 212, 191, 0.08);
+    border-color: rgba(45, 212, 191, 0.4);
+  }
+  .hs-ico {
+    flex: 0 0 auto;
+    color: var(--teal);
+    font-size: 0.9rem;
+    line-height: 1;
+  }
+  .hs-ph {
+    flex: 1 1 auto;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .hs-kbd {
+    flex: 0 0 auto;
+    font-size: 0.56rem;
+    color: var(--grey);
+    opacity: 0.6;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+    padding: 0 4px;
   }
   .controls {
     display: flex;

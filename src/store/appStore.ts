@@ -16,6 +16,9 @@ export const aiPane = writable<number | null>(null);
 /** 設定パネルの表示状態（TitleBar の歯車 / Ctrl+, から開く）。 */
 export const showSettings = writable(false);
 
+/** コマンドパレットの表示状態（ヘッダーの検索欄 / Ctrl+Shift+P から開く）。 */
+export const showPalette = writable(false);
+
 /** ブロードキャスト入力。ON の間、フォーカスペインへの入力を全ペインへ複製する。 */
 export const broadcast = writable(false);
 
