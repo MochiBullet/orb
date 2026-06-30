@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, broadcast } from "../store/appStore";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -141,6 +141,11 @@
     { label: "ペイン: ズーム切替", hint: "Ctrl+Shift+Z", run: () => zoomFocused() },
     { label: "タブ: 新規", hint: "Ctrl+T", run: () => newTab() },
     { label: "タブ: 閉じる", hint: "Ctrl+W", run: () => closeTab(get(activeTabId)) },
+    {
+      label: "ブロードキャスト入力: 切替",
+      hint: "全ペイン同時入力",
+      run: () => broadcast.update((b) => !b),
+    },
     {
       label: "サイドバー: 左右入替",
       hint: "Ctrl+Shift+B",

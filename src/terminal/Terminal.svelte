@@ -9,7 +9,8 @@
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { PtyClient } from "../core/pty";
   import { CommandBlocks } from "./blocks/osc";
-  import { focusedPane, aiPane, showSettings } from "../store/appStore";
+  import { focusedPane, aiPane, showSettings, layout, broadcast } from "../store/appStore";
+  import { leafIds } from "../layout/tree";
   import { config } from "../core/config";
   import { invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -217,7 +218,17 @@
       return;
     }
 
-    term.onData((data) => pty?.write(encoder.encode(data)));
+    term.onData((data) => {
+      const bytes = encoder.encode(data);
+      if (get(broadcast)) {
+        // ブロードキャスト中はフォーカスペインの入力を全ペインへ複製。
+        for (const id of leafIds(get(layout))) {
+          void invoke("write_pty", { paneId: id, data: Array.from(bytes) });
+        }
+      } else {
+        pty?.write(bytes);
+      }
+    });
     term.onBinary((data) => {
       const bytes = new Uint8Array(data.length);
       for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xff;
@@ -248,7 +259,12 @@
   });
 </script>
 
-<div class="term-wrap" class:focused={$focusedPane === paneId} class:ai={role === "ai"}>
+<div
+  class="term-wrap"
+  class:focused={$focusedPane === paneId}
+  class:ai={role === "ai"}
+  class:broadcast={$broadcast}
+>
   <div class="term" bind:this={container} onpointerdown={focusThis} role="presentation"></div>
   {#if showSearch}
     <div class="search-bar">
@@ -287,6 +303,10 @@
   }
   .term-wrap.ai.focused {
     box-shadow: inset 0 0 0 1.5px rgba(167, 139, 250, 0.75);
+  }
+  /* ブロードキャスト中は全ペインを赤枠で警告（入力が全ペインに飛ぶ）。 */
+  .term-wrap.broadcast {
+    box-shadow: inset 0 0 0 2px rgba(255, 92, 138, 0.6);
   }
   .term {
     width: 100%;

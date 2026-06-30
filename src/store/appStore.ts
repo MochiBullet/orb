@@ -16,6 +16,9 @@ export const aiPane = writable<number | null>(null);
 /** 設定パネルの表示状態（TitleBar の歯車 / Ctrl+, から開く）。 */
 export const showSettings = writable(false);
 
+/** ブロードキャスト入力。ON の間、フォーカスペインへの入力を全ペインへ複製する。 */
+export const broadcast = writable(false);
+
 /** ペインごとの cwd レジストリ。focus 切替時に旧ペイン値が残置しないよう、
  *  OSC Cwd を全ペイン分ここに溜め、focus 中ペインの値を cwd ストアへ即反映する。 */
 const cwdRegistry = new Map<number, string>();
