@@ -71,10 +71,13 @@ function global:prompt {
     $h = Get-History -Count 1
     if ($h) { $global:__orb_si.LastHistoryId = $h.Id }
 
-    # 狭いペイン(幅<50)では PSReadLine の ListView 予測が警告を連発するため
-    # InlineView に退避する（元が ListView の人のみ。幅が戻れば ListView を復元＝好みを壊さない）。
+    # 狭い/低いペイン(幅<50 または 高さ<5)では PSReadLine の ListView 予測が
+    # 警告を連発するため InlineView に退避（元が ListView の人のみ。広く戻れば ListView 復元）。
     if ($global:__orb_si.HasPSReadLine -and $global:__orb_si.OrigPredStyle -eq 'ListView') {
-        $want = if ($Host.UI.RawUI.WindowSize.Width -lt 50) { 'InlineView' } else { 'ListView' }
+        # PSReadLine 自身が見るのと同じ [Console] のサイズで判定（ConPTY では RawUI とズレる）。
+        $cw = 80; $ch = 24
+        try { $cw = [Console]::WindowWidth; $ch = [Console]::WindowHeight } catch {}
+        $want = if ($cw -lt 50 -or $ch -lt 5) { 'InlineView' } else { 'ListView' }
         if ($global:__orb_si.PredStyle -ne $want) {
             try { Set-PSReadLineOption -PredictionViewStyle $want -ErrorAction SilentlyContinue } catch {}
             $global:__orb_si.PredStyle = $want
