@@ -63,19 +63,31 @@ pub fn save_config(cfg: &Config) -> Result<()> {
     Ok(())
 }
 
-/// config.toml を読む。無ければデフォルトを書き出して返す（projects.toml と同じ方針）。
+/// config.toml を読む（read 専用＝FS を書き換えない。初回の書き出しは seed_defaults）。
 pub fn load_config() -> Config {
-    let path = config_dir().join("config.toml");
-    match std::fs::read_to_string(&path) {
+    match std::fs::read_to_string(config_dir().join("config.toml")) {
         Ok(text) => toml::from_str::<Config>(&text).unwrap_or_default(),
-        Err(_) => {
-            let cfg = Config::default();
-            let dir = config_dir();
-            let _ = std::fs::create_dir_all(&dir);
-            if let Ok(s) = toml::to_string_pretty(&cfg) {
-                let _ = std::fs::write(&path, s);
-            }
-            cfg
+        Err(_) => Config::default(),
+    }
+}
+
+/// 初回起動時、設定ファイルが無ければ既定を書き出す（書き込みは起動時の一度だけ）。
+/// 「読み取りコマンドが FS を書き換える」副作用を load_* から切り離すための seed。
+pub fn seed_defaults() {
+    let dir = config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let pp = dir.join("projects.toml");
+    if !pp.exists() {
+        if let Ok(s) = toml::to_string_pretty(&ProjectsFile {
+            project: default_projects(),
+        }) {
+            let _ = std::fs::write(pp, s);
+        }
+    }
+    let cp = dir.join("config.toml");
+    if !cp.exists() {
+        if let Ok(s) = toml::to_string_pretty(&Config::default()) {
+            let _ = std::fs::write(cp, s);
         }
     }
 }
@@ -92,29 +104,15 @@ fn config_dir() -> PathBuf {
         .join("orb")
 }
 
-/// projects.toml を読む。無ければデフォルト案件を書き出して返す。
+/// projects.toml を読む（read 専用＝FS を書き換えない。初回 seed は seed_defaults）。
+/// 空リストは「意図的に空」として尊重、パース失敗・ファイル無しのみメモリ既定を返す。
 pub fn load_projects() -> Vec<Project> {
-    let path = config_dir().join("projects.toml");
-    match std::fs::read_to_string(&path) {
-        // ファイルが存在する: ユーザー設定を尊重し、デフォルトで上書きしない。
-        // 空リストは「意図的に空」として尊重、パース失敗時のみメモリ上の既定を返す
-        // （ファイルは触らずユーザーが直せるよう温存）。
+    match std::fs::read_to_string(config_dir().join("projects.toml")) {
         Ok(text) => match toml::from_str::<ProjectsFile>(&text) {
             Ok(pf) => pf.project,
             Err(_) => default_projects(),
         },
-        // ファイルが無い: 初回のみ既定を書き出して返す。
-        Err(_) => {
-            let defaults = default_projects();
-            let dir = config_dir();
-            let _ = std::fs::create_dir_all(&dir);
-            if let Ok(s) = toml::to_string_pretty(&ProjectsFile {
-                project: defaults.clone(),
-            }) {
-                let _ = std::fs::write(&path, s);
-            }
-            defaults
-        }
+        Err(_) => default_projects(),
     }
 }
 

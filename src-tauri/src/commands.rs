@@ -85,3 +85,14 @@ pub fn close_pty(state: State<'_, AppState>, pane_id: PaneId) -> Result<()> {
     }
     Ok(())
 }
+
+/// フロントの起動/リロード時に呼ぶ。旧ペインの PTY を全破棄して孤児
+/// reader スレッド・pwsh を防ぐ（HMR/WebView リロードは Channel を再bind できないため
+/// 全 drop が正しい）。kill はロックの外で。
+#[tauri::command]
+pub fn close_all_ptys(state: State<'_, AppState>) {
+    let drained: Vec<_> = state.ptys.lock().unwrap().drain().collect();
+    for (_, mut handle) in drained {
+        handle.kill();
+    }
+}

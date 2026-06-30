@@ -1,8 +1,12 @@
 import { mount } from "svelte";
+import { invoke } from "@tauri-apps/api/core";
 import "@xterm/xterm/css/xterm.css";
 import "./styles/app.css";
 import App from "./App.svelte";
 import { loadConfig } from "./core/config";
+
+// HMR / WebView リロード時、前マウントが残した PTY を破棄（孤児 reader/pwsh を防ぐ）。
+await invoke("close_all_ptys").catch(() => {});
 
 // 端末生成前に設定を読み込んでおく（Terminal は get(config) を同期参照する）。
 await loadConfig();

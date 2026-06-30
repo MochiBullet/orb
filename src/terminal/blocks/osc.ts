@@ -1,5 +1,5 @@
 import type { Terminal, IMarker, IDecoration, IDisposable } from "@xterm/xterm";
-import { cwd as cwdStore, focusedPane, aiPane } from "../../store/appStore";
+import { aiPane, setPaneCwd } from "../../store/appStore";
 import { get } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -72,7 +72,7 @@ export class CommandBlocks {
     const value = decodeOsc(rest.slice(eq + 1));
     if (key === "Cwd") {
       this.cwd = value;
-      if (get(focusedPane) === this.paneId) cwdStore.set(value);
+      setPaneCwd(this.paneId, value);
     } else if (key === "PromptType") this.promptType = value;
   }
 
