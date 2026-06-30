@@ -7,6 +7,7 @@
   import { ClipboardAddon } from "@xterm/addon-clipboard";
   import { SearchAddon } from "@xterm/addon-search";
   import { WebLinksAddon } from "@xterm/addon-web-links";
+  import { SerializeAddon } from "@xterm/addon-serialize";
   import { PtyClient } from "../core/pty";
   import { CommandBlocks } from "./blocks/osc";
   import {
@@ -18,9 +19,14 @@
     broadcast,
     registerTermClear,
     unregisterTermClear,
+    registerTermSerialize,
+    unregisterTermSerialize,
+    consumeScrollback,
+    saveOneScrollback,
   } from "../store/appStore";
   import { leafIds } from "../layout/tree";
   import { config } from "../core/config";
+  import { logInfo, logWarn, logError } from "../core/log";
   import { invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -37,9 +43,12 @@
   let search: SearchAddon | undefined;
   let pty: PtyClient | undefined;
   let observer: ResizeObserver | undefined;
+  let io: IntersectionObserver | undefined;
   let resizeTimer: number | undefined;
   let disposed = false;
   let blocks: CommandBlocks | undefined;
+  let serializeAddon: SerializeAddon | undefined;
+  let scrollbackTimer: number | undefined;
   let showSearch = $state(false);
   let searchQuery = $state("");
   let searchInput = $state<HTMLInputElement | undefined>(undefined);
@@ -147,13 +156,22 @@
     });
   }
 
-  // 設定でフォントサイズが変わったら即反映（全ペイン）。
+  // 表示中（タブがアクティブ）かどうか。display:none のスロット内では fit/resize すると
+  // cols が壊れ、再表示時に過去の出力が細く描画されるため、可視判定で抑止する。
+  function isVisible(): boolean {
+    return !!container && container.offsetParent !== null && container.clientWidth > 1 && container.clientHeight > 1;
+  }
+
+  // 設定でフォントサイズが変わったら即反映。非表示ペインは fit せず、再表示時に
+  // IntersectionObserver の復帰ハンドラで fit し直す（非表示中の fit は描画を壊すため）。
   $effect(() => {
     const fs = $config.font_size;
     if (term && term.options.fontSize !== fs) {
       term.options.fontSize = fs;
-      fit?.fit();
-      pty?.resize(term.cols, term.rows);
+      if (isVisible()) {
+        fit?.fit();
+        pty?.resize(term.cols, term.rows);
+      }
     }
   });
 
@@ -227,16 +245,95 @@
         e.preventDefault();
         e.stopPropagation();
       }
-    } else if (key === "v") {
-      void navigator.clipboard.readText().then((t) => {
-        if (t) pty?.write(encoder.encode(t));
-      });
-      e.preventDefault();
-      e.stopPropagation();
     }
+    // Ctrl+V はここで処理しない。keydown を preventDefault しても WebView2 は paste
+    // イベントを別途発火するため、手動で readText→pty.write すると xterm 本体の
+    // paste ハンドラと二重書き込みになる（＝ペーストが2回出る）。xterm 本体に任せれば
+    // bracketed paste（\x1b[200~…201~）も正しく付与され、broadcast 経路（term.onData）
+    // にも一本で乗る。右クリック貼り付け（onContextMenu）は別操作なので従来どおり残す。
+  }
+
+  // 出力が落ち着いたら（1.5s debounce）画面内容を自動保存。閉じる処理に保存を
+  // ぶら下げる方式（onCloseRequested）は close をブロックしてゾンビ化させるため、
+  // 稼働中にバックグラウンドで残す。再起動時はこれを過去ログとして書き戻す。
+  function scheduleScrollbackSave() {
+    if (scrollbackTimer) clearTimeout(scrollbackTimer);
+    scrollbackTimer = window.setTimeout(() => {
+      if (disposed || !serializeAddon) return;
+      try {
+        saveOneScrollback(paneId, serializeAddon.serialize({ scrollback: 1000 }));
+      } catch {
+        /* 保存失敗は無視 */
+      }
+    }, 1500);
+  }
+
+  let ptyStarted = false;
+  // PTY 起動は startPty で一度だけ。0px で fit すると 1x1 に丸まり pwsh が極小起動して
+  // 描画されない「空の枠」になるため、tryStart 側でサイズ確定を待ってから呼ぶ。
+  async function startPty() {
+    if (ptyStarted || disposed || !term || !fit) return;
+    ptyStarted = true;
+    fit.fit();
+    logInfo(`pane ${paneId}: startPty (cols=${term.cols} rows=${term.rows})`);
+
+    // 前回セッションの画面内容を復元（あれば）。読み取り専用の過去ログとして書き戻し、
+    // 区切りの下に新しい pwsh を起動する＝continue/resume なしで前回の表示が戻る。
+    const prior = consumeScrollback(paneId);
+    if (prior) {
+      term.write(prior);
+      term.write(
+        "\r\n\x1b[38;5;108m──────── orb · 前回のセッション（上は記録／ここから新しいシェル）────────\x1b[0m\r\n",
+      );
+      logInfo(`pane ${paneId}: restored scrollback (${prior.length} bytes)`);
+    }
+
+    pty = new PtyClient(paneId);
+    try {
+      await pty.spawn(
+        term.cols,
+        term.rows,
+        (bytes) => {
+          term?.write(bytes);
+          scheduleScrollbackSave();
+        },
+        initialCmd,
+      );
+      logInfo(`pane ${paneId}: pty spawned`);
+    } catch (e) {
+      logError(`pane ${paneId}: spawn failed: ${String(e)}`);
+      term.writeln("\x1b[31m[orb] PTY の起動に失敗しました: " + String(e) + "\x1b[0m");
+      term.writeln(
+        "\x1b[90mPowerShell 7 (pwsh.exe) が見つからない場合は、インストールするか PATH を通してください。\x1b[0m",
+      );
+      return;
+    }
+
+    if (disposed) {
+      pty.close();
+      return;
+    }
+
+    term.onData((data) => {
+      const bytes = encoder.encode(data);
+      if (get(broadcast)) {
+        // ブロードキャスト中はフォーカスペインの入力を全ペインへ複製。
+        for (const id of leafIds(get(layout))) {
+          void invoke("write_pty", { paneId: id, data: Array.from(bytes) });
+        }
+      } else {
+        pty?.write(bytes);
+      }
+    });
+    term.onBinary((data) => {
+      const bytes = new Uint8Array(data.length);
+      for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xff;
+      pty?.write(bytes);
+    });
   }
 
   onMount(async () => {
+    logInfo(`pane ${paneId}: mount`);
     term = new Terminal({
       fontFamily: cfg.font_family,
       fontSize: cfg.font_size,
@@ -272,6 +369,9 @@
     search = new SearchAddon();
     term.loadAddon(search);
 
+    serializeAddon = new SerializeAddon();
+    term.loadAddon(serializeAddon);
+
     // クリック可能URL: 出力中の http/https をクリックで既定ブラウザで開く。
     term.loadAddon(new WebLinksAddon((_e, uri) => void openUrl(uri)));
 
@@ -306,8 +406,6 @@
       console.warn("[orb] WebGL addon unavailable, using fallback renderer", e);
     }
 
-    fit.fit();
-
     blocks = new CommandBlocks(term, paneId);
 
     // 合字 $effect の初回登録を解禁（term.open 済みでないと joiner を張れない）。
@@ -316,53 +414,87 @@
     // スクロール状態を追従（「↓ 最下部」ボタンの出し入れ。term.dispose で自動解除）。
     term.onScroll(() => updateScrollState());
 
-    pty = new PtyClient(paneId);
-    try {
-      await pty.spawn(term.cols, term.rows, (bytes) => term?.write(bytes), initialCmd);
-    } catch (e) {
-      term.writeln("\x1b[31m[orb] PTY の起動に失敗しました: " + String(e) + "\x1b[0m");
-      term.writeln(
-        "\x1b[90mPowerShell 7 (pwsh.exe) が見つからない場合は、インストールするか PATH を通してください。\x1b[0m",
-      );
-      return;
-    }
-
-    if (disposed) {
-      pty.close();
-      return;
-    }
-
-    term.onData((data) => {
-      const bytes = encoder.encode(data);
-      if (get(broadcast)) {
-        // ブロードキャスト中はフォーカスペインの入力を全ペインへ複製。
-        for (const id of leafIds(get(layout))) {
-          void invoke("write_pty", { paneId: id, data: Array.from(bytes) });
-        }
-      } else {
-        pty?.write(bytes);
+    // PTY 起動トリガー。空枠バグ（0px で fit→1x1→極小 pwsh）を避けつつ、
+    // ターミナルが無起動で終わらないよう安全網を張る：
+    //  - 実寸があれば即起動。
+    //  - 表示中なのにサイズ未確定なら数フレーム待ち、最後（~1.5s）は強制起動。
+    //  - display:none の非アクティブタブ（offsetParent===null）は表示まで起動を保留し、
+    //    ResizeObserver が表示された瞬間に起動を促す。
+    // PTY 起動トリガー。0px で fit すると 1x1 に丸まり「空の枠」になるため可視化後に起動。
+    // 非表示ペインを rAF で毎フレーム監視すると clientWidth/offsetParent の読みが強制 reflow を
+    // 誘発し、ペインが増えるとレイアウトスラッシングでフリーズする。よって：
+    //  - 表示中でサイズ確定待ちのときだけ短期 rAF（最大 ~1.5s で強制起動）。
+    //  - 非表示タブは reflow ゼロの IntersectionObserver で「表示された瞬間」に起動。
+    let startWaited = 0;
+    function pollActive() {
+      if (ptyStarted || disposed || !term) return;
+      if (container.clientWidth > 1 && container.clientHeight > 1) {
+        void startPty();
+        return;
       }
+      if (container.offsetParent === null) return; // 非表示 → IntersectionObserver に委ねる
+      if (startWaited > 90) {
+        logWarn(`pane ${paneId}: size unresolved, forcing start`);
+        void startPty();
+        return;
+      }
+      startWaited++;
+      requestAnimationFrame(pollActive);
+    }
+
+    io = new IntersectionObserver((entries) => {
+      if (disposed) {
+        io?.disconnect();
+        return;
+      }
+      if (!entries.some((e) => e.isIntersecting)) return; // 非表示化（タブ離脱）は無視
+      if (!ptyStarted) {
+        startWaited = 0;
+        pollActive(); // 初回: 表示された＝サイズ確定を待って起動
+        return;
+      }
+      // 再表示（タブに戻った）: 非表示中は fit を抑止しているので、隠れている間の窓リサイズ／
+      // フォント変更が未反映なまま。実寸に合わせて fit し直し再描画する。これをしないと
+      // WebGL のグリフがズレたまま＝過去の出力が細く描画される。次フレームでサイズ確定後に実行。
+      requestAnimationFrame(() => {
+        if (disposed || !term || !fit || !isVisible()) return;
+        fit.fit();
+        pty?.resize(term.cols, term.rows);
+        term.refresh(0, term.rows - 1);
+      });
     });
-    term.onBinary((data) => {
-      const bytes = new Uint8Array(data.length);
-      for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xff;
-      pty?.write(bytes);
-    });
+    io.observe(container);
 
     observer = new ResizeObserver(() => {
+      if (!term || !fit || disposed) return;
+      if (!ptyStarted) {
+        // 非アクティブタブが表示された等でサイズが付いたら起動。
+        if (container.clientWidth > 1 && container.clientHeight > 1) void startPty();
+        return;
+      }
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => {
         if (!term || !fit) return;
+        // 非表示中（タブ非アクティブ／display:none）は fit しない。0px で fit すると cols が
+        // 壊れ、タブに戻ったとき過去の出力が細く描画される（致命バグ）。再表示時は
+        // ResizeObserver が 0→実寸でもう一度発火し、IntersectionObserver の復帰ハンドラも
+        // 走るので、そこで正しく fit し直す。
+        if (!isVisible()) return;
         fit.fit();
         pty?.resize(term.cols, term.rows);
+        term.refresh(0, term.rows - 1);
       }, RESIZE_DEBOUNCE_MS);
     });
     observer.observe(container);
+
+    requestAnimationFrame(pollActive);
   });
 
   onDestroy(() => {
     disposed = true;
+    logInfo(`pane ${paneId}: destroy`);
     if (resizeTimer) clearTimeout(resizeTimer);
+    if (scrollbackTimer) clearTimeout(scrollbackTimer);
     unregisterTermClear(paneId);
     container?.removeEventListener("keydown", onCopyPaste, true);
     container?.removeEventListener("wheel", onWheel, { capture: true });
@@ -374,6 +506,7 @@
     document.removeEventListener("visibilitychange", refocusIfMine);
     unlistenWinFocus?.();
     observer?.disconnect();
+    io?.disconnect();
     blocks?.dispose();
     pty?.close();
     term?.dispose();
