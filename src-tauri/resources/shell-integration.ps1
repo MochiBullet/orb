@@ -12,13 +12,14 @@ $global:__orb_si = @{
     OriginalPrompt = $function:prompt
     LastHistoryId  = -1
     HasPSReadLine  = $null -ne (Get-Module -Name PSReadLine)
-    OrigPredStyle  = $null
-    PredStyle      = $null
 }
 
-# 元の PredictionViewStyle を記憶（狭ペインでの自動退避＆復元に使う）。
+# orb は分割多用ターミナルのため PSReadLine 予測を InlineView に固定する。
+# ListView は「幅50・高さ5」未満で警告を出し、リサイズに prompt 単位でしか追従できず
+# 分割直後の警告を防げない。予測自体は1行インラインで残る。元の好みは orb の外では不変
+# （この pwsh プロセス内だけの変更）。
 if ($global:__orb_si.HasPSReadLine) {
-    try { $global:__orb_si.OrigPredStyle = (Get-PSReadLineOption).PredictionViewStyle } catch {}
+    try { Set-PSReadLineOption -PredictionViewStyle InlineView -ErrorAction SilentlyContinue } catch {}
 }
 
 $global:__orb_ESC = [char]0x1b
@@ -70,19 +71,6 @@ function global:prompt {
 
     $h = Get-History -Count 1
     if ($h) { $global:__orb_si.LastHistoryId = $h.Id }
-
-    # 狭い/低いペイン(幅<50 または 高さ<5)では PSReadLine の ListView 予測が
-    # 警告を連発するため InlineView に退避（元が ListView の人のみ。広く戻れば ListView 復元）。
-    if ($global:__orb_si.HasPSReadLine -and $global:__orb_si.OrigPredStyle -eq 'ListView') {
-        # PSReadLine 自身が見るのと同じ [Console] のサイズで判定（ConPTY では RawUI とズレる）。
-        $cw = 80; $ch = 24
-        try { $cw = [Console]::WindowWidth; $ch = [Console]::WindowHeight } catch {}
-        $want = if ($cw -lt 50 -or $ch -lt 5) { 'InlineView' } else { 'ListView' }
-        if ($global:__orb_si.PredStyle -ne $want) {
-            try { Set-PSReadLineOption -PredictionViewStyle $want -ErrorAction SilentlyContinue } catch {}
-            $global:__orb_si.PredStyle = $want
-        }
-    }
 
     return $out
 }
