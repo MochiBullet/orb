@@ -121,6 +121,17 @@ export function newTab(lay?: PaneNode) {
   tabWelcome.update((n) => n + 1); // 新規タブで小さな welcome を出す
 }
 
+/** 案件ランチャー用: 新しいタブで案件を開く（既存タブを潰さない・#38）。
+ *  ai ペイン ID と案件名（タブ名）を設定する。SESSION_KEY 永続化で名前ごと復元される。 */
+export function openProjectTab(lay: PaneNode, aiPaneId: number, name: string) {
+  saveActive();
+  const t: Tab = { id: nextPaneId(), layout: lay, focused: aiPaneId, ai: aiPaneId, name };
+  tabs.update((ts) => [...ts, t]);
+  activeTabId.set(t.id);
+  loadTab(t);
+  tabWelcome.update((n) => n + 1);
+}
+
 export function switchTab(id: number) {
   if (id === get(activeTabId)) return;
   saveActive();
