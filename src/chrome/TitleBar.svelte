@@ -104,6 +104,8 @@
   }
   .mark {
     flex: 0 0 auto;
+    /* クリックを .brand（data-tauri-drag-region）へ透過させ、ロゴ上でも窓ドラッグを維持。 */
+    pointer-events: none;
     filter: drop-shadow(0 0 4px rgba(45, 212, 191, 0.55))
       drop-shadow(0 0 6px rgba(167, 139, 250, 0.3));
   }
@@ -113,6 +115,8 @@
     font-size: 0.82rem;
     color: var(--teal);
     text-shadow: 0 0 12px rgba(45, 212, 191, 0.5);
+    /* ORB 文字上のクリックも .brand へ透過＝窓ドラッグを維持（子要素化での回帰防止）。 */
+    pointer-events: none;
   }
   .cwd {
     font-size: 0.72rem;
