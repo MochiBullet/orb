@@ -115,16 +115,47 @@ pub fn fetch_mcp_health() -> Vec<McpHealth> {
         return Vec::new();
     };
 
-    // 出力先が stdout / stderr どちらでも拾えるよう両方を連結してパースする
-    // （有効行＝`<name>: … - <status>` だけ拾うのでヘッダ行が混じっても無害）。
-    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-    text.push('\n');
-    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    // 出力先が stdout / stderr どちらでも拾えるよう両方を連結してパースする。
+    let mut raw = String::from_utf8_lossy(&out.stdout).into_owned();
+    raw.push('\n');
+    raw.push_str(&String::from_utf8_lossy(&out.stderr));
+    parse_mcp_health(&raw)
+}
 
+/// ANSI エスケープ（CSI: `ESC [ … 最終バイト(0x40-0x7e)`）を除去して平文化する。
+/// `claude mcp list` が色付きで出力する環境でも名前抽出・状態判定が壊れないよう、
+/// パース前に一度剥がす（監査 wf_aabcbab7 の PLAUSIBLE 指摘への堅牢化）。
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            // ESC の次が '[' なら CSI。最終バイト(0x40..=0x7e)まで読み飛ばす。
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                while let Some(nc) = chars.next() {
+                    if ('\u{40}'..='\u{7e}').contains(&nc) {
+                        break;
+                    }
+                }
+            }
+            // ESC 単体・非 CSI は ESC を落とすだけ
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// `claude mcp list` 出力テキストから各サーバの生死を判定する
+/// （プロセス起動と分離＝単体テスト可能）。
+fn parse_mcp_health(raw: &str) -> Vec<McpHealth> {
+    let text = strip_ansi(raw);
     let mut result = Vec::new();
     for line in text.lines() {
         // 期待形式: "<name>: <url/cmd> - <marker> <status text>"
         // ヘッダ行 "Checking MCP server health…"（`:` 無し）や空行はここで弾かれる。
+        // URL 内の ':' は split_once(':') が最初の ':' で切るので名前抽出に影響しない。
         let Some((name, rest)) = line.split_once(':') else {
             continue;
         };
@@ -149,4 +180,30 @@ pub fn fetch_mcp_health() -> Vec<McpHealth> {
         });
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_plain_url_and_ansi_lines() {
+        let sample = "Checking MCP server health…\n\
+            playwright: cmd /c npx -y @playwright/mcp@latest - ✔ Connected\n\
+            cloudflare-docs: https://docs.mcp.cloudflare.com/mcp (HTTP) - ✔ Connected\n\
+            claude.ai Gmail: https://gmailmcp.googleapis.com/mcp/v1 - ! Needs authentication\n\
+            \u{1b}[1mcontext7\u{1b}[0m: cmd /c npx -y @upstash/context7-mcp - \u{1b}[32m✔ Connected\u{1b}[0m\n\
+            broken: some cmd - ✗ Failed to connect\n";
+        let r = parse_mcp_health(sample);
+        let find = |n: &str| r.iter().find(|h| h.name == n).map(|h| h.status.as_str());
+        assert_eq!(find("playwright"), Some("connected"));
+        // URL 内の ':' に惑わされず first-colon で名前を取り、短縮名になる
+        assert_eq!(find("cf-docs"), Some("connected"));
+        assert_eq!(find("claude.ai Gmail"), Some("needs_auth"));
+        // ANSI 装飾を剥がして context7 -> ctx7 / connected
+        assert_eq!(find("ctx7"), Some("connected"));
+        assert_eq!(find("broken"), Some("failed"));
+        // ヘッダ行（": " を含まない）は拾われない
+        assert!(!r.iter().any(|h| h.name.contains("Checking")));
+    }
 }

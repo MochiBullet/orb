@@ -39,11 +39,14 @@ pub fn get_claude_status(cwd: Option<String>) -> crate::status::ClaudeStatus {
     crate::status::fetch_status(cwd)
 }
 
-/// `claude mcp list` 実測の MCP 生死（サイドバーのチップ色用）。数秒かかる重い呼び出しなので
-/// フロントからは長間隔＋手動リロード時のみ。ブロッキングは Tauri が別スレッドで実行する。
+/// `claude mcp list` 実測の MCP 生死（サイドバーのチップ色用）。数秒かかる重いブロッキング処理。
+/// Tauri v2 の同期コマンドはメインスレッドで走り UI を固めるため、async にして
+/// `spawn_blocking` でブロッキング処理を専用スレッドプールへ逃がす（起動時＋5分毎＋手動↻で発火）。
 #[tauri::command]
-pub fn get_mcp_health() -> Vec<crate::status::McpHealth> {
-    crate::status::fetch_mcp_health()
+pub async fn get_mcp_health() -> Vec<crate::status::McpHealth> {
+    tauri::async_runtime::spawn_blocking(crate::status::fetch_mcp_health)
+        .await
+        .unwrap_or_default()
 }
 
 /// cwd の git ブランチ名（サイドバー用）。git 不在・非リポジトリ・detached は None。
