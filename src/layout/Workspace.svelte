@@ -21,12 +21,14 @@
   import Launcher from "./Launcher.svelte";
   import Settings from "../chrome/Settings.svelte";
   import CommandPalette, { type PaletteAction } from "../chrome/CommandPalette.svelte";
+  import BlockHistory from "../chrome/BlockHistory.svelte";
   import { grid2x2, columns3, columns2, mainStack } from "./presets";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { logError } from "../core/log";
 
   let showLauncher = $state(false);
+  let showHistory = $state(false); // #31: ブロック履歴オーバーレイ（耐久ログからの再描画）
   let zoomedPane = $state<number | null>(null);
   let wsEl: HTMLDivElement;
   const FULL: Rect = { x: 0, y: 0, w: 100, h: 100 };
@@ -131,7 +133,7 @@
   });
 
   function onKey(e: KeyboardEvent) {
-    if (showLauncher || get(showPalette) || get(showSettings)) return;
+    if (showLauncher || showHistory || get(showPalette) || get(showSettings)) return;
     // Ctrl+, : 設定
     if (e.ctrlKey && !e.shiftKey && e.key === ",") {
       e.preventDefault();
@@ -185,6 +187,9 @@
     } else if (k === "n") {
       e.preventDefault();
       dnd.update((d) => !d); // フォーカスモード(DND)切替 (Ctrl+Shift+N)
+    } else if (k === "h") {
+      e.preventDefault();
+      showHistory = true; // ブロック履歴 (Ctrl+Shift+H, #31)
     }
   }
 
@@ -220,6 +225,7 @@
       hint: "Ctrl+Shift+B",
       run: () => sidebarSide.update((s) => (s === "right" ? "left" : "right")),
     },
+    { label: "ブロック履歴 / Block history", hint: "Ctrl+Shift+H", run: () => (showHistory = true) },
     { label: "設定を開く", hint: "Ctrl+,", run: () => showSettings.set(true) },
     { label: "案件ランチャー", hint: "Ctrl+P", run: () => (showLauncher = true) },
     {
@@ -357,6 +363,10 @@
 
 {#if $showSettings}
   <Settings onClose={() => showSettings.set(false)} />
+{/if}
+
+{#if showHistory}
+  <BlockHistory onClose={() => (showHistory = false)} />
 {/if}
 
 {#if $showPalette}

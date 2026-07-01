@@ -106,7 +106,8 @@ pub fn seed_defaults() {
 }
 
 /// $XDG_CONFIG_HOME/orb（未設定なら ~/.config/orb）。
-fn config_dir() -> PathBuf {
+/// blocks.rs（#31 耐久ログ）も同じ基準ディレクトリを使うため pub(crate)。
+pub(crate) fn config_dir() -> PathBuf {
     if let Some(x) = std::env::var_os("XDG_CONFIG_HOME") {
         return PathBuf::from(x).join("orb");
     }

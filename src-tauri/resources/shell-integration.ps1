@@ -20,6 +20,9 @@ if (Get-Module PSReadLine) {
 $global:__orb_si = @{
     OriginalPrompt = $function:prompt
     LastHistoryId  = -1
+    # 現在ブロックが開いているか（A を出して D 未了）。空Enter等でコマンド未実行のときは
+    # このまま開き続け、A/D を重複させない＝幻ブロックで耐久ログ #31 を汚さない。
+    BlockOpen      = $false
     HasPSReadLine  = $null -ne (Get-Module -Name PSReadLine)
 }
 
@@ -53,20 +56,31 @@ function global:prompt {
     $LastOk = $?
     $FakeCode = [int](-not $LastOk)
 
+    # 前回プロンプト以降に「実際にコマンドが実行された」かを履歴 ID の前進で判定する
+    # （VS Code shell integration と同流儀）。空Enter・Ctrl+C で入力破棄・シェル内部の
+    # プロンプト再描画では履歴 ID が進まない＝コマンド未実行として D/A を出さない。
+    $h = Get-History -Count 1
+    $curId = if ($h) { [int]$h.Id } else { -1 }
+    $ranCommand = $curId -ne $global:__orb_si.LastHistoryId
+
     $out = ''
 
-    # D: 直前コマンド終了 + 終了コード（初回プロンプトでは出さない）。
-    if ($global:__orb_si.LastHistoryId -ne -1) {
+    # D: コマンドが実際に走ったら、開いているブロックを終了コード付きで閉じる。
+    if ($ranCommand -and $global:__orb_si.BlockOpen) {
         $code = if ($LastOk) { 0 } elseif ($LastExit) { $LastExit } else { 1 }
         $out += __orb_osc "D;$code"
+        $global:__orb_si.BlockOpen = $false
     }
 
-    # A: プロンプト開始。
-    $out += __orb_osc 'A'
-
-    # P: 作業ディレクトリ。
-    if ($pwd.Provider.Name -eq 'FileSystem') {
-        $out += __orb_osc "P;Cwd=$(__orb_escape $pwd.ProviderPath)"
+    # A: 開いているブロックが無ければ新ブロックを開く（初回 or D 直後）。
+    # 開いたままなら（空Enter等）新 A を出さず待機ブロックを継続＝幻ブロックを作らない。
+    $openBlock = -not $global:__orb_si.BlockOpen
+    if ($openBlock) {
+        $out += __orb_osc 'A'
+        # P: 作業ディレクトリ（新ブロックにだけ付ける）。
+        if ($pwd.Provider.Name -eq 'FileSystem') {
+            $out += __orb_osc "P;Cwd=$(__orb_escape $pwd.ProviderPath)"
+        }
     }
 
     # 元の prompt（starship 等）は $? / $LASTEXITCODE を見るので状態を復元してから呼ぶ。
@@ -75,11 +89,14 @@ function global:prompt {
 
     $out += [string]($global:__orb_si.OriginalPrompt.Invoke())
 
-    # B: コマンド入力開始（プロンプト表示の終端）。
-    $out += __orb_osc 'B'
+    # B: コマンド入力開始（新ブロックを開いたときだけ）。
+    if ($openBlock) {
+        $out += __orb_osc 'B'
+        $global:__orb_si.BlockOpen = $true
+    }
 
-    $h = Get-History -Count 1
-    if ($h) { $global:__orb_si.LastHistoryId = $h.Id }
+    # 次回比較用に履歴 ID を記録。
+    $global:__orb_si.LastHistoryId = $curId
 
     # PSReadLine は対話開始時に遅延ロードされ、起動時の設定が空振りすることがある。
     # prompt ごとに InlineView を強制し、ListView の「画面が小さい」警告を完全に根絶する。

@@ -1,3 +1,4 @@
+mod blocks;
 mod commands;
 mod config;
 mod error;
@@ -62,6 +63,8 @@ pub fn run() {
             commands::get_mcp_health,
             commands::get_git_branch,
             commands::open_in_editor,
+            blocks::append_block_event,
+            blocks::read_block_events,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -4,6 +4,7 @@ import { get } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
 import { shouldNotifyForPane, notifyThrottled } from "./notify";
 import { logError } from "../../core/log";
+import { logBlockEvent, genId } from "../../core/blocks-log";
 
 /**
  * OSC 133/633 の D マーカー payload（rest）から終了コードを解釈する純関数。
@@ -66,6 +67,8 @@ export class CommandBlocks {
   cwd = "";
   promptType = "";
   private cmdStart = 0;
+  /** #31: 現在のブロックの ID（プロンプト開始で採番、耐久ログの block_id に使う）。 */
+  private currentBlockId = "";
   /** この時間(ms)以上かかったコマンドだけ完了通知の対象にする。 */
   private static NOTIFY_MS = 6000;
 
@@ -101,12 +104,17 @@ export class CommandBlocks {
 
   private onPromptStart() {
     if (this.startMarker && !this.finished) {
-      this.decorate(this.startMarker, -1, null);
+      // D 欠落のまま次プロンプトが来た＝前ブロックを中断クローズ。現在位置を終端マーカーとして
+      // 捕捉し、装飾もログも中断(-1・aborted)で確定する。end=null だと本文が1行に潰れて失われる。
+      const endMarker = this.term.registerMarker(0);
+      this.decorate(this.startMarker, -1, endMarker ?? null);
+      this.logBlock(this.startMarker, endMarker ?? null, -1, true);
     }
     this.startMarker = this.term.registerMarker(0) ?? null;
     if (this.startMarker) this.promptMarkers.push(this.startMarker);
     this.finished = false;
     this.cmdStart = Date.now();
+    this.currentBlockId = genId();
   }
 
   private onFinished(rest: string) {
@@ -114,8 +122,34 @@ export class CommandBlocks {
     const code = parseExitCode(rest);
     const endMarker = this.term.registerMarker(0);
     this.decorate(this.startMarker, code, endMarker ?? null);
+    this.logBlock(this.startMarker, endMarker ?? null, code, false);
     this.finished = true;
     this.notifyIfBackground(code);
+  }
+
+  /** #31: 確定/中断した 1 ブロックを耐久ログ（JSONL）へ追記する。
+   *  xterm からテキスト・cwd・時刻・exit を取り出し、レンダラ非依存の blocks-log へ渡す。
+   *  command / output_body は #33（B/C マーカー）まで null（嘘の分割を書かない）。
+   *  aborted=true は「D を受け取らず次プロンプト/破棄で閉じた」＝中断（-1 の内訳を #34 が判別可能に）。
+   *  ログ整形は同期実行なので、万一の例外で OSC ハンドラ（true を返す契約）を壊さないよう握り潰す。 */
+  private logBlock(start: IMarker, end: IMarker | null, code: number, aborted: boolean) {
+    if (!this.currentBlockId || this.cmdStart === 0) return;
+    try {
+      logBlockEvent({
+        paneId: this.paneId,
+        blockId: this.currentBlockId,
+        cwd: this.cwd,
+        shell: "pwsh",
+        promptType: this.promptType,
+        exitCode: code,
+        aborted,
+        startedAt: this.cmdStart,
+        endedAt: Date.now(),
+        text: this.blockText(start, end),
+      });
+    } catch (e) {
+      logError(`pane ${this.paneId}: block log build failed: ${String(e)}`);
+    }
   }
 
   /** 非フォーカスのペインで長時間コマンドが終わったら OS 通知（バイブコーディングの待ち時間用）。 */
@@ -272,6 +306,10 @@ export class CommandBlocks {
   }
 
   dispose() {
+    // dispose 時の中断ログはあえて残さない：コマンド開始信号（OSC 133 C）が無い現状では
+    // 「実行中コマンドを抱えたまま閉じた」と「アイドルのプロンプトで閉じただけ」を区別できず、
+    // ペインを閉じるたびに末尾のアイドルブロックが aborted -1 のゴミ記録になる（#3 の幻ブロックと同質）。
+    // 実行中コマンドの取りこぼし捕捉は、C マーカーで開始を検知できる #33 で gate 付きで入れる。
     for (const d of this.decorations) d.dispose();
     for (const d of this.disposables) d.dispose();
     this.decorations = [];
