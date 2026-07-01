@@ -42,8 +42,6 @@ export class CommandBlocks {
   constructor(
     private term: Terminal,
     private paneId: number,
-    /** 最初のプロンプト開始（OSC 633/133 の A）で一度呼ぶ。#42: 「shell starting…」を消す用。 */
-    private onPromptStartCb?: () => void,
   ) {
     this.disposables.push(term.parser.registerOscHandler(633, (d) => this.handle(d)));
     this.disposables.push(term.parser.registerOscHandler(133, (d) => this.handle(d)));
@@ -69,8 +67,6 @@ export class CommandBlocks {
   }
 
   private onPromptStart() {
-    // シェル準備完了の合図（#42）。プロンプトが出た＝profile ロード終了。冪等な購読側に委ねる。
-    this.onPromptStartCb?.();
     if (this.startMarker && !this.finished) {
       this.decorate(this.startMarker, -1, null);
     }

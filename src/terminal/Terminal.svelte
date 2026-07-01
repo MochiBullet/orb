@@ -15,16 +15,16 @@
     focusedPane,
     aiPane,
     showSettings,
-    showSplash,
     layout,
     broadcast,
     registerTermClear,
     unregisterTermClear,
     registerTermSerialize,
     unregisterTermSerialize,
+    registerTermWrite,
+    unregisterTermWrite,
     registerPaneInput,
     unregisterPaneInput,
-    consumeScrollback,
     saveOneScrollback,
   } from "../store/appStore";
   import { leafIds } from "../layout/tree";
@@ -59,19 +59,10 @@
   let termReady = $state(false);
   let ligatureJoinerId: number | undefined;
   let scrolledUp = $state(false);
-  // #42: 起動時、pwsh の profile ロード（starship/zoxide/fzf/PSReadLine）に 2〜5s かかる間は
-  // 無出力でフリーズに見える。マウント〜シェル準備完了まで小さな「shell starting…」チップを出す。
-  // 消えるのは先着した方: (a) OSC 633;A プロンプト開始 / (b) 最初の実 PTY 出力。固定タイマーは使わない。
-  let shellStarting = $state(true);
   const encoder = new TextEncoder();
 
-  // シェル準備完了でチップを消す（冪等）。onData（最初の実出力）と OSC 633;A の双方から呼ばれる。
-  function markShellReady() {
-    if (shellStarting) shellStarting = false;
-  }
-
   // 起動直後の入力ロス対策（#39）: 入力ハンドラは spawn より前に張り、PTY が未起動の間の
-  // 打鍵（スプラッシュの最初の一打を含む）はここに溜めて spawn 完了時に順番どおり流す。
+  // 打鍵（起動直後の最初の一打を含む）はここに溜めて spawn 完了時に順番どおり流す。
   let inputBuffer: Array<{ bytes: Uint8Array; binary: boolean }> = [];
   let ptyReady = false;
 
@@ -90,7 +81,7 @@
       );
     }
   }
-  // spawn 前は溜め、spawn 後は即書き込む。スプラッシュ／xterm 双方の入力経路がここに集約される。
+  // spawn 前は溜め、spawn 後は即書き込む。xterm・外部の入力経路がここに集約される。
   function enqueueInput(bytes: Uint8Array, binary = false) {
     if (!ptyReady) {
       inputBuffer.push({ bytes, binary });
@@ -180,8 +171,7 @@
   // 設定パネルを閉じた瞬間も（$showSettings が false になったら）端末へ戻す
   // ＝設定内の input にフォーカスが残って入力が吸われるのを防ぐ。
   $effect(() => {
-    // スプラッシュ表示中は端末にフォーカスしない＝Enter で閉じた瞬間に確実に戻す。
-    if ($focusedPane === paneId && !$showSettings && !$showSplash) term?.focus();
+    if ($focusedPane === paneId && !$showSettings) term?.focus();
   });
 
   // ウィンドウ復帰時、フォーカスペインの端末へ確実にフォーカスを戻す。
@@ -200,7 +190,7 @@
   function refocusIfMine() {
     if (disposed || composing) return;
     const ok = () =>
-      get(focusedPane) === paneId && !get(showSettings) && !get(showSplash);
+      get(focusedPane) === paneId && !get(showSettings);
     if (!ok()) return;
     // 既に自分の端末にフォーカスがあるなら触らない。IME 候補ウィンドウ出現等で
     // 焦点が外れていないのに focus() を呼ぶと日本語変換が中断されるのを防ぐ。
@@ -352,16 +342,8 @@
     fit.fit();
     logInfo(`pane ${paneId}: startPty (cols=${term.cols} rows=${term.rows})`);
 
-    // 前回セッションの画面内容を復元（あれば）。読み取り専用の過去ログとして書き戻し、
-    // 区切りの下に新しい pwsh を起動する＝continue/resume なしで前回の表示が戻る。
-    const prior = consumeScrollback(paneId);
-    if (prior) {
-      term.write(prior);
-      term.write(
-        "\r\n\x1b[38;5;108m──────── orb · 前回のセッション（上は記録／ここから新しいシェル）────────\x1b[0m\r\n",
-      );
-      logInfo(`pane ${paneId}: restored scrollback (${prior.length} bytes)`);
-    }
+    // #43: 起動時の自動書き戻し（前回スクロールバックの復元）は廃止。空のシェルで即起動する
+    // ＝古いログ・区切りを出さない。前回セッションはパレット「前回のセッションを復元」から任意で。
 
     pty = new PtyClient(paneId);
     try {
@@ -369,7 +351,6 @@
         term.cols,
         term.rows,
         (bytes) => {
-          markShellReady(); // #42: 最初の実 PTY 出力でチップを消す（先着トリガの一方）。
           term?.write(bytes);
           scheduleScrollbackSave();
         },
@@ -390,7 +371,7 @@
       return;
     }
 
-    // spawn 完了。溜まっていた入力（スプラッシュの最初の一打・spawn 待ちの打鍵）を
+    // spawn 完了。溜まっていた入力（起動直後の最初の一打・spawn 待ちの打鍵）を
     // 登録順に流す＝1打も落とさず順序も保つ。以降 enqueueInput は即時書き込みになる。
     ptyReady = true;
     for (const item of inputBuffer) writeInputNow(item.bytes, item.binary);
@@ -450,8 +431,10 @@
       for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xff;
       enqueueInput(bytes, true);
     });
-    // スプラッシュ表示中（端末未フォーカス）の打鍵をこのペインの入力経路へ流せるよう登録。
+    // 端末未フォーカス時の外部入力ソースからの打鍵をこのペインの入力経路へ流せるよう登録（#39）。
     registerPaneInput(paneId, (bytes) => enqueueInput(bytes));
+    // オンデマンドの前回セッション復元（パレット）で、退避した画面内容をこの端末へ書き戻す用。
+    registerTermWrite(paneId, (text) => term?.write(text));
 
     // file:line リンク（#37）。WebLinksAddon(URL) とは別パターンなので併存させる。
     linkProvider = term.registerLinkProvider({
@@ -508,8 +491,7 @@
       console.warn("[orb] WebGL addon unavailable, using fallback renderer", e);
     }
 
-    // #42: OSC 633;A（プロンプト開始）到達でも「shell starting…」を消す（先着トリガのもう一方）。
-    blocks = new CommandBlocks(term, paneId, markShellReady);
+    blocks = new CommandBlocks(term, paneId);
 
     // 合字 $effect の初回登録を解禁（term.open 済みでないと joiner を張れない）。
     termReady = true;
@@ -599,6 +581,7 @@
     if (resizeTimer) clearTimeout(resizeTimer);
     if (scrollbackTimer) clearTimeout(scrollbackTimer);
     unregisterTermClear(paneId);
+    unregisterTermWrite(paneId);
     unregisterPaneInput(paneId);
     inputBuffer = [];
     container?.removeEventListener("keydown", onCopyPaste, true);
@@ -626,14 +609,6 @@
   class:broadcast={$broadcast}
 >
   <div class="term" bind:this={container} onpointerdown={focusThis} role="presentation"></div>
-
-  {#if shellStarting}
-    <!-- #42: 起動レイテンシの体感フリーズ解消。全画面を覆わない小チップ（復元スクロールバックを隠さない）。 -->
-    <div class="shell-starting" role="status" aria-live="polite">
-      <span class="ss-dot"></span>
-      shell starting…
-    </div>
-  {/if}
 
   {#if showSearch}
     <div class="search-bar">
@@ -775,68 +750,6 @@
     to {
       opacity: 1;
       transform: none;
-    }
-  }
-
-  /* #42: 起動中の「shell starting…」チップ。左下に控えめに。全画面を覆わず復元スクロールバックを隠さない。
-     アニメは transform/opacity のみ（compositor-only, PERFORMANCE 準拠）。teal/neon on black。 */
-  .shell-starting {
-    position: absolute;
-    left: 14px;
-    bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 4px 11px;
-    background: #05100e;
-    border: 1px solid rgba(45, 212, 191, 0.4);
-    border-radius: 999px;
-    box-shadow: 0 4px 18px -6px rgba(45, 212, 191, 0.5);
-    color: var(--teal);
-    font-family: inherit;
-    font-size: 0.72rem;
-    letter-spacing: 0.04em;
-    pointer-events: none;
-    z-index: 9;
-    animation: ss-in 0.16s ease-out;
-  }
-  .ss-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--teal);
-    box-shadow: 0 0 8px rgba(45, 212, 191, 0.85);
-    animation: ss-pulse 1.15s ease-in-out infinite;
-  }
-  @keyframes ss-in {
-    from {
-      opacity: 0;
-      transform: translateY(6px);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
-  }
-  @keyframes ss-pulse {
-    0%,
-    100% {
-      opacity: 0.35;
-      transform: scale(0.8);
-    }
-    50% {
-      opacity: 1;
-      transform: scale(1.15);
-    }
-  }
-  /* 動き軽減設定では無限パルスを止める（点は残す）。 */
-  @media (prefers-reduced-motion: reduce) {
-    .shell-starting {
-      animation: none;
-    }
-    .ss-dot {
-      animation: none;
-      opacity: 0.85;
     }
   }
 

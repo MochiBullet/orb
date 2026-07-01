@@ -7,7 +7,6 @@ export interface OrbConfig {
   scrollback: number;
   accent: string;
   ligatures: boolean;
-  show_opening: boolean;
 }
 
 const DEFAULT: OrbConfig = {
@@ -16,7 +15,6 @@ const DEFAULT: OrbConfig = {
   scrollback: 1000,
   accent: "#2dd4bf",
   ligatures: true,
-  show_opening: true,
 };
 
 /** ~/.config/orb/config.toml の内容。起動時に loadConfig() で埋める。 */

@@ -1,19 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { get } from "svelte/store";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import TitleBar from "./chrome/TitleBar.svelte";
   import TabBar from "./chrome/TabBar.svelte";
   import Sidebar from "./chrome/Sidebar.svelte";
   import Workspace from "./layout/Workspace.svelte";
-  import Splash from "./chrome/Splash.svelte";
-  import { sidebarSide, showSplash, saveScrollbacks } from "./store/appStore";
-  import { config } from "./core/config";
+  import { sidebarSide, saveScrollbacks } from "./store/appStore";
 
-  // 起動時オープニング（設定 show_opening が false なら出さない）。
   onMount(() => {
-    if (get(config).show_opening !== false) showSplash.set(true);
-
     // アプリ終了/リロード時に各ペインの画面内容を保存（再起動で過去ログとして復元）。
     window.addEventListener("beforeunload", saveScrollbacks);
     let unlisten: (() => void) | undefined;
@@ -38,10 +32,6 @@
     <Sidebar />
   </div>
 </div>
-
-{#if $showSplash}
-  <Splash />
-{/if}
 
 <style>
   .app {

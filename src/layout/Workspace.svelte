@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, showSplash, tabWelcome, dnd } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd } from "../store/appStore";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -222,8 +222,24 @@
     },
     { label: "設定を開く", hint: "Ctrl+,", run: () => showSettings.set(true) },
     { label: "案件ランチャー", hint: "Ctrl+P", run: () => (showLauncher = true) },
-    { label: "オープニング: 再生", hint: "WELCOME ORB", run: () => showSplash.set(true) },
+    {
+      label: "前回のセッションを復元 / Restore previous session",
+      hint: "保存済みスクロールバック",
+      run: () => restorePreviousSession(),
+    },
   ];
+
+  // フォーカス中ペインへ、退避しておいた前回セッションの画面内容を書き戻す（#43: オンデマンド復元）。
+  // 起動時の自動書き戻しは廃止したので、必要な時だけこのコマンドで戻す。
+  function restorePreviousSession() {
+    const pid = get(focusedPane);
+    const prior = consumeScrollback(pid);
+    if (!prior) return;
+    writeToPane(
+      pid,
+      "\r\n\x1b[38;5;108m──────── orb · 前回のセッション（復元）────────\x1b[0m\r\n" + prior + "\r\n",
+    );
+  }
 
   function doSplit(dir: "h" | "v") {
     zoomedPane = null;

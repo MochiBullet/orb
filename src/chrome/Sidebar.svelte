@@ -17,6 +17,7 @@
   let healthLoading = $state(false);
   let timer: number | undefined;
   let healthTimer: number | undefined;
+  let healthDeferTimer: number | undefined;
   let clock: number | undefined;
 
   let paneCount = $derived($layout ? leafIds($layout).length : 0);
@@ -67,7 +68,6 @@
   // 値が入るまで数回だけ短間隔で再試行する。以後は 30s 間隔。
   async function initialLoad() {
     refreshStatus();
-    void refreshHealth(); // 初回の生死（非同期・独立、重いが UI はブロックしない）
     for (let i = 0; i < 4 && !usage; i++) {
       await refreshUsage();
       if (usage) break;
@@ -81,6 +81,8 @@
       refreshUsage();
       refreshStatus();
     }, 30000);
+    // MCP 生死は重い（数秒）ので起動処理から外し、起動が落ち着いた頃に一度だけ実行（#43: 起動高速化）。
+    healthDeferTimer = window.setTimeout(() => void refreshHealth(), 3000);
     // 生死は重いので usage/status とは別に 5 分間隔。鮮度は ↻ 手動リロードで補う。
     healthTimer = window.setInterval(() => void refreshHealth(), 300000);
     clock = window.setInterval(() => (now = Date.now()), 10000);
@@ -88,6 +90,7 @@
   onDestroy(() => {
     if (timer) clearInterval(timer);
     if (healthTimer) clearInterval(healthTimer);
+    if (healthDeferTimer) clearTimeout(healthDeferTimer);
     if (clock) clearInterval(clock);
   });
 

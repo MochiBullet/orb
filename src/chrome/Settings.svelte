@@ -67,10 +67,6 @@
       <span>合字 (=&gt; != -&gt; 等)</span>
       <input type="checkbox" bind:checked={draft.ligatures} />
     </label>
-    <label class="toggle">
-      <span>起動時オープニング (WELCOME ORB)</span>
-      <input type="checkbox" bind:checked={draft.show_opening} />
-    </label>
     <div class="note">フォント・アクセント色・合字は保存で反映 / スクロールバックは新しいペインから反映</div>
 
     <div class="btns">

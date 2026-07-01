@@ -96,14 +96,16 @@ export function ensureFirstTab() {
         const active = data.tabs.find((t) => t.id === data.active) ?? data.tabs[0];
         activeTabId.set(active.id);
         loadTab(active);
-        primeScrollbackRestore(true); // セッション復元成立＝各ペインの過去ログ復元を解禁
+        // #43: 起動時は自動復元しない（速度）。前回の scrollback はメモリへ退避され、
+        // パレット「前回のセッションを復元」からオンデマンドで書き戻せる。
+        primeScrollbackRestore(false);
         return;
       }
     }
   } catch {
     /* 壊れたセッションは無視して新規 */
   }
-  primeScrollbackRestore(false); // 新規起動＝前回の scrollback は復元せず掃除する
+  primeScrollbackRestore(false); // #43: 起動時は自動復元しない（新規起動でも同様）
   const t = makeTab();
   tabs.set([t]);
   activeTabId.set(t.id);

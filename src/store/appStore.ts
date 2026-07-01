@@ -49,11 +49,8 @@ function persistedBool(key: string, fallback: boolean) {
  *  永続なので「起動のたびに有効化」は不要＝一度 ON にすれば以後そのまま。 */
 export const dnd = persistedBool("orb.dnd", false);
 
-/** 起動時オープニング（WELCOME ORB スプラッシュ）の表示状態。App 起動時 / パレットの再生から true。 */
-export const showSplash = writable(false);
-
 /** 新規タブ作成のたびに増えるカウンタ。Workspace が購読して小さな welcome を一瞬出す。
- *  初回タブ/セッション復元（ensureFirstTab）では増やさない＝起動スプラッシュと二重で出さない。 */
+ *  初回タブ/セッション復元（ensureFirstTab）では増やさない＝起動直後に余計な演出を出さない。 */
 export const tabWelcome = writable(0);
 
 /** ペインごとの画面クリア関数レジストリ（paneId→term.clear）。
@@ -80,8 +77,8 @@ export function unregisterPaneInput(paneId: number) {
   paneInputRegistry.delete(paneId);
 }
 /** フォーカス中ペイン（無ければ任意の1ペイン）の端末入力経路へバイト列を届ける。
- *  起動スプラッシュがまだ端末にフォーカスを渡していない間の打鍵を PTY へ流すのに使う。
- *  戻り値は届け先が在ったか（＝消えずに済んだか）。 */
+ *  端末未フォーカス時の外部入力ソースからフォーカスペインの入力経路（#39 バッファ）へ
+ *  打鍵を流すのに使う。戻り値は届け先が在ったか（＝消えずに済んだか）。 */
 export function sendInputToFocusedPane(bytes: Uint8Array): boolean {
   const fn = paneInputRegistry.get(get(focusedPane)) ?? paneInputRegistry.values().next().value;
   if (!fn) return false;
@@ -147,40 +144,54 @@ export function saveOneScrollback(paneId: number, text: string) {
   }
 }
 
-// scrollback の復元はセッション(orb.session)復元が成立した時だけ許可する。
-// 新規起動で前回ログを別ペインへ誤って書き戻すのを防ぐ。ensureFirstTab が一度だけ確定させる。
+// 前回セッションの scrollback を起動時に一度だけメモリ(restoreCache)へ退避しておく。
+// #43: 起動時の自動書き戻し（eager restore）は速度のため廃止。退避したスナップショットは
+// パレットの「前回のセッションを復元」からオンデマンドでのみ消費する。ensureFirstTab が
+// 一度だけ確定させる（セッション中の saveOneScrollback が localStorage を上書きしても、
+// 前回分はこの時点でメモリへ写してあるので失われない）。
 let restoreCache: Record<number, string> | null = null;
 let restorePrimed = false;
 
-/** ensureFirstTab から一度だけ呼ぶ。enabled=true で保存済み scrollback を読み込み、
- *  false（新規起動）では古い保存を掃除して復元しない。 */
+/** ensureFirstTab から一度だけ呼ぶ。保存済み scrollback をメモリへ読み込み、オンデマンド
+ *  復元で使えるよう退避する。#43 以降は起動時の自動書き戻しをしないため、引数 enabled は
+ *  互換のための残置（自動復元の可否を分岐していた名残）で、常にスナップショットのみ退避する。 */
 export function primeScrollbackRestore(enabled: boolean) {
+  void enabled; // #43: 自動復元は廃止。分岐せず常にオンデマンド用スナップショットを退避。
   if (restorePrimed) return;
   restorePrimed = true;
-  if (enabled) {
-    try {
-      const raw = localStorage.getItem(SCROLLBACK_KEY);
-      restoreCache = raw ? JSON.parse(raw) : null;
-    } catch {
-      restoreCache = null;
-    }
-  } else {
+  try {
+    const raw = localStorage.getItem(SCROLLBACK_KEY);
+    restoreCache = raw ? JSON.parse(raw) : null;
+  } catch {
     restoreCache = null;
-    try {
-      localStorage.removeItem(SCROLLBACK_KEY);
-    } catch {
-      /* noop */
-    }
   }
 }
 
-/** 指定ペインの保存済み画面内容を取り出す（消費。再 spawn では二度と復元しない）。 */
+/** 指定ペインの保存済み画面内容を取り出す（消費。一度取り出したら二度は返さない）。
+ *  オンデマンド復元（パレット）から呼ぶ。 */
 export function consumeScrollback(paneId: number): string | undefined {
   if (!restoreCache) return undefined;
   const text = restoreCache[paneId];
   if (text === undefined) return undefined;
   delete restoreCache[paneId];
   return text;
+}
+
+/** ペインごとの端末書き込みシンク（paneId→term.write）。オンデマンドの前回セッション復元で、
+ *  退避しておいた画面内容をそのペインの端末へ書き戻すのに使う（registerTermClear と同じ流儀）。 */
+const termWriteRegistry = new Map<number, (text: string) => void>();
+export function registerTermWrite(paneId: number, fn: (text: string) => void) {
+  termWriteRegistry.set(paneId, fn);
+}
+export function unregisterTermWrite(paneId: number) {
+  termWriteRegistry.delete(paneId);
+}
+/** 指定ペインの端末へ文字列（ANSI 可）を書き込む。前回セッション復元で使う。 */
+export function writeToPane(paneId: number, text: string): boolean {
+  const fn = termWriteRegistry.get(paneId);
+  if (!fn) return false;
+  fn(text);
+  return true;
 }
 
 /** ペインごとの cwd レジストリ。focus 切替時に旧ペイン値が残置しないよう、

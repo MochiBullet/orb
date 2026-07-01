@@ -38,9 +38,6 @@ fn default_accent() -> String {
 fn default_ligatures() -> bool {
     true
 }
-fn default_show_opening() -> bool {
-    true
-}
 
 /// orb 本体の設定（config.toml）。
 #[derive(Serialize, Deserialize, Clone)]
@@ -56,9 +53,6 @@ pub struct Config {
     /// プログラミング合字（=> != -> 等）を character joiner で繋げて表示。
     #[serde(default = "default_ligatures")]
     pub ligatures: bool,
-    /// 起動時の WELCOME ORB オープニング（スプラッシュ）を表示。
-    #[serde(default = "default_show_opening")]
-    pub show_opening: bool,
 }
 
 impl Default for Config {
@@ -69,7 +63,6 @@ impl Default for Config {
             scrollback: default_scrollback(),
             accent: default_accent(),
             ligatures: default_ligatures(),
-            show_opening: default_show_opening(),
         }
     }
 }
