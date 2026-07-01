@@ -5,12 +5,13 @@
   import { FitAddon } from "@xterm/addon-fit";
   import { WebglAddon } from "@xterm/addon-webgl";
   import { Unicode11Addon } from "@xterm/addon-unicode11";
-  import { ClipboardAddon } from "@xterm/addon-clipboard";
+  import { ClipboardAddon, Base64 } from "@xterm/addon-clipboard";
   import { SearchAddon } from "@xterm/addon-search";
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import { SerializeAddon } from "@xterm/addon-serialize";
   import { PtyClient } from "../core/pty";
   import { CommandBlocks } from "./blocks/osc";
+  import { orbClipboardProvider } from "./blocks/clipboard";
   import {
     focusedPane,
     aiPane,
@@ -131,11 +132,13 @@
     const sel = term?.getSelection();
     if (sel) void navigator.clipboard.writeText(sel);
   }
-  // 右クリックでペースト（クリップボードの内容を PTY へ）。
+  // 右クリックでペースト。#37: 生バイト直書きではなく term.paste() 経由にする＝
+  // bracketed paste（DECSET 2004）が付き、onData→enqueueInput を通るので #39 バッファ・
+  // #40 エラー処理・broadcast にも一本で乗る（Ctrl+V と同じ挙動）。
   function onContextMenu(e: MouseEvent) {
     e.preventDefault();
     void navigator.clipboard.readText().then((t) => {
-      if (t) pty?.write(encoder.encode(t))?.catch((e) => logError(`pane ${paneId}: paste write failed: ${String(e)}`));
+      if (t) term?.paste(t);
     });
   }
 
@@ -411,7 +414,8 @@
     term.loadAddon(unicode);
     term.unicode.activeVersion = "11";
 
-    term.loadAddon(new ClipboardAddon());
+    // #35: OSC 52 は write のみ許可、read は default-deny（orbClipboardProvider）。
+    term.loadAddon(new ClipboardAddon(new Base64(), orbClipboardProvider));
     search = new SearchAddon();
     term.loadAddon(search);
 
