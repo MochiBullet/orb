@@ -24,6 +24,7 @@
   import { grid2x2, columns3, columns2, mainStack } from "./presets";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
+  import { logError } from "../core/log";
 
   let showLauncher = $state(false);
   let zoomedPane = $state<number | null>(null);
@@ -55,7 +56,9 @@
     if (target == null || !paths?.length) return;
     const base = get(cwdStore);
     const text = paths.map((p) => quotePath(relToCwd(p, base))).join(" ") + " ";
-    void invoke("write_pty", { paneId: target, data: Array.from(dropEncoder.encode(text)) });
+    void invoke("write_pty", { paneId: target, data: Array.from(dropEncoder.encode(text)) }).catch(
+      (e) => logError(`pane ${target}: drag-drop write failed: ${String(e)}`),
+    );
   }
 
   // アクティブタブは最新の $layout、非アクティブは保存済み layout を使う。

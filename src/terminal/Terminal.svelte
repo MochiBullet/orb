@@ -104,7 +104,7 @@
   function onContextMenu(e: MouseEvent) {
     e.preventDefault();
     void navigator.clipboard.readText().then((t) => {
-      if (t) pty?.write(encoder.encode(t));
+      if (t) pty?.write(encoder.encode(t))?.catch((e) => logError(`pane ${paneId}: paste write failed: ${String(e)}`));
     });
   }
 
@@ -119,7 +119,9 @@
     if (target == null || target === paneId) return;
     const sel = term?.getSelection() ?? "";
     if (!sel) return;
-    void invoke("write_pty", { paneId: target, data: Array.from(encoder.encode(sel)) });
+    void invoke("write_pty", { paneId: target, data: Array.from(encoder.encode(sel)) }).catch((e) =>
+      logError(`pane ${target}: send-to-AI write failed: ${String(e)}`),
+    );
   }
 
   // semantic history（VIBE_IDEAS #37）: 出力中の `src/foo.ts:42` 形をクリックで開く。
@@ -333,16 +335,18 @@
       if (get(broadcast)) {
         // ブロードキャスト中はフォーカスペインの入力を全ペインへ複製。
         for (const id of leafIds(get(layout))) {
-          void invoke("write_pty", { paneId: id, data: Array.from(bytes) });
+          void invoke("write_pty", { paneId: id, data: Array.from(bytes) }).catch((e) =>
+            logError(`pane ${id}: broadcast write failed: ${String(e)}`),
+          );
         }
       } else {
-        pty?.write(bytes);
+        pty?.write(bytes)?.catch((e) => logError(`pane ${paneId}: input write failed: ${String(e)}`));
       }
     });
     term.onBinary((data) => {
       const bytes = new Uint8Array(data.length);
       for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xff;
-      pty?.write(bytes);
+      pty?.write(bytes)?.catch((e) => logError(`pane ${paneId}: binary write failed: ${String(e)}`));
     });
   }
 

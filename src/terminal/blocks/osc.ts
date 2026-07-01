@@ -3,6 +3,7 @@ import { aiPane, setPaneCwd, focusedPane, dnd } from "../../store/appStore";
 import { get } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
 import { sendNotification } from "@tauri-apps/plugin-notification";
+import { logError } from "../../core/log";
 
 /**
  * OSC 133/633 マーカーを解釈して Warp 風のコマンドブロック装飾を出すコントローラ。
@@ -118,7 +119,10 @@ export class CommandBlocks {
     const target = get(aiPane);
     if (target == null || target === this.paneId) return;
     const t = this.blockText(start, end);
-    if (t) void invoke("write_pty", { paneId: target, data: Array.from(this.encoder.encode(t)) });
+    if (t)
+      void invoke("write_pty", { paneId: target, data: Array.from(this.encoder.encode(t)) }).catch(
+        (e) => logError(`pane ${target}: send-block-to-AI write failed: ${String(e)}`),
+      );
   }
 
   /** 失敗ブロック（exit≠0）を「これ直して」依頼として AI ペインへ送る（VIBE_IDEAS #2）。
@@ -130,7 +134,9 @@ export class CommandBlocks {
     if (!block) return;
     const ctx = this.cwd ? ` (cwd: ${this.cwd})` : "";
     const msg = `次のコマンドが exit ${code} で失敗しました${ctx}。原因を説明して、修正案（必要なら修正後のコマンド）を出して:\n\n${block}\n`;
-    void invoke("write_pty", { paneId: target, data: Array.from(this.encoder.encode(msg)) });
+    void invoke("write_pty", { paneId: target, data: Array.from(this.encoder.encode(msg)) }).catch(
+      (e) => logError(`pane ${target}: fix-with-AI write failed: ${String(e)}`),
+    );
   }
 
   private decorate(marker: IMarker, code: number, endMarker: IMarker | null) {
