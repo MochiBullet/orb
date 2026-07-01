@@ -59,6 +59,7 @@ pub fn run() {
             commands::save_config,
             commands::get_usage,
             commands::get_claude_status,
+            commands::get_mcp_health,
             commands::get_git_branch,
             commands::open_in_editor,
         ])

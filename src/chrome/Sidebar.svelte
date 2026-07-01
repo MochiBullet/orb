@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
   import { getUsage, type Usage } from "../core/usage";
-  import { getClaudeStatus, getGitBranch, type ClaudeStatus } from "../core/status";
+  import { getClaudeStatus, getGitBranch, getMcpHealth, type ClaudeStatus, type McpStatus } from "../core/status";
   import { cwd as cwdStore, layout, startedAt, sidebarSide } from "../store/appStore";
   import { tabs } from "../layout/tabs";
   import { leafIds } from "../layout/tree";
@@ -13,7 +13,10 @@
   let now = $state(Date.now());
   let wsOpen = $state(false);
   let branch = $state<string | null>(null);
+  let health = $state<Record<string, McpStatus>>({}); // 短縮名 -> 生死（claude mcp list 実測）
+  let healthLoading = $state(false);
   let timer: number | undefined;
+  let healthTimer: number | undefined;
   let clock: number | undefined;
 
   let paneCount = $derived($layout ? leafIds($layout).length : 0);
@@ -44,11 +47,27 @@
       /* settings 読めない時はサイドバーが欠けるだけ */
     }
   }
+  // MCP の生死（claude mcp list 実測）。重い（数秒）ので手動リロード＋長間隔でのみ叩く。
+  async function refreshHealth() {
+    if (healthLoading) return; // 連打・タイマー重なりでの二重起動を防ぐ
+    healthLoading = true;
+    try {
+      const list = await getMcpHealth();
+      const map: Record<string, McpStatus> = {};
+      for (const h of list) map[h.name] = h.status;
+      health = map;
+    } catch {
+      /* 取れなければ従来どおりグレー表示のまま（config 一覧は残る） */
+    } finally {
+      healthLoading = false;
+    }
+  }
 
   // 初回はトークン更新レース（claude --continue 直後の 401）を避けるため、
   // 値が入るまで数回だけ短間隔で再試行する。以後は 30s 間隔。
   async function initialLoad() {
     refreshStatus();
+    void refreshHealth(); // 初回の生死（非同期・独立、重いが UI はブロックしない）
     for (let i = 0; i < 4 && !usage; i++) {
       await refreshUsage();
       if (usage) break;
@@ -62,10 +81,13 @@
       refreshUsage();
       refreshStatus();
     }, 30000);
+    // 生死は重いので usage/status とは別に 5 分間隔。鮮度は ↻ 手動リロードで補う。
+    healthTimer = window.setInterval(() => void refreshHealth(), 300000);
     clock = window.setInterval(() => (now = Date.now()), 10000);
   });
   onDestroy(() => {
     if (timer) clearInterval(timer);
+    if (healthTimer) clearInterval(healthTimer);
     if (clock) clearInterval(clock);
   });
 
@@ -130,12 +152,21 @@
     {#if status}
       <div class="krow"><span>model</span><span class="kv">{status.model || "—"}</span></div>
       <div class="krow"><span>effort</span><span class="kv">{status.effort || "—"}</span></div>
-      <div class="krow mcp" title={"MCP（config由来）:\n" + status.mcp.join("\n")}>
-        <span>mcp</span><span class="kv">{status.mcp.length} <span class="caret">▾</span></span>
+      <div class="krow mcp" title={"MCP 生死（claude mcp list 実測）:\n✔ connected  ! needs auth  ✗ failed"}>
+        <span>mcp</span>
+        <span class="kv"
+          >{status.mcp.length}<button
+            class="reload"
+            class:spin={healthLoading}
+            onclick={() => void refreshHealth()}
+            title="MCP の生死を再取得"
+            aria-label="reload MCP health">↻</button
+          ></span
+        >
       </div>
       {#if status.mcp.length}
         <div class="chips">
-          {#each status.mcp as m}<span class="chip">{m}</span>{/each}
+          {#each status.mcp as m}<span class="chip {health[m] ?? 'unknown'}" title={health[m] ?? 'unknown'}>{m}</span>{/each}
         </div>
       {/if}
     {:else}
@@ -246,9 +277,29 @@
   .mcp {
     cursor: help;
   }
-  .mcp .caret {
+  .reload {
+    background: none;
+    border: none;
+    padding: 0;
+    margin-left: 5px;
     color: var(--teal);
-    font-size: 0.6rem;
+    font-size: 0.72rem;
+    line-height: 1;
+    cursor: pointer;
+    vertical-align: middle;
+  }
+  .reload:hover {
+    text-shadow: 0 0 6px rgba(45, 212, 191, 0.7);
+  }
+  /* 取得中はスピン（transform のみ＝compositor-only、軽量ethos準拠）。 */
+  .reload.spin {
+    display: inline-block;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
   .chips {
     display: flex;
@@ -258,11 +309,32 @@
   }
   .chip {
     font-size: 0.58rem;
-    color: var(--teal);
-    background: rgba(45, 212, 191, 0.1);
-    border: 1px solid rgba(45, 212, 191, 0.22);
+    border: 1px solid;
     border-radius: 4px;
     padding: 1px 5px;
+    /* health 未取得＝ニュートラルなグレー。取得後に status クラスで生死の色がつく。 */
+    color: var(--grey);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.16);
+    transition:
+      color 0.3s,
+      background 0.3s,
+      border-color 0.3s;
+  }
+  .chip.connected {
+    color: var(--teal);
+    background: rgba(45, 212, 191, 0.1);
+    border-color: rgba(45, 212, 191, 0.22);
+  }
+  .chip.needs_auth {
+    color: #f5c451;
+    background: rgba(245, 196, 81, 0.1);
+    border-color: rgba(245, 196, 81, 0.3);
+  }
+  .chip.failed {
+    color: var(--red);
+    background: rgba(255, 92, 138, 0.1);
+    border-color: rgba(255, 92, 138, 0.3);
   }
   .ws-sec {
     margin-top: auto;

@@ -1,3 +1,4 @@
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -87,4 +88,65 @@ pub fn fetch_status(cwd: Option<String>) -> ClaudeStatus {
     }
 
     ClaudeStatus { model, effort, mcp }
+}
+
+/// `claude mcp list` の実測による各 MCP サーバの接続状態（サイドバーのチップ色用）。
+/// config 由来の一覧（fetch_status）と違い、実際に接続を試みた「生死」を映す。
+#[derive(Serialize, Deserialize, Clone)]
+pub struct McpHealth {
+    /// 短縮名。fetch_status のチップ（short_mcp 済み）と突き合わせるため同じ関数を通す。
+    pub name: String,
+    /// "connected" | "needs_auth" | "failed" | "unknown"。
+    pub status: String,
+}
+
+/// `claude mcp list` を実行し、各行末尾の状態文字列から生死を判定して返す。
+/// claude は Windows では PATH 上 `claude.cmd` シムのため `cmd /c` 経由で起動する
+/// （`claude.exe` 実体は PATH に出ない — memory reference-claude-exe-path-windows）。
+/// npx stdio 系サーバを毎回起動して接続試行するので数秒〜十数秒かかる重い呼び出し。
+/// サイドバーからは長間隔（5分）＋手動リロード時のみ叩く。
+pub fn fetch_mcp_health() -> Vec<McpHealth> {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let Ok(out) = std::process::Command::new("cmd")
+        .args(["/C", "claude", "mcp", "list"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+    else {
+        return Vec::new();
+    };
+
+    // 出力先が stdout / stderr どちらでも拾えるよう両方を連結してパースする
+    // （有効行＝`<name>: … - <status>` だけ拾うのでヘッダ行が混じっても無害）。
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    text.push('\n');
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+
+    let mut result = Vec::new();
+    for line in text.lines() {
+        // 期待形式: "<name>: <url/cmd> - <marker> <status text>"
+        // ヘッダ行 "Checking MCP server health…"（`:` 無し）や空行はここで弾かれる。
+        let Some((name, rest)) = line.split_once(':') else {
+            continue;
+        };
+        let name = name.trim();
+        if name.is_empty() || !rest.contains(" - ") {
+            continue;
+        }
+        // 状態は最後の " - " 以降だけ見る（コマンド内のハイフンに引っ掛からない）。
+        let tail = rest.rsplit(" - ").next().unwrap_or("").to_lowercase();
+        let status = if tail.contains("connected") {
+            "connected"
+        } else if tail.contains("auth") {
+            "needs_auth"
+        } else if tail.contains("failed") || tail.contains("error") {
+            "failed"
+        } else {
+            "unknown"
+        };
+        result.push(McpHealth {
+            name: short_mcp(name),
+            status: status.to_string(),
+        });
+    }
+    result
 }
