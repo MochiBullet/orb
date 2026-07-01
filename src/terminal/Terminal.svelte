@@ -59,7 +59,16 @@
   let termReady = $state(false);
   let ligatureJoinerId: number | undefined;
   let scrolledUp = $state(false);
+  // #42: 起動時、pwsh の profile ロード（starship/zoxide/fzf/PSReadLine）に 2〜5s かかる間は
+  // 無出力でフリーズに見える。マウント〜シェル準備完了まで小さな「shell starting…」チップを出す。
+  // 消えるのは先着した方: (a) OSC 633;A プロンプト開始 / (b) 最初の実 PTY 出力。固定タイマーは使わない。
+  let shellStarting = $state(true);
   const encoder = new TextEncoder();
+
+  // シェル準備完了でチップを消す（冪等）。onData（最初の実出力）と OSC 633;A の双方から呼ばれる。
+  function markShellReady() {
+    if (shellStarting) shellStarting = false;
+  }
 
   // 起動直後の入力ロス対策（#39）: 入力ハンドラは spawn より前に張り、PTY が未起動の間の
   // 打鍵（スプラッシュの最初の一打を含む）はここに溜めて spawn 完了時に順番どおり流す。
@@ -341,6 +350,7 @@
         term.cols,
         term.rows,
         (bytes) => {
+          markShellReady(); // #42: 最初の実 PTY 出力でチップを消す（先着トリガの一方）。
           term?.write(bytes);
           scheduleScrollbackSave();
         },
@@ -479,7 +489,8 @@
       console.warn("[orb] WebGL addon unavailable, using fallback renderer", e);
     }
 
-    blocks = new CommandBlocks(term, paneId);
+    // #42: OSC 633;A（プロンプト開始）到達でも「shell starting…」を消す（先着トリガのもう一方）。
+    blocks = new CommandBlocks(term, paneId, markShellReady);
 
     // 合字 $effect の初回登録を解禁（term.open 済みでないと joiner を張れない）。
     termReady = true;
@@ -596,6 +607,15 @@
   class:broadcast={$broadcast}
 >
   <div class="term" bind:this={container} onpointerdown={focusThis} role="presentation"></div>
+
+  {#if shellStarting}
+    <!-- #42: 起動レイテンシの体感フリーズ解消。全画面を覆わない小チップ（復元スクロールバックを隠さない）。 -->
+    <div class="shell-starting" role="status" aria-live="polite">
+      <span class="ss-dot"></span>
+      shell starting…
+    </div>
+  {/if}
+
   {#if showSearch}
     <div class="search-bar">
       <input
@@ -736,6 +756,68 @@
     to {
       opacity: 1;
       transform: none;
+    }
+  }
+
+  /* #42: 起動中の「shell starting…」チップ。左下に控えめに。全画面を覆わず復元スクロールバックを隠さない。
+     アニメは transform/opacity のみ（compositor-only, PERFORMANCE 準拠）。teal/neon on black。 */
+  .shell-starting {
+    position: absolute;
+    left: 14px;
+    bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 11px;
+    background: #05100e;
+    border: 1px solid rgba(45, 212, 191, 0.4);
+    border-radius: 999px;
+    box-shadow: 0 4px 18px -6px rgba(45, 212, 191, 0.5);
+    color: var(--teal);
+    font-family: inherit;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+    z-index: 9;
+    animation: ss-in 0.16s ease-out;
+  }
+  .ss-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--teal);
+    box-shadow: 0 0 8px rgba(45, 212, 191, 0.85);
+    animation: ss-pulse 1.15s ease-in-out infinite;
+  }
+  @keyframes ss-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes ss-pulse {
+    0%,
+    100% {
+      opacity: 0.35;
+      transform: scale(0.8);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.15);
+    }
+  }
+  /* 動き軽減設定では無限パルスを止める（点は残す）。 */
+  @media (prefers-reduced-motion: reduce) {
+    .shell-starting {
+      animation: none;
+    }
+    .ss-dot {
+      animation: none;
+      opacity: 0.85;
     }
   }
 
