@@ -6,6 +6,19 @@ import { sendNotification } from "@tauri-apps/plugin-notification";
 import { logError } from "../../core/log";
 
 /**
+ * OSC 133/633 の D マーカー payload（rest）から終了コードを解釈する純関数。
+ *
+ * - 空文字（D 欠落・Ctrl-C 等）や壊れた payload は -1（不明/中断＝⊘）に写す。
+ * - 実際の成功（exit 0）は必ず 0 のまま保つ。`|| -1` / `|| 0` は 0 を falsy として
+ *   潰すため使わない（#41: 偽の成功／偽の失敗どちらも防ぐ）。Number.isNaN で判定する。
+ */
+export function parseExitCode(rest: string): number {
+  if (rest === "") return -1;
+  const n = parseInt(rest.split(";")[0], 10);
+  return Number.isNaN(n) ? -1 : n;
+}
+
+/**
  * OSC 133/633 マーカーを解釈して Warp 風のコマンドブロック装飾を出すコントローラ。
  *
  * - 単一 xterm グリッドは維持し、ブロック境界は decoration（DOM オーバーレイ）で乗せる。
@@ -65,7 +78,7 @@ export class CommandBlocks {
 
   private onFinished(rest: string) {
     if (!this.startMarker) return;
-    const code = rest === "" ? 0 : parseInt(rest.split(";")[0], 10) || 0;
+    const code = parseExitCode(rest);
     const endMarker = this.term.registerMarker(0);
     this.decorate(this.startMarker, code, endMarker ?? null);
     this.finished = true;
