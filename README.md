@@ -79,13 +79,15 @@ pnpm tauri build
 
 ## 機能
 
-- **コマンドブロックUI** — OSC 133/633 を解釈して Warp 風のブロック境界・終了コードバッジ（成功 teal / 失敗 red）を decoration で乗せる。各ブロックに hover ツールバー（`copy` / `→AI`）。プロンプト間ジャンプ（Ctrl+↑/↓）。**alt-buffer（vim/lazygit/btop/fzf 等）中はブロック処理を完全停止**。
+- **コマンドブロックUI** — OSC 133/633 を解釈して Warp 風のブロック境界・終了コードバッジ（成功 teal / 失敗 red）を decoration で乗せる。各ブロックに hover ツールバー（`copy` / `→AI` / 失敗は `🔧 fix`）。プロンプト間ジャンプ（Ctrl+↑/↓）。**alt-buffer（vim/lazygit/btop/fzf 等）中はブロック処理を完全停止**。
+- **ブロック耐久ログ & 履歴** — 各ブロック（command/exit/cwd/時刻）を append-only JSONL（`~/.config/orb/blocks/YYYY-MM-DD.jsonl`）へ Rust から追記。`Ctrl+Shift+H` で**ログのみからブロック列を再構築**する履歴オーバーレイ（検索・日付ナビ・copy/→AI）。
+- **OSC 52 クリップボード** — TUI/CLI のコピーを OS クリップボードへ反映（write）。read は既定拒否（`OSC 52;c;?` に空応答＝プロセスによるクリップボード吸い出しを防ぐ）。
 - **ペイン分割** — 横/縦分割、フォーカス枠グロー、スプリッタドラッグでリサイズ、閉じると兄弟が昇格。分割時は**フォーカス中ペインの cwd を継承**。ツリーは flat-geometry で、分割やタブ切替で端末（PTY）を殺さない。
 - **タブ** — 複数ワークスペース。タブを切り替えても**全タブの PTY とスクロールバックが生存**（非アクティブは display 非表示）。
-- **案件ランチャー** — `~/.config/orb/projects.toml` の案件を Ctrl+P パレットから起動。`dev3` プリセット＝左 AI(`claude --continue`) / 右上 dev / 右下 `lg`（lazygit）の3ペインを正しい cwd で spawn。
+- **案件ランチャー** — `~/.config/orb/projects.toml` の案件を Ctrl+P パレットから起動。`dev3` レイアウト＝左 AI / 右上 dev / 右下 `lg`（lazygit）を正しい cwd で spawn。AI 起動プリセット（継続 `--continue` / 新規 / 危険モード `--dangerously-skip-permissions`、Tab で巡回）。**案件は現タブを潰さず案件名の新タブ**で開く。
 - **AI（Claude）ペイン** — `claude --continue` を violet 差し色の専用ペインで常駐。別ペインの選択範囲（Ctrl+L）やコマンドブロック（→AI ボタン）を AI ペインの stdin へ送る。
 - **サイドバー** — トークン使用量（5h / 7d、80%超で赤）を 30秒ごとに表示。
-- **設定GUI** — Ctrl+, でフォント / scrollback を編集、`config.toml` に保存。フォントサイズは全ペインに即反映。
+- **設定GUI** — Ctrl+, でフォント / scrollback / アクセント色 / **背景画像＋暗幕** を編集、`config.toml` に保存。フォントサイズは全ペインに即反映。背景画像は端末背後に透過表示（暗幕は画像だけに効く）。
 - **フォントズーム** — Ctrl+ホイール / Ctrl+= / Ctrl+- / Ctrl+0（行列維持の font zoom）。
 - **スクロールバック検索** — Ctrl+F。
 - **カスタムタイトルバー** — `decorations:false`、翡翠グラデ、ランチャーにオーロラ演出（transform 駆動・reduced-motion 尊重）。
@@ -101,6 +103,7 @@ pnpm tauri build
 | `Ctrl+P` | 案件ランチャー |
 | `Ctrl+,` | 設定 |
 | `Ctrl+F` | スクロールバック検索 |
+| `Ctrl+Shift+H` | ブロック履歴（耐久ログから再構築） |
 | `Ctrl+ホイール` / `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | フォント拡大 / 縮小 / リセット |
 | `Ctrl+↑` / `Ctrl+↓` | 直前 / 直後のプロンプトへジャンプ |
 | `Ctrl+L` | 選択範囲を AI ペインへ送る |
@@ -112,7 +115,8 @@ pnpm tauri build
 
 | ファイル | 中身 |
 |---|---|
-| `config.toml` | `font_size` / `font_family` / `scrollback`（無ければ既定を書き出す。Ctrl+, でも編集可）|
+| `config.toml` | `font_size` / `font_family` / `scrollback` / `accent` / `ligatures` / `bg_image` / `bg_dim`（無ければ既定を書き出す。Ctrl+, でも編集可）|
+| `blocks/YYYY-MM-DD.jsonl` | ブロック耐久ログ（append-only。Ctrl+Shift+H の履歴が読む）|
 | `projects.toml` | 案件ランチャーの `[[project]]` 群（無ければ既定10案件を書き出す）|
 
 `shell-integration.ps1`（OSC 133/633 注入）はバイナリに埋め込み、起動時に `%TEMP%\orb\` へ一度だけ展開される。
