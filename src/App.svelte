@@ -38,6 +38,17 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
+    /* #21: 背景画像＋暗幕を .app の「背景ペイント層」に1枚へ合成する（画像なしは透明＝従来通り黒）。
+       暗幕を絶対配置オーバーレイ(::before)にすると、Svelte のスタイルスコープで z-index が
+       子コンポーネント root(TitleBar/TabBar)に効かず、それらまで暗くなる。背景に焼き込めば
+       不透明な chrome は一切影響を受けず、透過した端末だけに暗幕が効く（z-index 非依存）。 */
+    background-image: linear-gradient(
+        rgba(0, 0, 0, var(--bg-dim, 0)),
+        rgba(0, 0, 0, var(--bg-dim, 0))
+      ),
+      var(--bg-image, none);
+    background-size: cover;
+    background-position: center;
   }
   .body {
     flex: 1 1 auto;

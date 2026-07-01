@@ -38,6 +38,12 @@ fn default_accent() -> String {
 fn default_ligatures() -> bool {
     true
 }
+fn default_bg_image() -> String {
+    String::new()
+}
+fn default_bg_dim() -> f32 {
+    0.6
+}
 
 /// orb 本体の設定（config.toml）。
 #[derive(Serialize, Deserialize, Clone)]
@@ -53,6 +59,12 @@ pub struct Config {
     /// プログラミング合字（=> != -> 等）を character joiner で繋げて表示。
     #[serde(default = "default_ligatures")]
     pub ligatures: bool,
+    /// 背景画像の絶対パス（空=無し）。asset プロトコルで配信し端末背後に敷く（#21）。
+    #[serde(default = "default_bg_image")]
+    pub bg_image: String,
+    /// 背景画像の上に敷く暗幕の不透明度 0..1（可読性確保）。画像が無ければ無効。
+    #[serde(default = "default_bg_dim")]
+    pub bg_dim: f32,
 }
 
 impl Default for Config {
@@ -63,6 +75,8 @@ impl Default for Config {
             scrollback: default_scrollback(),
             accent: default_accent(),
             ligatures: default_ligatures(),
+            bg_image: default_bg_image(),
+            bg_dim: default_bg_dim(),
         }
     }
 }

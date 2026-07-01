@@ -238,6 +238,15 @@
     }
   });
 
+  // #21: 保存で背景画像の有無が変わったら xterm キャンバス背景の透過を切替（DOM レンダラの
+  // ペインでライブ反映）。WebGL のペイン（画像なしで起動）はレンダラ切替が要るため再起動で反映。
+  $effect(() => {
+    const bg = $config.bg_image ? "rgba(0,0,0,0)" : "#000000";
+    if (term && term.options.theme?.background !== bg) {
+      term.options.theme = { ...term.options.theme, background: bg };
+    }
+  });
+
   // ピンチズーム / Ctrl+ホイール / Ctrl+0。WebView2 ではタッチパッドのピンチは
   // ctrlKey 付き wheel として届く。
   function zoom(delta: number) {
@@ -389,8 +398,11 @@
       scrollback: cfg.scrollback,
       cursorBlink: true,
       allowProposedApi: true,
+      // #21: 背景画像時だけ透過を許可（この時は WebGL 非使用＝DOM レンダラで透過が効く）。
+      // 画像なしは false＝WebGL の不透明 fast path を維持（perf）。
+      allowTransparency: !!cfg.bg_image,
       theme: {
-        background: "#000000",
+        background: cfg.bg_image ? "rgba(0,0,0,0)" : "#000000",
         foreground: "#e6fffa",
         cursor: "#2dd4bf",
         cursorAccent: "#000000",
@@ -487,12 +499,17 @@
     // Ctrl+Shift+K / パレットの「画面クリア」からこのペインを消去できるよう登録。
     registerTermClear(paneId, () => term?.clear());
 
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
-    } catch (e) {
-      console.warn("[orb] WebGL addon unavailable, using fallback renderer", e);
+    // #21: 背景画像がある時は WebGL を積まない。WebGL レンダラは allowTransparency を
+    // 無視して不透明背景を描くため、キャンバスの背後に画像が透けない（DOM レンダラは透過対応）。
+    // 画像なしの通常時は WebGL を維持＝速度優先。背景の切替は再起動/新ペインで反映（レンダラ切替のため）。
+    if (!cfg.bg_image) {
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => webgl.dispose());
+        term.loadAddon(webgl);
+      } catch (e) {
+        console.warn("[orb] WebGL addon unavailable, using fallback renderer", e);
+      }
     }
 
     blocks = new CommandBlocks(term, paneId);
@@ -675,7 +692,14 @@
     width: 100%;
     height: 100%;
     padding: 6px 8px 4px;
-    background: #000;
+    /* #21: 背景画像時は透過（--term-bg=transparent）にして .app の画像を透かす。既定は黒。 */
+    background: var(--term-bg, #000);
+  }
+  /* #21: xterm.css の `.xterm .xterm-viewport { background-color:#000 }` を上書き。
+     この不透明黒が allowTransparency を無視して画像を隠す張本人（元 revert の主因）。
+     背景画像時は --term-bg=transparent で端末本体に画像を透かす。画像なしは #000 のまま。 */
+  .term :global(.xterm .xterm-viewport) {
+    background-color: var(--term-bg, #000);
   }
   .term :global(.xterm-viewport)::-webkit-scrollbar {
     width: 10px;
