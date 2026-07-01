@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseExitCode } from "./osc";
+import { parseExitCode, parseOsc9, parseOsc777 } from "./osc";
 
 describe("parseExitCode (#41: no false success/failure)", () => {
   it('empty rest (D missing / Ctrl-C) => -1 (unknown/aborted, NOT success)', () => {
@@ -28,5 +28,61 @@ describe("parseExitCode (#41: no false success/failure)", () => {
 
   it('";x" (leading semicolon) => -1 (empty code field is unknown)', () => {
     expect(parseExitCode(";x")).toBe(-1);
+  });
+});
+
+describe("parseOsc9 (#32: iTerm2-style OSC 9 notification)", () => {
+  it("plain message => body", () => {
+    expect(parseOsc9("Build finished")).toBe("Build finished");
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(parseOsc9("  done  ")).toBe("done");
+  });
+
+  it("empty => null (nothing to notify)", () => {
+    expect(parseOsc9("")).toBeNull();
+  });
+
+  it("ConEmu progress (4;...) => null (not a notification)", () => {
+    expect(parseOsc9("4;50")).toBeNull();
+  });
+
+  it("ConEmu numeric subcommand (1;C:\\path) => null", () => {
+    expect(parseOsc9("1;C:\\path")).toBeNull();
+  });
+
+  it("message that merely contains a digit is kept", () => {
+    expect(parseOsc9("Test 3 passed")).toBe("Test 3 passed");
+  });
+});
+
+describe("parseOsc777 (#32: OSC 777;notify;title;body)", () => {
+  it("full notify => title + body", () => {
+    expect(parseOsc777("notify;Claude;Task complete")).toEqual({
+      title: "Claude",
+      body: "Task complete",
+    });
+  });
+
+  it("missing body => empty body, title kept", () => {
+    expect(parseOsc777("notify;Claude")).toEqual({ title: "Claude", body: "" });
+  });
+
+  it("missing title => 'orb' fallback", () => {
+    expect(parseOsc777("notify;;just a body")).toEqual({ title: "orb", body: "just a body" });
+  });
+
+  it("body containing semicolons is preserved", () => {
+    expect(parseOsc777("notify;T;a;b;c")).toEqual({ title: "T", body: "a;b;c" });
+  });
+
+  it("non-notify subcommand => null (ignored)", () => {
+    expect(parseOsc777("something;else")).toBeNull();
+  });
+
+  it("notify with no title and no body => null (no info)", () => {
+    expect(parseOsc777("notify;;")).toBeNull();
+    expect(parseOsc777("notify")).toBeNull();
   });
 });

@@ -1,8 +1,8 @@
 import type { Terminal, IMarker, IDecoration, IDisposable } from "@xterm/xterm";
-import { aiPane, setPaneCwd, focusedPane, dnd } from "../../store/appStore";
+import { aiPane, setPaneCwd, dnd } from "../../store/appStore";
 import { get } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
-import { sendNotification } from "@tauri-apps/plugin-notification";
+import { shouldNotifyForPane, notifyThrottled } from "./notify";
 import { logError } from "../../core/log";
 
 /**
@@ -16,6 +16,36 @@ export function parseExitCode(rest: string): number {
   if (rest === "") return -1;
   const n = parseInt(rest.split(";")[0], 10);
   return Number.isNaN(n) ? -1 : n;
+}
+
+/**
+ * iTerm2 スタイルの OSC 9 通知（`OSC 9 ; <message> ST/BEL`）を解釈する純関数。
+ *
+ * data は識別子後の残り（"message"）。通知本文を返す。通知でないもの＝空文字や、
+ * ConEmu/Windows Terminal 系の数値サブコマンド（`OSC 9 ; 4 ; …`=進捗バー、`9;1`=cwd 等）は
+ * null（無視）に写す。これで PowerShell 等の進捗表示を通知と誤検知しない。
+ */
+export function parseOsc9(data: string): string | null {
+  if (/^\d+;/.test(data)) return null; // ConEmu numeric subcommand (progress/cwd/…), not a notification
+  const body = data.trim();
+  return body === "" ? null : body;
+}
+
+/**
+ * `OSC 777 ; notify ; <title> ; <body>`（rxvt/urxvt 系）を解釈する純関数。
+ *
+ * data は識別子後の残り（"notify;title;body"）。防御的にパースする：
+ * - 先頭が "notify" 以外のサブコマンドは null（無視）。
+ * - title 欠落は "orb" にフォールバック。body は ";" を含んでも保持（3 個目以降を再結合）。
+ * - title も body も空なら情報ゼロとして null（無視）。
+ */
+export function parseOsc777(data: string): { title: string; body: string } | null {
+  const parts = data.split(";");
+  if (parts[0] !== "notify") return null;
+  const rawTitle = (parts[1] ?? "").trim();
+  const body = parts.slice(2).join(";").trim();
+  if (rawTitle === "" && body === "") return null;
+  return { title: rawTitle || "orb", body };
 }
 
 /**
@@ -45,6 +75,9 @@ export class CommandBlocks {
   ) {
     this.disposables.push(term.parser.registerOscHandler(633, (d) => this.handle(d)));
     this.disposables.push(term.parser.registerOscHandler(133, (d) => this.handle(d)));
+    // #32: TUI（Claude Code 等）が完了/確認待ちで撃つ通知エスケープを OS 通知へ転送。
+    this.disposables.push(term.parser.registerOscHandler(9, (d) => this.onOsc9(d)));
+    this.disposables.push(term.parser.registerOscHandler(777, (d) => this.onOsc777(d)));
   }
 
   private handle(data: string): boolean {
@@ -89,13 +122,27 @@ export class CommandBlocks {
   private notifyIfBackground(code: number) {
     const elapsed = Date.now() - this.cmdStart;
     if (this.cmdStart === 0 || elapsed < CommandBlocks.NOTIFY_MS) return;
-    if (get(focusedPane) === this.paneId) return; // 今見ているペインは通知しない
+    if (!shouldNotifyForPane(this.paneId)) return; // 前面（最前面ウィンドウ＆今見ているペイン）は通知しない
     if (get(dnd) && code === 0) return; // フォーカスモード(#20): 成功通知は出さない（失敗は昇格）
     const secs = Math.round(elapsed / 1000);
-    void sendNotification({
-      title: code === 0 ? "orb ✓ コマンド完了" : `orb ✗ 失敗 (exit ${code})`,
-      body: `${secs}秒 — ${this.cwd || "(orb)"}`,
-    });
+    notifyThrottled(
+      code === 0 ? "orb ✓ コマンド完了" : `orb ✗ 失敗 (exit ${code})`,
+      `${secs}秒 — ${this.cwd || "(orb)"}`,
+    );
+  }
+
+  /** #32: iTerm2 スタイル OSC 9 通知（`OSC 9 ; <message>`）を OS 通知へ転送。 */
+  private onOsc9(data: string): boolean {
+    const body = parseOsc9(data);
+    if (body != null && shouldNotifyForPane(this.paneId)) notifyThrottled("orb", body);
+    return true;
+  }
+
+  /** #32: `OSC 777 ; notify ; <title> ; <body>` を OS 通知へ転送。 */
+  private onOsc777(data: string): boolean {
+    const n = parseOsc777(data);
+    if (n && shouldNotifyForPane(this.paneId)) notifyThrottled(n.title, n.body);
+    return true;
   }
 
   private onProperty(rest: string) {
