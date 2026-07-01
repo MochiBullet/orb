@@ -70,6 +70,25 @@ export function clearPane(paneId: number) {
   termClearRegistry.get(paneId)?.();
 }
 
+/** ペインごとの入力シンク（paneId → 入力バイトを端末の入力経路へ）。Terminal は
+ *  spawn 前でも登録し、PTY 未起動の間はバッファへ積む＝起動直後の打鍵を落とさない。 */
+const paneInputRegistry = new Map<number, (bytes: Uint8Array) => void>();
+export function registerPaneInput(paneId: number, fn: (bytes: Uint8Array) => void) {
+  paneInputRegistry.set(paneId, fn);
+}
+export function unregisterPaneInput(paneId: number) {
+  paneInputRegistry.delete(paneId);
+}
+/** フォーカス中ペイン（無ければ任意の1ペイン）の端末入力経路へバイト列を届ける。
+ *  起動スプラッシュがまだ端末にフォーカスを渡していない間の打鍵を PTY へ流すのに使う。
+ *  戻り値は届け先が在ったか（＝消えずに済んだか）。 */
+export function sendInputToFocusedPane(bytes: Uint8Array): boolean {
+  const fn = paneInputRegistry.get(get(focusedPane)) ?? paneInputRegistry.values().next().value;
+  if (!fn) return false;
+  fn(bytes);
+  return true;
+}
+
 /** ペインごとの画面内容シリアライザ（paneId→ANSI 付き文字列を返す）。
  *  アプリ終了/リロード時に全ペイン分を保存し、再起動で過去ログとして復元する
  *  （PTY プロセス自体は復元不可なので「画面の記録」を書き戻して新シェルを起動する）。 */

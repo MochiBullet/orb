@@ -22,6 +22,8 @@
     unregisterTermClear,
     registerTermSerialize,
     unregisterTermSerialize,
+    registerPaneInput,
+    unregisterPaneInput,
     consumeScrollback,
     saveOneScrollback,
   } from "../store/appStore";
@@ -58,6 +60,35 @@
   let ligatureJoinerId: number | undefined;
   let scrolledUp = $state(false);
   const encoder = new TextEncoder();
+
+  // 起動直後の入力ロス対策（#39）: 入力ハンドラは spawn より前に張り、PTY が未起動の間の
+  // 打鍵（スプラッシュの最初の一打を含む）はここに溜めて spawn 完了時に順番どおり流す。
+  let inputBuffer: Array<{ bytes: Uint8Array; binary: boolean }> = [];
+  let ptyReady = false;
+
+  // 入力バイトを PTY へ即書き込む。binary 以外かつ broadcast 中は全ペインへ複製（通常タイプと同経路）。
+  function writeInputNow(bytes: Uint8Array, binary: boolean) {
+    if (!binary && get(broadcast)) {
+      // ブロードキャスト中はフォーカスペインの入力を全ペインへ複製。
+      for (const id of leafIds(get(layout))) {
+        void invoke("write_pty", { paneId: id, data: Array.from(bytes) }).catch((e) =>
+          logError(`pane ${id}: broadcast write failed: ${String(e)}`),
+        );
+      }
+    } else {
+      pty?.write(bytes)?.catch((e) =>
+        logError(`pane ${paneId}: ${binary ? "binary" : "input"} write failed: ${String(e)}`),
+      );
+    }
+  }
+  // spawn 前は溜め、spawn 後は即書き込む。スプラッシュ／xterm 双方の入力経路がここに集約される。
+  function enqueueInput(bytes: Uint8Array, binary = false) {
+    if (!ptyReady) {
+      inputBuffer.push({ bytes, binary });
+      return;
+    }
+    writeInputNow(bytes, binary);
+  }
 
   // スクロールで履歴を遡っているか判定（「↓ 最下部」ボタンの表示制御）。
   // 代替画面（vim/lazygit 等）では出さない。
@@ -330,24 +361,11 @@
       return;
     }
 
-    term.onData((data) => {
-      const bytes = encoder.encode(data);
-      if (get(broadcast)) {
-        // ブロードキャスト中はフォーカスペインの入力を全ペインへ複製。
-        for (const id of leafIds(get(layout))) {
-          void invoke("write_pty", { paneId: id, data: Array.from(bytes) }).catch((e) =>
-            logError(`pane ${id}: broadcast write failed: ${String(e)}`),
-          );
-        }
-      } else {
-        pty?.write(bytes)?.catch((e) => logError(`pane ${paneId}: input write failed: ${String(e)}`));
-      }
-    });
-    term.onBinary((data) => {
-      const bytes = new Uint8Array(data.length);
-      for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xff;
-      pty?.write(bytes)?.catch((e) => logError(`pane ${paneId}: binary write failed: ${String(e)}`));
-    });
+    // spawn 完了。溜まっていた入力（スプラッシュの最初の一打・spawn 待ちの打鍵）を
+    // 登録順に流す＝1打も落とさず順序も保つ。以降 enqueueInput は即時書き込みになる。
+    ptyReady = true;
+    for (const item of inputBuffer) writeInputNow(item.bytes, item.binary);
+    inputBuffer = [];
   }
 
   onMount(async () => {
@@ -394,6 +412,17 @@
     term.loadAddon(new WebLinksAddon((_e, uri) => void openUrl(uri)));
 
     term.open(container);
+
+    // 入力ハンドラは spawn を待たずにここで張る（#39）。PTY 未起動の間は enqueueInput が
+    // バッファへ積み、spawn 完了時にまとめて流す＝起動直後の打鍵を1打も落とさない。
+    term.onData((data) => enqueueInput(encoder.encode(data)));
+    term.onBinary((data) => {
+      const bytes = new Uint8Array(data.length);
+      for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xff;
+      enqueueInput(bytes, true);
+    });
+    // スプラッシュ表示中（端末未フォーカス）の打鍵をこのペインの入力経路へ流せるよう登録。
+    registerPaneInput(paneId, (bytes) => enqueueInput(bytes));
 
     // file:line リンク（#37）。WebLinksAddon(URL) とは別パターンなので併存させる。
     linkProvider = term.registerLinkProvider({
@@ -540,6 +569,8 @@
     if (resizeTimer) clearTimeout(resizeTimer);
     if (scrollbackTimer) clearTimeout(scrollbackTimer);
     unregisterTermClear(paneId);
+    unregisterPaneInput(paneId);
+    inputBuffer = [];
     container?.removeEventListener("keydown", onCopyPaste, true);
     container?.removeEventListener("wheel", onWheel, { capture: true });
     container?.removeEventListener("mouseup", onMouseUp);

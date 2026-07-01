@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { showSplash } from "../store/appStore";
+  import { showSplash, sendInputToFocusedPane } from "../store/appStore";
+
+  const encoder = new TextEncoder();
 
   // figlet: WELCOME = font "small"（スリム）。バックスラッシュを保つため String.raw。
   const WELCOME_ART = [
@@ -30,16 +32,36 @@
   function dismiss() {
     if (leaving) return;
     leaving = true;
-    // 消費済みのキーリスナを即外す（以降の入力は端末へ通す）。
-    window.removeEventListener("keydown", onKey, true);
-    // フェードアウト後に実体を消す（reduce 時は即）。
+    // フェードアウト後に実体を消す（reduce 時は即）。keydown リスナは onDestroy まで張り続け、
+    // フェード中（端末はまだ未フォーカス）の打鍵も PTY へ流す＝1打も落とさない。
     outTimer = window.setTimeout(() => showSplash.set(false), reduce ? 0 : 420);
   }
 
-  // 任意キー（またはクリック）で開始。その1打は消費して端末へは渡さない。
+  // KeyboardEvent を端末バイト列へ。修飾キー単独／Ctrl 等の併用は入力にしない（消費のみ）。
+  function keyToBytes(e: KeyboardEvent): Uint8Array | null {
+    if (e.isComposing) return null;
+    if (e.ctrlKey || e.metaKey || e.altKey) return null;
+    let s: string | null = null;
+    if (e.key === "Enter") s = "\r";
+    else if (e.key === "Tab") s = "\t";
+    else if (e.key === "Backspace") s = "\x7f";
+    else if (e.key === "Escape") s = "\x1b";
+    else if (e.key === "ArrowUp") s = "\x1b[A";
+    else if (e.key === "ArrowDown") s = "\x1b[B";
+    else if (e.key === "ArrowRight") s = "\x1b[C";
+    else if (e.key === "ArrowLeft") s = "\x1b[D";
+    else if (e.key.length === 1) s = e.key;
+    return s == null ? null : encoder.encode(s);
+  }
+
+  // 任意キーで開始。その打鍵は splash が消費（preventDefault/stopPropagation で xterm には
+  // 渡さない）し、代わりにフォーカスペインの入力経路へ一度だけ届ける＝二重入力なし・入力ロスなし。
+  // PTY が未起動なら Terminal 側でバッファされ、spawn 完了時に流れる。
   function onKey(e: KeyboardEvent) {
     e.preventDefault();
     e.stopPropagation();
+    const bytes = keyToBytes(e);
+    if (bytes) sendInputToFocusedPane(bytes);
     dismiss();
   }
 
