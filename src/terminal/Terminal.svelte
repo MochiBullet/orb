@@ -284,6 +284,25 @@
 
   // コピペ等の capture-phase keydown（attachCustomKeyEventHandler は二重発火するため不使用）。
   function onCopyPaste(e: KeyboardEvent) {
+    // #30: Claude Code TUI 等では Shift+Enter で「改行」したい。xterm 6.0 は Enter も
+    // Shift+Enter も同じ CR を送り、Windows ConPTY は kitty CSI-u を通さないため、
+    // capture 段で握って LF(0x0A) を1本だけ送る。LF は Claude Code の 'chat:newline'
+    // （Ctrl+J 既定）で、PSReadLine も 0x0A を改行扱い＝素の pwsh でも安全。通常タイプと
+    // 同じ enqueueInput 経路に流す（#39 バッファリング/#40 エラー処理/broadcast を共有）。
+    // 他修飾なし・IME 変換中は除外。capture の preventDefault で xterm の CR 送出を止める＝二重なし。
+    if (
+      e.key === "Enter" &&
+      e.shiftKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !e.isComposing
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      enqueueInput(new Uint8Array([0x0a]));
+      return;
+    }
     if (!e.ctrlKey) return;
     if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); blocks?.jumpPrev(); return; }
     if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); blocks?.jumpNext(); return; }
