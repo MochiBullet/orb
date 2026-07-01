@@ -124,23 +124,22 @@
     background: rgba(45, 212, 191, 0.08);
     border-color: rgba(45, 212, 191, 0.4);
   }
+  /* 取扱説明(ⓘ) は枠なし＝アイコン単体。ホバーは glow で示す。 */
   .hinfo {
     flex: 0 0 auto;
     width: 24px;
     height: 24px;
-    border: 1px solid rgba(45, 212, 191, 0.18);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.04);
+    border: none;
+    background: none;
     color: var(--teal);
-    font-size: 0.95rem;
+    font-size: 1.05rem;
     line-height: 1;
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    transition: color 0.15s, text-shadow 0.15s;
   }
   .hinfo:hover {
-    background: rgba(45, 212, 191, 0.14);
-    border-color: var(--teal);
     color: var(--fg);
+    text-shadow: 0 0 8px rgba(45, 212, 191, 0.7);
   }
   .hs-ico {
     flex: 0 0 auto;
@@ -188,7 +187,7 @@
     color: var(--grey);
     font-size: 0.8rem;
     cursor: pointer;
-    transition: background 0.12s, color 0.12s, transform 0.25s;
+    transition: background 0.12s, color 0.12s;
   }
   .ctl:hover {
     background: rgba(45, 212, 191, 0.12);
@@ -199,7 +198,6 @@
   }
   .ctl.gear:hover {
     color: var(--teal);
-    transform: rotate(60deg);
   }
   .ctl.close:hover {
     background: rgba(255, 92, 138, 0.2);
