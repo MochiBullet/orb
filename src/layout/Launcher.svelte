@@ -74,6 +74,7 @@
         <button
           class="chip"
           class:on={preset === ps.id}
+          class:danger={ps.id === "yolo"}
           title={ps.hint}
           onpointerdown={(e) => {
             e.preventDefault();
@@ -188,6 +189,16 @@
     background: rgba(45, 212, 191, 0.16);
     border-color: var(--teal);
     color: var(--fg);
+  }
+  /* 危険モード(--dangerously-skip-permissions)は赤で警告し誤クリックを抑止。 */
+  .chip.danger {
+    color: #ff5c8a;
+    border-color: rgba(255, 92, 138, 0.4);
+  }
+  .chip.danger.on {
+    background: rgba(255, 92, 138, 0.18);
+    border-color: #ff5c8a;
+    color: #ffd0dd;
   }
   .pk {
     margin-left: auto;
