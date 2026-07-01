@@ -19,7 +19,25 @@
 
 <div class="titlebar" data-tauri-drag-region>
   <div class="left" data-tauri-drag-region>
-    <span class="brand" data-tauri-drag-region>ORB</span>
+    <span class="brand" data-tauri-drag-region>
+      <svg class="mark" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+        <defs>
+          <radialGradient id="orbCore" cx="38%" cy="34%" r="72%">
+            <stop offset="0%" stop-color="#7ff5e4" />
+            <stop offset="45%" stop-color="#2dd4bf" />
+            <stop offset="100%" stop-color="#0b3b34" />
+          </radialGradient>
+        </defs>
+        <ellipse
+          cx="12" cy="12" rx="10.5" ry="4"
+          fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.7"
+          transform="rotate(-28 12 12)"
+        />
+        <circle cx="12" cy="12" r="5.8" fill="url(#orbCore)" />
+        <circle cx="9.7" cy="9.5" r="1.6" fill="#eafffb" opacity="0.85" />
+      </svg>
+      <span class="word">ORB</span>
+    </span>
     {#if $cwd}
       <span class="cwd" data-tauri-drag-region>{shortCwd($cwd)}</span>
     {/if}
@@ -80,6 +98,16 @@
     min-width: 0;
   }
   .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .mark {
+    flex: 0 0 auto;
+    filter: drop-shadow(0 0 4px rgba(45, 212, 191, 0.55))
+      drop-shadow(0 0 6px rgba(167, 139, 250, 0.3));
+  }
+  .word {
     font-weight: 700;
     letter-spacing: 0.35em;
     font-size: 0.82rem;
