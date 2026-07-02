@@ -4,10 +4,11 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getUsage, type Usage } from "../core/usage";
   import { getClaudeStatus, getGitBranch, getMcpHealth, type ClaudeStatus, type McpStatus } from "../core/status";
-  import { cwd as cwdStore, layout, startedAt, sidebarSide, aiPaneActivity, aiPane } from "../store/appStore";
+  import { cwd as cwdStore, layout, startedAt, sidebarSide, aiPaneActivity, aiPane, focusedPane } from "../store/appStore";
   import { tabs } from "../layout/tabs";
   import { leafIds } from "../layout/tree";
   import { logError } from "../core/log";
+  import { buildClaudeCmd } from "../layout/launch";
 
   // #34 系: サイドバーから直接 model/effort を切替。値は Claude CLI の非対話引数
   // （`/model <alias>` `/effort <level>` は Enter で即反映）。
@@ -50,6 +51,23 @@
     const v = (e.currentTarget as HTMLSelectElement).value;
     (e.currentTarget as HTMLSelectElement).value = "";
     if (v) sendAiCommand(`/effort ${v}`);
+  }
+
+  /** claude 起動ボタン。aiPane 未設定ならフォーカス中のペインへフォールバックし、
+   *  そのペインをそのまま aiPane として確定する（「ここで起動する」＝「ここが AI ペイン」）。
+   *  model/effort プルダウンとは違い、ボタンは押したら必ず何か起きてほしいための挙動。 */
+  function startClaude(preset: "fresh" | "continue") {
+    let target = get(aiPane);
+    if (target == null) {
+      target = get(focusedPane);
+      if (target != null) aiPane.set(target);
+    }
+    if (target == null) return;
+    void invoke("write_pty", {
+      paneId: target,
+      data: Array.from(cmdEncoder.encode(buildClaudeCmd(preset) + "\r")),
+    }).catch((e) => logError(`claude start failed: ${String(e)}`));
+    aiPaneActivity.set(Date.now());
   }
 
   let usage = $state<Usage | null>(null);
@@ -194,6 +212,13 @@
 </script>
 
 <aside class="sidebar" class:left={$sidebarSide === "left"}>
+  <div class="sec">
+    <div class="startrow">
+      <button class="startbtn" onclick={() => startClaude("fresh")} title="claude を新規起動">claude</button>
+      <button class="startbtn" onclick={() => startClaude("continue")} title="claude --continue（会話を再開）">continue</button>
+    </div>
+  </div>
+
   <div class="sec">
     <div class="label">TOKENS</div>
     {#if usage}
@@ -393,6 +418,29 @@
   .switcher:disabled {
     opacity: 0.35;
     cursor: default;
+  }
+  .startrow {
+    display: flex;
+    gap: 5px;
+  }
+  .startbtn {
+    flex: 1 1 0;
+    min-width: 0;
+    background: transparent;
+    color: var(--teal);
+    border: 1px solid rgba(45, 212, 191, 0.35);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.68rem;
+    padding: 5px 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .startbtn:hover {
+    background: rgba(45, 212, 191, 0.14);
+    border-color: var(--teal);
   }
   .mcp {
     cursor: help;

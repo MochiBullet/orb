@@ -83,6 +83,20 @@ function makeTab(lay?: PaneNode): Tab {
   return { id, layout: leaf(leafId), focused: leafId, ai: null };
 }
 
+/** 初回起動用の AI タブ: claude は自動起動せず空シェル（claude 未導入環境でも安全）＋
+ *  role="ai" のみ予約。ai を最初から埋めておくことで、サイドバーの model/effort
+ *  プルダウンと claude 起動ボタンが起動直後から使える（#34 の続き）。 */
+function makeAiTab(): Tab {
+  const id = nextPaneId();
+  const leafId = nextPaneId();
+  return { id, layout: leaf(leafId, undefined, "ai"), focused: leafId, ai: leafId, name: "AI" };
+}
+function makeShellTab(): Tab {
+  const id = nextPaneId();
+  const leafId = nextPaneId();
+  return { id, layout: leaf(leafId), focused: leafId, ai: null, name: "shell" };
+}
+
 /** 初回マウント時に最初のタブを用意する。前回セッションがあれば復元する。 */
 export function ensureFirstTab() {
   if (get(tabs).length > 0) return;
@@ -106,10 +120,12 @@ export function ensureFirstTab() {
     /* 壊れたセッションは無視して新規 */
   }
   primeScrollbackRestore(false); // #43: 起動時は自動復元しない（新規起動でも同様）
-  const t = makeTab();
-  tabs.set([t]);
-  activeTabId.set(t.id);
-  loadTab(t);
+  // 真の初回起動: AI タブ + 通常シェルタブの2枚で開始（AI が最初のアクティブタブ）。
+  const aiTab = makeAiTab();
+  const shellTab = makeShellTab();
+  tabs.set([aiTab, shellTab]);
+  activeTabId.set(aiTab.id);
+  loadTab(aiTab);
 }
 
 export function newTab(lay?: PaneNode) {
