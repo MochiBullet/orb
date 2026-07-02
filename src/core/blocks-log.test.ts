@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { capText, localDay, buildBlockEvent, genId } from "./blocks-log";
+import { capText, localDay, buildBlockEvent, genId, parseSearchQuery } from "./blocks-log";
 
 describe("capText (#31: JSONL を肥大させない上限)", () => {
   it("上限内はそのまま・truncated=false", () => {
@@ -120,5 +120,66 @@ describe("genId (#31)", () => {
     const b = genId();
     expect(a).toBeTruthy();
     expect(a).not.toBe(b);
+  });
+});
+
+describe("parseSearchQuery (#49: 横断検索 DSL)", () => {
+  it("素のトークンは AND 検索語になる", () => {
+    const s = parseSearchQuery("  cargo   build ");
+    expect(s.terms).toEqual(["cargo", "build"]);
+    expect(s.exit).toBeNull();
+    expect(s.cwd).toBeNull();
+    expect(s.field).toBe("all");
+    expect(s.from).toBeNull();
+    expect(s.to).toBeNull();
+  });
+
+  it("exit: は ok / fail / 数値（負値含む）を受ける・!0 と ≠0 は fail の別名", () => {
+    expect(parseSearchQuery("exit:ok").exit).toBe("ok");
+    expect(parseSearchQuery("exit:fail").exit).toBe("fail");
+    expect(parseSearchQuery("exit:137").exit).toBe("137");
+    expect(parseSearchQuery("exit:-1").exit).toBe("-1");
+    expect(parseSearchQuery("exit:!0").exit).toBe("fail");
+    expect(parseSearchQuery("exit:≠0").exit).toBe("fail");
+  });
+
+  it("cwd: / in: を解釈する（cmd・out の短縮も）", () => {
+    const s = parseSearchQuery("cwd:orb in:command");
+    expect(s.cwd).toBe("orb");
+    expect(s.field).toBe("command");
+    expect(parseSearchQuery("in:cmd").field).toBe("command");
+    expect(parseSearchQuery("in:output").field).toBe("output");
+    expect(parseSearchQuery("in:out").field).toBe("output");
+    expect(parseSearchQuery("in:all").field).toBe("all");
+  });
+
+  it("from:/to:/day: は YYYY-MM-DD のみ・day は両端に展開", () => {
+    const s = parseSearchQuery("from:2026-06-01 to:2026-06-30");
+    expect(s.from).toBe("2026-06-01");
+    expect(s.to).toBe("2026-06-30");
+    const d = parseSearchQuery("day:2026-07-01");
+    expect(d.from).toBe("2026-07-01");
+    expect(d.to).toBe("2026-07-01");
+  });
+
+  it("解釈できない key:value はトークンごと検索語へ落とす＝入力を黙って捨てない", () => {
+    expect(parseSearchQuery("exit:xyz").terms).toEqual(["exit:xyz"]);
+    expect(parseSearchQuery("in:body").terms).toEqual(["in:body"]);
+    expect(parseSearchQuery("from:2026-6-1").terms).toEqual(["from:2026-6-1"]);
+    expect(parseSearchQuery("day:notdate").terms).toEqual(["day:notdate"]);
+    // 値なしの exit: / cwd: も検索語扱い
+    expect(parseSearchQuery("exit:").terms).toEqual(["exit:"]);
+    expect(parseSearchQuery("cwd:").terms).toEqual(["cwd:"]);
+    // URL のようなコロン入りトークンはそのまま検索語
+    expect(parseSearchQuery("https://example.com").terms).toEqual(["https://example.com"]);
+  });
+
+  it("混在クエリ: 受け入れ条件の形（cargo exit:fail cwd:orb）を分解できる", () => {
+    const s = parseSearchQuery("cargo exit:fail cwd:orb in:command from:2026-06-01");
+    expect(s.terms).toEqual(["cargo"]);
+    expect(s.exit).toBe("fail");
+    expect(s.cwd).toBe("orb");
+    expect(s.field).toBe("command");
+    expect(s.from).toBe("2026-06-01");
   });
 });

@@ -148,3 +148,100 @@ export async function readBlockEvents(day: string = localDay()): Promise<BlockEv
     return [];
   }
 }
+
+// ---- #49 全期間横断検索 ------------------------------------------------------------------
+
+/** 検索クエリの構造化結果。Rust の `SearchFilters`（blocks.rs）へそのまま渡す形。 */
+export interface SearchSpec {
+  /** AND 検索語（`key:value` 以外のトークン）。 */
+  terms: string[];
+  /** "ok" | "fail" | 終了コードの数値文字列。 */
+  exit: string | null;
+  cwd: string | null;
+  field: "all" | "command" | "output";
+  from: string | null;
+  to: string | null;
+}
+
+export interface SearchHit {
+  day: string;
+  event: BlockEvent;
+}
+
+export interface SearchResult {
+  hits: SearchHit[];
+  scanned_days: number;
+  limit_hit: boolean;
+}
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 検索 DSL を構造化する純関数（vitest 対象）。
+ *
+ * `cargo exit:fail cwd:orb in:command from:2026-06-01` 形式。対応キー:
+ * - `exit:` ok / fail（`!0` `≠0` も fail の別名）/ 終了コード数値
+ * - `cwd:` 部分一致 / `in:` command・cmd / output・out / all
+ * - `from:` `to:` `day:`（YYYY-MM-DD、day は両端に展開）
+ * 解釈できない `key:value` はトークンごと検索語に落とす＝入力を黙って捨てない。
+ */
+export function parseSearchQuery(raw: string): SearchSpec {
+  const spec: SearchSpec = { terms: [], exit: null, cwd: null, field: "all", from: null, to: null };
+  for (const tok of raw.trim().split(/\s+/).filter(Boolean)) {
+    const m = /^([a-zA-Z]+):(.*)$/.exec(tok);
+    const key = m?.[1].toLowerCase();
+    const val = m?.[2] ?? "";
+    if (key === "exit" && val) {
+      if (val === "ok" || val === "fail") {
+        spec.exit = val;
+        continue;
+      }
+      if (val === "!0" || val === "≠0") {
+        spec.exit = "fail";
+        continue;
+      }
+      if (/^-?\d+$/.test(val)) {
+        spec.exit = val;
+        continue;
+      }
+    } else if (key === "cwd" && val) {
+      spec.cwd = val;
+      continue;
+    } else if (key === "in") {
+      if (val === "command" || val === "cmd") {
+        spec.field = "command";
+        continue;
+      }
+      if (val === "output" || val === "out") {
+        spec.field = "output";
+        continue;
+      }
+      if (val === "all") {
+        spec.field = "all";
+        continue;
+      }
+    } else if ((key === "from" || key === "to") && DAY_RE.test(val)) {
+      spec[key] = val;
+      continue;
+    } else if (key === "day" && DAY_RE.test(val)) {
+      spec.from = val;
+      spec.to = val;
+      continue;
+    }
+    spec.terms.push(tok);
+  }
+  return spec;
+}
+
+/** 全期間のブロックログを横断検索する（#49）。失敗時は空結果。 */
+export async function searchBlockEvents(raw: string, limit = 200): Promise<SearchResult> {
+  const spec = parseSearchQuery(raw);
+  try {
+    return await invoke<SearchResult>("search_block_events", {
+      filters: { ...spec, limit },
+    });
+  } catch (e) {
+    logError(`block log search failed: ${String(e)}`);
+    return { hits: [], scanned_days: 0, limit_hit: false };
+  }
+}
