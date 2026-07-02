@@ -16,6 +16,7 @@
   import {
     focusedPane,
     aiPane,
+    aiPaneActivity,
     showSettings,
     layout,
     broadcast,
@@ -446,7 +447,15 @@
 
     // 入力ハンドラは spawn を待たずにここで張る（#39）。PTY 未起動の間は enqueueInput が
     // バッファへ積み、spawn 完了時にまとめて流す＝起動直後の打鍵を1打も落とさない。
-    term.onData((data) => enqueueInput(encoder.encode(data)));
+    term.onData((data) => {
+      enqueueInput(encoder.encode(data));
+      // AI ペインで Enter が押された＝claude 側で何か実行された合図。/model・/effort は
+      // pwsh の OSC マーカーを経由しない（claude が標準入力を握っている間 ReadLine は動かない）
+      // ため、サイドバーの CLAUDE ステータスをこの合図で再チェックさせる。
+      if (role === "ai" && (data.includes("\r") || data.includes("\n"))) {
+        aiPaneActivity.set(Date.now());
+      }
+    });
     term.onBinary((data) => {
       const bytes = new Uint8Array(data.length);
       for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xff;

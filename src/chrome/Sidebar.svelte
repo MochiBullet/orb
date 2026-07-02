@@ -3,7 +3,7 @@
   import { get } from "svelte/store";
   import { getUsage, type Usage } from "../core/usage";
   import { getClaudeStatus, getGitBranch, getMcpHealth, type ClaudeStatus, type McpStatus } from "../core/status";
-  import { cwd as cwdStore, layout, startedAt, sidebarSide } from "../store/appStore";
+  import { cwd as cwdStore, layout, startedAt, sidebarSide, aiPaneActivity } from "../store/appStore";
   import { tabs } from "../layout/tabs";
   import { leafIds } from "../layout/tree";
 
@@ -29,6 +29,15 @@
     getGitBranch(c || undefined)
       .then((b) => (branch = b))
       .catch(() => (branch = null));
+  });
+
+  // AI ペインで Enter が押された（/model・/effort 等の可能性）→ CLAUDE ステータスを再チェック。
+  // settings.json への書き込みには若干のタイムラグがあるため 2 段（1.2s / 3s）でリトライする。
+  let aiActivityTimers: number[] = [];
+  $effect(() => {
+    void $aiPaneActivity; // 依存として購読するだけ（値そのものは使わない）
+    for (const t of aiActivityTimers) clearTimeout(t);
+    aiActivityTimers = [1200, 3000].map((ms) => window.setTimeout(() => refreshStatus(), ms));
   });
 
   let usageErr = $state("");
@@ -101,6 +110,7 @@
     if (healthTimer) clearInterval(healthTimer);
     if (healthDeferTimer) clearTimeout(healthDeferTimer);
     if (clock) clearInterval(clock);
+    for (const t of aiActivityTimers) clearTimeout(t);
   });
 
   function fmtReset(iso: string): string {

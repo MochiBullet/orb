@@ -13,6 +13,12 @@ export const focusedPane = writable<number>(0);
 /** AI(claude)ペインの ID。Ctrl+L で選択テキストの送信先になる。null=AIペイン無し。 */
 export const aiPane = writable<number | null>(null);
 
+/** AI ペインで Enter が押された時刻（ms）。/model・/effort 等のスラッシュコマンドは
+ *  Claude CLI 内部の処理で pwsh の OSC マーカー（#33）を経由しないため、シェル側の
+ *  ブロック境界からは検知できない。代わりに「AI ペインで何か実行された」を合図に
+ *  サイドバーの CLAUDE ステータス（model/effort/MCP）を再チェックさせる（#33 の続き）。 */
+export const aiPaneActivity = writable(0);
+
 /** 設定パネルの表示状態（TitleBar の歯車 / Ctrl+, から開く）。 */
 export const showSettings = writable(false);
 
