@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, setFocusedAsAiPane } from "../store/appStore";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -226,6 +226,11 @@
       run: () => sidebarSide.update((s) => (s === "right" ? "left" : "right")),
     },
     { label: "ブロック履歴 / Block history", hint: "Ctrl+Shift+H", run: () => (showHistory = true) },
+    {
+      label: "このペインを AI ペインに設定",
+      hint: "サイドバーの model/effort 切替の送信先",
+      run: () => setFocusedAsAiPane(),
+    },
     { label: "設定を開く", hint: "Ctrl+,", run: () => showSettings.set(true) },
     { label: "案件ランチャー", hint: "Ctrl+P", run: () => (showLauncher = true) },
     {

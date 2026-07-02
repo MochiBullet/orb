@@ -19,6 +19,13 @@ export const aiPane = writable<number | null>(null);
  *  サイドバーの CLAUDE ステータス（model/effort/MCP）を再チェックさせる（#33 の続き）。 */
 export const aiPaneActivity = writable(0);
 
+/** フォーカス中のペインを AI ペインに指定する。今は案件ランチャー（tabs.ts）経由でしか
+ *  aiPane が決まらず、手動 split/新規タブでは永遠に未設定＝サイドバーの model/effort
+ *  プルダウンが常に disabled になる。パレット/ショートカットからの明示指定用。 */
+export function setFocusedAsAiPane() {
+  aiPane.set(get(focusedPane));
+}
+
 /** 設定パネルの表示状態（TitleBar の歯車 / Ctrl+, から開く）。 */
 export const showSettings = writable(false);
 
