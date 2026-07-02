@@ -134,6 +134,234 @@ pub async fn read_block_events(day: String) -> Vec<BlockEvent> {
         .unwrap_or_default()
 }
 
+// ---- #49 全期間横断検索 -------------------------------------------------------------------
+//
+// `blocks/*.jsonl` を日付降順に 1 ファイルずつストリーム走査する（全ファイル一括ロードはしない）。
+// ファイル内は追記順＝時系列なので逆順に読む＝結果はグローバルに「新しい順」。limit 到達で即打ち切り。
+
+/// 横断検索のフィルタ。フロントの `parseSearchQuery`（blocks-log.ts）が組む・snake_case 1:1。
+#[derive(Deserialize, Clone, Debug)]
+pub struct SearchFilters {
+    /// AND 検索語（大文字小文字は無視）。空なら全件（他フィルタのみで絞る）。
+    #[serde(default)]
+    pub terms: Vec<String>,
+    /// "ok"（exit 0）| "fail"（exit ≠ 0）| 終了コードの数値文字列。不明な値は無視。
+    #[serde(default)]
+    pub exit: Option<String>,
+    /// cwd の部分一致（大文字小文字は無視）。
+    #[serde(default)]
+    pub cwd: Option<String>,
+    /// 検索対象: "all"（既定）| "command" | "output"。
+    #[serde(default)]
+    pub field: Option<String>,
+    /// 日付範囲（YYYY-MM-DD・両端含む）。不正な形式は無視。
+    #[serde(default)]
+    pub from: Option<String>,
+    #[serde(default)]
+    pub to: Option<String>,
+    /// 最大ヒット件数（1..=1000 に clamp）。
+    #[serde(default = "default_search_limit")]
+    pub limit: usize,
+}
+
+fn default_search_limit() -> usize {
+    200
+}
+
+/// 1 ヒット。UI の日付見出し用に、由来ファイルの日付を添える。
+#[derive(Serialize, Debug)]
+pub struct SearchHit {
+    pub day: String,
+    pub event: BlockEvent,
+}
+
+#[derive(Serialize, Debug)]
+pub struct SearchResult {
+    pub hits: Vec<SearchHit>,
+    /// 実際に読んだ日数（範囲外スキップ・打ち切り後は数えない）。
+    pub scanned_days: u32,
+    /// limit で打ち切った（＝まだ古い方にヒットが残っている可能性がある）。
+    pub limit_hit: bool,
+}
+
+enum ExitFilter {
+    Any,
+    Ok,
+    Fail,
+    Code(i64),
+}
+
+enum SearchField {
+    All,
+    Command,
+    Output,
+}
+
+/// 検索前に一度だけ正規化したフィルタ（小文字化・clamp・プリフィルタ可否の判定）。
+struct NormFilters {
+    terms: Vec<String>,
+    exit: ExitFilter,
+    cwd: Option<String>,
+    field: SearchField,
+    from: Option<String>,
+    to: Option<String>,
+    limit: usize,
+    /// 生行プリフィルタを使ってよいか。serde_json が生のまま書く文字だけで構成された語
+    /// （`"` `\` 制御文字を含まない）なら、パース前の行 contains は「含まない＝不一致」の
+    /// 高速棄却として安全（一致判定そのものはパース後の matches が行う）。
+    prefilter: bool,
+}
+
+fn normalize_filters(f: &SearchFilters) -> NormFilters {
+    let terms: Vec<String> = f
+        .terms
+        .iter()
+        .map(|t| t.trim().to_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
+    let prefilter = !terms.is_empty()
+        && terms
+            .iter()
+            .all(|t| !t.chars().any(|c| c == '"' || c == '\\' || c.is_control()));
+    let exit = match f.exit.as_deref() {
+        Some("ok") => ExitFilter::Ok,
+        Some("fail") => ExitFilter::Fail,
+        Some(s) => s.parse::<i64>().map(ExitFilter::Code).unwrap_or(ExitFilter::Any),
+        None => ExitFilter::Any,
+    };
+    let valid_day = |d: &Option<String>| d.as_deref().filter(|s| is_valid_day(s)).map(String::from);
+    NormFilters {
+        terms,
+        exit,
+        cwd: f.cwd.as_deref().map(|c| c.to_lowercase()).filter(|c| !c.is_empty()),
+        field: match f.field.as_deref() {
+            Some("command") => SearchField::Command,
+            Some("output") => SearchField::Output,
+            _ => SearchField::All,
+        },
+        from: valid_day(&f.from),
+        to: valid_day(&f.to),
+        limit: f.limit.clamp(1, 1000),
+        prefilter,
+    }
+}
+
+/// blocks ディレクトリの日付ファイル（YYYY-MM-DD.jsonl）を新しい日付順で列挙する。
+fn list_days(dir: &Path) -> Vec<String> {
+    let mut days: Vec<String> = match std::fs::read_dir(dir) {
+        Ok(rd) => rd
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let day = name.strip_suffix(".jsonl")?.to_string();
+                is_valid_day(&day).then_some(day)
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    days.sort_unstable_by(|a, b| b.cmp(a));
+    days
+}
+
+fn event_matches(e: &BlockEvent, f: &NormFilters) -> bool {
+    match f.exit {
+        ExitFilter::Any => {}
+        ExitFilter::Ok => {
+            if e.exit_code != 0 {
+                return false;
+            }
+        }
+        ExitFilter::Fail => {
+            if e.exit_code == 0 {
+                return false;
+            }
+        }
+        ExitFilter::Code(c) => {
+            if e.exit_code != c {
+                return false;
+            }
+        }
+    }
+    if let Some(c) = &f.cwd {
+        if !e.cwd.to_lowercase().contains(c.as_str()) {
+            return false;
+        }
+    }
+    if f.terms.is_empty() {
+        return true;
+    }
+    let hay = match f.field {
+        // command のみ: #33 で確定した行だけが対象（マーカー不在＝候補にしない。嘘をつかない）。
+        SearchField::Command => match &e.command {
+            Some(c) => c.clone(),
+            None => return false,
+        },
+        // output のみ: 確定 output_body の無い旧レコードは全文へフォールバック（取りこぼし優先で回収）。
+        SearchField::Output => e.output_body.clone().unwrap_or_else(|| e.text.clone()),
+        SearchField::All => format!("{} {} {}", e.command.as_deref().unwrap_or(""), e.text, e.cwd),
+    }
+    .to_lowercase();
+    f.terms.iter().all(|t| hay.contains(t.as_str()))
+}
+
+/// 横断検索の本体（dir 注入でテスト可能）。日付降順・ファイル内逆順＝新しい順、limit で有界。
+fn search_events_in(dir: &Path, filters: &SearchFilters) -> SearchResult {
+    let f = normalize_filters(filters);
+    let mut hits: Vec<SearchHit> = Vec::new();
+    let mut scanned_days = 0u32;
+    let mut limit_hit = false;
+    'days: for day in list_days(dir) {
+        // 降順走査なので from 未満に達したら以降はすべて範囲外＝打ち切り。to 超えはスキップして続行。
+        if let Some(from) = &f.from {
+            if day.as_str() < from.as_str() {
+                break;
+            }
+        }
+        if let Some(to) = &f.to {
+            if day.as_str() > to.as_str() {
+                continue;
+            }
+        }
+        let text = match std::fs::read_to_string(day_file(dir, &day)) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        scanned_days += 1;
+        for line in text.lines().rev() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if f.prefilter {
+                let low = line.to_lowercase();
+                if !f.terms.iter().all(|t| low.contains(t.as_str())) {
+                    continue;
+                }
+            }
+            let e = match serde_json::from_str::<BlockEvent>(line) {
+                Ok(e) => e,
+                Err(_) => continue, // 壊れた行・将来スキーマは読み戻し同様スキップ
+            };
+            if !event_matches(&e, &f) {
+                continue;
+            }
+            hits.push(SearchHit { day: day.clone(), event: e });
+            if hits.len() >= f.limit {
+                limit_hit = true;
+                break 'days;
+            }
+        }
+    }
+    SearchResult { hits, scanned_days, limit_hit }
+}
+
+/// #49: 全期間のブロックログを横断検索する（日付降順ストリーム・limit で有界）。
+#[tauri::command]
+pub async fn search_block_events(filters: SearchFilters) -> SearchResult {
+    tauri::async_runtime::spawn_blocking(move || search_events_in(&blocks_dir(), &filters))
+        .await
+        .unwrap_or_else(|_| SearchResult { hits: Vec::new(), scanned_days: 0, limit_hit: false })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,6 +444,157 @@ mod tests {
             day_file(Path::new("base"), "../evil").file_name().unwrap(),
             "unknown.jsonl"
         );
+    }
+
+    /// 検索テスト用のフィルタ（既定＝無条件・limit 200）。
+    fn filters() -> SearchFilters {
+        SearchFilters {
+            terms: vec![],
+            exit: None,
+            cwd: None,
+            field: None,
+            from: None,
+            to: None,
+            limit: 200,
+        }
+    }
+
+    /// 3 日分のログを作る。各日 2 件（追記順＝古→新）。
+    fn seed_days(dir: &Path) {
+        let _ = std::fs::remove_dir_all(dir);
+        for (day, ids) in [
+            ("2026-06-29", ["a1", "a2"]),
+            ("2026-06-30", ["b1", "b2"]),
+            ("2026-07-01", ["c1", "c2"]),
+        ] {
+            for id in ids {
+                write_event_to(dir, day, &ev(id, 0)).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn search_is_newest_first_across_days_and_bounded() {
+        let dir = temp("search-order");
+        seed_days(&dir);
+        let got = search_events_in(&dir, &filters());
+        let order: Vec<&str> = got.hits.iter().map(|h| h.event.block_id.as_str()).collect();
+        // 日付降順 × ファイル内逆順 ＝ グローバル新しい順。
+        assert_eq!(order, ["c2", "c1", "b2", "b1", "a2", "a1"]);
+        assert_eq!(got.hits[0].day, "2026-07-01");
+        assert!(!got.limit_hit);
+        assert_eq!(got.scanned_days, 3);
+
+        let bounded = search_events_in(&dir, &SearchFilters { limit: 3, ..filters() });
+        assert_eq!(bounded.hits.len(), 3);
+        assert!(bounded.limit_hit);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_filters_exit_cwd_and_terms() {
+        let dir = temp("search-filter");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut fail = ev("f1", 101);
+        fail.text = "cargo build\nerror: expected `;`".into();
+        fail.cwd = r"C:\proj\orb".into();
+        let mut ok = ev("o1", 0);
+        ok.text = "cargo build\nFinished dev".into();
+        ok.cwd = r"C:\proj\other".into();
+        write_event_to(&dir, "2026-07-01", &fail).unwrap();
+        write_event_to(&dir, "2026-07-01", &ok).unwrap();
+
+        // exit:fail ＋ 語 AND（大文字小文字無視）
+        let got = search_events_in(
+            &dir,
+            &SearchFilters { terms: vec!["CARGO".into()], exit: Some("fail".into()), ..filters() },
+        );
+        assert_eq!(got.hits.len(), 1);
+        assert_eq!(got.hits[0].event.block_id, "f1");
+
+        // exit:0 は数値指定でも通る
+        let got = search_events_in(&dir, &SearchFilters { exit: Some("0".into()), ..filters() });
+        assert_eq!(got.hits.len(), 1);
+        assert_eq!(got.hits[0].event.block_id, "o1");
+
+        // cwd 部分一致（小文字化）
+        let got = search_events_in(&dir, &SearchFilters { cwd: Some("ORB".into()), ..filters() });
+        assert_eq!(got.hits.len(), 1);
+        assert_eq!(got.hits[0].event.block_id, "f1");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_field_scopes_are_honest() {
+        let dir = temp("search-scope");
+        let _ = std::fs::remove_dir_all(&dir);
+        // command 確定済み（#33 マーカーあり）
+        let mut with_cmd = ev("cmd1", 0);
+        with_cmd.command = Some("pnpm vitest run".into());
+        with_cmd.output_body = Some("62 passed".into());
+        // マーカー無しの旧レコード（command/output_body = null）。text にだけ語が居る。
+        let mut legacy = ev("old1", 0);
+        legacy.text = "pnpm vitest run\n62 passed".into();
+        write_event_to(&dir, "2026-07-01", &with_cmd).unwrap();
+        write_event_to(&dir, "2026-07-01", &legacy).unwrap();
+
+        // in:command → 確定 command を持つレコードだけ（legacy は候補にしない＝嘘をつかない）
+        let got = search_events_in(
+            &dir,
+            &SearchFilters { terms: vec!["vitest".into()], field: Some("command".into()), ..filters() },
+        );
+        assert_eq!(got.hits.len(), 1);
+        assert_eq!(got.hits[0].event.block_id, "cmd1");
+
+        // in:output → output_body、無ければ text へフォールバック（旧レコードも回収）
+        let got = search_events_in(
+            &dir,
+            &SearchFilters { terms: vec!["passed".into()], field: Some("output".into()), ..filters() },
+        );
+        assert_eq!(got.hits.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_date_range_bounds_scan() {
+        let dir = temp("search-range");
+        seed_days(&dir);
+        let got = search_events_in(
+            &dir,
+            &SearchFilters {
+                from: Some("2026-06-30".into()),
+                to: Some("2026-06-30".into()),
+                ..filters()
+            },
+        );
+        assert_eq!(got.hits.len(), 2);
+        assert!(got.hits.iter().all(|h| h.day == "2026-06-30"));
+        // to で新しい日をスキップ、from 未満に達した時点で走査を打ち切る＝読むのは 1 日分だけ。
+        assert_eq!(got.scanned_days, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_prefilter_stays_correct_for_escaped_and_unicode_terms() {
+        let dir = temp("search-prefilter");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut e = ev("jp", 1);
+        e.text = "type 日本語のログ.txt\nsay \"hi\" と出た".into();
+        write_event_to(&dir, "2026-07-01", &e).unwrap();
+
+        // 非 ASCII 語: serde_json は生 UTF-8 で書くのでプリフィルタ経路でも一致する
+        let got =
+            search_events_in(&dir, &SearchFilters { terms: vec!["日本語".into()], ..filters() });
+        assert_eq!(got.hits.len(), 1);
+
+        // `"` を含む語: JSON では \" にエスケープされる＝プリフィルタ不可と判定され、
+        // フルパース経路で正しく一致する（棄却で取りこぼさない）
+        let got = search_events_in(
+            &dir,
+            &SearchFilters { terms: vec![r#"say "hi""#.into()], ..filters() },
+        );
+        assert_eq!(got.hits.len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
