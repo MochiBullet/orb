@@ -1,11 +1,56 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
+  import { invoke } from "@tauri-apps/api/core";
   import { getUsage, type Usage } from "../core/usage";
   import { getClaudeStatus, getGitBranch, getMcpHealth, type ClaudeStatus, type McpStatus } from "../core/status";
-  import { cwd as cwdStore, layout, startedAt, sidebarSide, aiPaneActivity } from "../store/appStore";
+  import { cwd as cwdStore, layout, startedAt, sidebarSide, aiPaneActivity, aiPane } from "../store/appStore";
   import { tabs } from "../layout/tabs";
   import { leafIds } from "../layout/tree";
+  import { logError } from "../core/log";
+
+  // #34 系: サイドバーから直接 model/effort を切替。値は Claude CLI の非対話引数
+  // （`/model <alias>` `/effort <level>` は Enter で即反映）。
+  // ultracode は誤操作で強制発火すると影響が大きいため一覧には含めない（要れば手打ちで）。
+  const MODEL_OPTIONS = [
+    { value: "opus", label: "Opus 4.8" },
+    { value: "sonnet", label: "Sonnet 5" },
+    { value: "haiku", label: "Haiku 4.5" },
+    { value: "fable", label: "Fable 5" },
+    { value: "default", label: "Default" },
+  ];
+  const EFFORT_OPTIONS = [
+    { value: "low", label: "low" },
+    { value: "medium", label: "medium" },
+    { value: "high", label: "high" },
+    { value: "xhigh", label: "xhigh" },
+    { value: "max", label: "max（このセッションのみ）" },
+    { value: "auto", label: "auto" },
+  ];
+  const cmdEncoder = new TextEncoder();
+
+  /** AI ペイン（フォーカスとは無関係に固定の aiPane store）へスラッシュコマンドを Enter 込みで
+   *  投入する。model/effort 切替は UI から明示選択された非破壊操作なので、#33 の rerun（Enter
+   *  を送らず人に委ねる）とは違い、即時反映が自然＝ここでは \r まで送る。
+   *  会話に既に出力がある場合 /model は確認プロンプトを出すことがあるが、それは自動化せず
+   *  端末上でユーザーの確認に委ねる（勝手に Enter を連打しない）。 */
+  function sendAiCommand(cmd: string) {
+    const target = get(aiPane);
+    if (target == null) return;
+    void invoke("write_pty", { paneId: target, data: Array.from(cmdEncoder.encode(cmd + "\r")) })
+      .catch((e) => logError(`AI pane command failed: ${String(e)}`));
+    aiPaneActivity.set(Date.now()); // 直後にサイドバーのステータスを再チェック（1.2s/3s）
+  }
+  function onModelChange(e: Event) {
+    const v = (e.currentTarget as HTMLSelectElement).value;
+    (e.currentTarget as HTMLSelectElement).value = ""; // プレースホルダに戻す（現在値は下のkvで見える）
+    if (v) sendAiCommand(`/model ${v}`);
+  }
+  function onEffortChange(e: Event) {
+    const v = (e.currentTarget as HTMLSelectElement).value;
+    (e.currentTarget as HTMLSelectElement).value = "";
+    if (v) sendAiCommand(`/effort ${v}`);
+  }
 
   let usage = $state<Usage | null>(null);
   let status = $state<ClaudeStatus | null>(null);
@@ -175,9 +220,24 @@
   <div class="sec">
     <div class="label">CLAUDE</div>
     {#if status}
-      <!-- model/effort は値が長い（claude-fable-5[1m] 等）ので 2 行積みで全文表示する -->
-      <div class="krow stack"><span>model</span><span class="kv">{status.model || "—"}</span></div>
-      <div class="krow stack"><span>effort</span><span class="kv">{status.effort || "—"}</span></div>
+      <!-- model/effort は値が長い（claude-fable-5[1m] 等）ので 2 行積みで全文表示する。
+           プルダウンは「変更する」専用（選ぶたびプレースホルダへ戻る）、現在値は kv 側の表示で見る。 -->
+      <div class="krow stack">
+        <span>model</span>
+        <span class="kv">{status.model || "—"}</span>
+        <select class="switcher" onchange={onModelChange} disabled={$aiPane == null} title={$aiPane == null ? "AI ペインがありません" : "モデルを切替"}>
+          <option value="">変更…</option>
+          {#each MODEL_OPTIONS as o}<option value={o.value}>{o.label}</option>{/each}
+        </select>
+      </div>
+      <div class="krow stack">
+        <span>effort</span>
+        <span class="kv">{status.effort || "—"}</span>
+        <select class="switcher" onchange={onEffortChange} disabled={$aiPane == null} title={$aiPane == null ? "AI ペインがありません" : "effort を切替"}>
+          <option value="">変更…</option>
+          {#each EFFORT_OPTIONS as o}<option value={o.value}>{o.label}</option>{/each}
+        </select>
+      </div>
       <div class="krow mcp" title={"MCP 生死（claude mcp list 実測）:\n✔ connected  ! needs auth  ✗ failed"}>
         <span>mcp</span>
         <span class="kv"
@@ -312,6 +372,27 @@
     word-break: break-all;
     line-height: 1.3;
     padding-left: 8px;
+  }
+  .switcher {
+    margin-top: 3px;
+    margin-left: 8px;
+    max-width: calc(100% - 8px);
+    background: #05100e;
+    color: var(--grey);
+    border: 1px solid rgba(45, 212, 191, 0.25);
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 0.64rem;
+    padding: 2px 4px;
+    cursor: pointer;
+  }
+  .switcher:hover:not(:disabled) {
+    border-color: var(--teal);
+    color: var(--fg);
+  }
+  .switcher:disabled {
+    opacity: 0.35;
+    cursor: default;
   }
   .mcp {
     cursor: help;
