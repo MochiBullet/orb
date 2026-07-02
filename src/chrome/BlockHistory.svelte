@@ -4,11 +4,18 @@
   import { invoke } from "@tauri-apps/api/core";
   import { aiPane, sendInputToFocusedPane } from "../store/appStore";
   import { logError } from "../core/log";
-  import { readBlockEvents, localDay, type BlockEvent } from "../core/blocks-log";
+  import {
+    readBlockEvents,
+    searchBlockEvents,
+    localDay,
+    type BlockEvent,
+    type SearchHit,
+  } from "../core/blocks-log";
   import { formatBlockForAi, formatFailureDigest, frameBracketedPaste, type BlockAiContext } from "../core/ai-payload";
 
   // #31 受け入れ条件の実証: 耐久ログ（JSONL）のみからブロック列を再構築・再描画する。
   // 稼働中の xterm 装飾には一切依存せず、read_block_events の結果だけで一覧を組む。
+  // #49: 検索語を入れた瞬間だけ「全期間横断モード」（search_block_events）へ切り替わる。
   let { onClose }: { onClose: () => void } = $props();
 
   const today = localDay();
@@ -18,13 +25,48 @@
   let query = $state("");
   let input = $state<HTMLInputElement | undefined>(undefined);
 
-  let filtered = $derived(
-    query.trim()
-      ? events.filter((e) =>
-          `${e.command ?? ""} ${e.text} ${e.cwd}`.toLowerCase().includes(query.trim().toLowerCase()),
-        )
-      : events,
-  );
+  // ---- #49 横断検索状態。query が空 = 従来の単日モード。
+  let crossMode = $derived(query.trim().length > 0);
+  let hits = $state<SearchHit[]>([]);
+  let searching = $state(false);
+  let searchMeta = $state<{ scanned: number; limitHit: boolean } | null>(null);
+  let searchSeq = 0;
+
+  $effect(() => {
+    const q = query.trim();
+    if (!q) {
+      searchSeq++; // 進行中の応答を無効化
+      hits = [];
+      searchMeta = null;
+      searching = false;
+      return;
+    }
+    const seq = ++searchSeq;
+    searching = true;
+    const t = setTimeout(async () => {
+      const res = await searchBlockEvents(q);
+      if (seq !== searchSeq) return; // 古い応答は捨てる（後勝ち）
+      hits = res.hits;
+      searchMeta = { scanned: res.scanned_days, limitHit: res.limit_hit };
+      searching = false;
+    }, 180); // debounce: タイプ中の全期間走査を抑える
+    return () => clearTimeout(t);
+  });
+
+  /** ヒットを日付ごとに束ねる（hits は日付降順で連続しているので単純な走査でよい）。 */
+  type DayGroup = { day: string; list: BlockEvent[] };
+  let groups = $derived.by(() => {
+    const gs: DayGroup[] = [];
+    for (const h of hits) {
+      const last = gs[gs.length - 1];
+      if (last && last.day === h.day) last.list.push(h.event);
+      else gs.push({ day: h.day, list: [h.event] });
+    }
+    return gs;
+  });
+
+  /** いま画面に出ているブロック（単日 or 横断ヒット）。失敗→AI とフッタ件数の共通母集団。 */
+  let visible = $derived(crossMode ? hits.map((h) => h.event) : events);
 
   async function load(d: string) {
     loading = true;
@@ -86,6 +128,15 @@
     if (sendInputToFocusedPane(enc.encode(frameBracketedPaste(e.command)), true)) onClose();
   }
 
+  /** #49: 過去日のヒットは実行時 cwd が今と違いがち。cd 込みで挿入する明示ボタン
+   *  （何が走るかプロンプト上で全部見える形＝黙った魔法をしない。実行は Enter で人が）。 */
+  function rerunWithCd(e: BlockEvent) {
+    if (!e.command || !e.cwd) return;
+    const cd = `cd '${e.cwd.replace(/'/g, "''")}'; ${e.command}`; // pwsh の単引用エスケープ
+    const enc = new TextEncoder();
+    if (sendInputToFocusedPane(enc.encode(frameBracketedPaste(cd)), true)) onClose();
+  }
+
   function copy(e: BlockEvent) {
     if (e.text) void navigator.clipboard.writeText(e.text);
   }
@@ -110,8 +161,8 @@
     sendToAi(formatBlockForAi(toCtx(e)));
   }
 
-  /** #34: 表示中（フィルタ後）の失敗ブロックをまとめて AI ペインへ。直近優先で最大10件。 */
-  let failedVisible = $derived(filtered.filter((e) => e.exit_code > 0));
+  /** #34: 表示中の失敗ブロックをまとめて AI ペインへ。直近優先で最大10件（横断ヒットも対象）。 */
+  let failedVisible = $derived(visible.filter((e) => e.exit_code > 0));
   function failuresToAi() {
     const picks = failedVisible.slice(0, 10).map(toCtx); // events は新しい順に並んでいる
     if (!picks.length) return;
@@ -130,16 +181,20 @@
   <div class="panel" onpointerdown={(e) => e.stopPropagation()} role="presentation">
     <div class="bar">
       <span class="ttl">ブロック履歴</span>
-      <span class="daynav">
-        <button onclick={() => shiftDay(-1)} title="前日" aria-label="前日">◀</button>
-        <span class="day">{day}{day === today ? " (今日)" : ""}</span>
-        <button onclick={() => shiftDay(1)} disabled={day >= today} title="翌日" aria-label="翌日">▶</button>
-      </span>
+      {#if crossMode}
+        <span class="day">全期間</span>
+      {:else}
+        <span class="daynav">
+          <button onclick={() => shiftDay(-1)} title="前日" aria-label="前日">◀</button>
+          <span class="day">{day}{day === today ? " (今日)" : ""}</span>
+          <button onclick={() => shiftDay(1)} disabled={day >= today} title="翌日" aria-label="翌日">▶</button>
+        </span>
+      {/if}
       <input
         bind:this={input}
         bind:value={query}
         onkeydown={onKey}
-        placeholder="コマンド / 出力 / cwd を検索…  (Esc)"
+        placeholder="検索で全期間横断… 例: cargo exit:fail cwd:orb  (Esc)"
       />
       {#if failedVisible.length}
         <button
@@ -153,34 +208,57 @@
       {/if}
       <button class="x" onclick={onClose} aria-label="閉じる">✕</button>
     </div>
+    {#snippet row(e: BlockEvent, cross: boolean)}
+      {@const b = badge(e.exit_code)}
+      <div class="row">
+        <span class="badge {b.cls}">{b.sym}</span>
+        <span class="time">{hhmm(e.started_at)}</span>
+        <span class="cmd" title={e.text}>{preview(e)}</span>
+        <span class="meta">{base(e.cwd)} · {secs(e.duration_ms)}</span>
+        <span class="tools">
+          <button onclick={() => copy(e)} title="全文をコピー">copy</button>
+          <button onclick={() => toAi(e)} title="AI ペインへ送る">→AI</button>
+          {#if e.command}
+            <button onclick={() => rerun(e)} title="フォーカス中のペインに再入力（実行は Enter で）">↻</button>
+            {#if cross && e.cwd}
+              <button onclick={() => rerunWithCd(e)} title={"cd '" + e.cwd + "'; を前置して再入力（実行は Enter で）"}>cd↻</button>
+            {/if}
+          {/if}
+        </span>
+      </div>
+    {/snippet}
     <div class="list">
-      {#if loading}
+      {#if crossMode}
+        {#if searching && !hits.length}
+          <div class="empty">全期間を検索中…</div>
+        {:else if !hits.length}
+          <div class="empty">全期間で該当なし</div>
+        {:else}
+          {#each groups as g (g.day)}
+            <div class="dayhead">{g.day}{g.day === today ? " (今日)" : ""}</div>
+            {#each g.list as e (e.block_id)}
+              {@render row(e, true)}
+            {/each}
+          {/each}
+        {/if}
+      {:else if loading}
         <div class="empty">読み込み中…</div>
-      {:else if !filtered.length}
-        <div class="empty">
-          {events.length ? "該当なし" : "今日のブロック記録はまだありません"}
-        </div>
+      {:else if !events.length}
+        <div class="empty">{day === today ? "今日" : day} のブロック記録はまだありません</div>
       {:else}
-        {#each filtered as e (e.block_id)}
-          {@const b = badge(e.exit_code)}
-          <div class="row">
-            <span class="badge {b.cls}">{b.sym}</span>
-            <span class="time">{hhmm(e.started_at)}</span>
-            <span class="cmd" title={e.text}>{preview(e)}</span>
-            <span class="meta">{base(e.cwd)} · {secs(e.duration_ms)}</span>
-            <span class="tools">
-              <button onclick={() => copy(e)} title="全文をコピー">copy</button>
-              <button onclick={() => toAi(e)} title="AI ペインへ送る">→AI</button>
-              {#if e.command}
-                <button onclick={() => rerun(e)} title="フォーカス中のペインに再入力（実行は Enter で）">↻</button>
-              {/if}
-            </span>
-          </div>
+        {#each events as e (e.block_id)}
+          {@render row(e, false)}
         {/each}
       {/if}
     </div>
     <div class="foot">
-      {filtered.length} / {events.length} ブロック · ~/.config/orb/blocks/{day}.jsonl
+      {#if crossMode}
+        {hits.length}件ヒット{searchMeta ? ` · ${searchMeta.scanned}日分を走査` : ""}{searchMeta?.limitHit
+          ? " · 上限で打ち切り（絞り込んで）"
+          : ""} · フィルタ: exit:fail / cwd: / in:command / from: to: day:
+      {:else}
+        {events.length} ブロック · ~/.config/orb/blocks/{day}.jsonl
+      {/if}
     </div>
   </div>
 </div>
@@ -301,6 +379,17 @@
   .list {
     overflow-y: auto;
     padding: 6px;
+  }
+  .dayhead {
+    position: sticky;
+    top: -6px; /* .list の padding ぶん食い込ませて隙間なく貼り付ける */
+    background: #05100e;
+    color: var(--teal);
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
+    padding: 6px 10px 3px;
+    border-bottom: 1px solid rgba(45, 212, 191, 0.12);
+    z-index: 1;
   }
   .row {
     display: flex;
