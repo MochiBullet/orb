@@ -26,6 +26,11 @@ export function setFocusedAsAiPane() {
   aiPane.set(get(focusedPane));
 }
 
+/** 最後にフォーカスされていた「シェル側」ペイン（role=ai 以外）。#34 の逆方向注入
+ *  （AI ペインの提案テキスト → Ctrl+Shift+L → シェルのプロンプトへ）の届け先。
+ *  Terminal.svelte がフォーカス変化で更新し、破棄時に自分なら null へ戻す。 */
+export const lastShellPane = writable<number | null>(null);
+
 /** 設定パネルの表示状態（TitleBar の歯車 / Ctrl+, から開く）。 */
 export const showSettings = writable(false);
 
@@ -101,6 +106,7 @@ export function sendInputToFocusedPane(bytes: Uint8Array, strict = false): boole
   fn(bytes);
   return true;
 }
+
 
 /** ペインごとの画面内容シリアライザ（paneId→ANSI 付き文字列を返す）。
  *  アプリ終了/リロード時に全ペイン分を保存し、再起動で過去ログとして復元する

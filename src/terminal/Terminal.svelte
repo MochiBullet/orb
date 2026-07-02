@@ -13,10 +13,12 @@
   import { CommandBlocks } from "./blocks/osc";
   import { orbClipboardProvider } from "./blocks/clipboard";
   import { genId } from "../core/blocks-log";
+  import { frameBracketedPaste } from "../core/ai-payload";
   import {
     focusedPane,
     aiPane,
     aiPaneActivity,
+    lastShellPane,
     showSettings,
     layout,
     broadcast,
@@ -152,15 +154,39 @@
     term?.focus();
   }
 
-  // Ctrl+L: このペインの選択テキストを AI(claude)ペインの stdin へ送る（ペースト）。
+  // Ctrl+L: このペインの選択テキストを AI(claude)ペインの入力欄へ送る。
+  // bracketed paste で包む＝複数行選択でも1回の貼り付けとして入る（素の \n は Enter 扱い）。
   function sendSelectionToAi() {
     const target = get(aiPane);
     if (target == null || target === paneId) return;
     const sel = term?.getSelection() ?? "";
     if (!sel) return;
-    void invoke("write_pty", { paneId: target, data: Array.from(encoder.encode(sel)) }).catch((e) =>
-      logError(`pane ${target}: send-to-AI write failed: ${String(e)}`),
-    );
+    void invoke("write_pty", {
+      paneId: target,
+      data: Array.from(encoder.encode(frameBracketedPaste(sel))),
+    }).catch((e) => logError(`pane ${target}: send-to-AI write failed: ${String(e)}`));
+  }
+
+  // Ctrl+Shift+L（#34 逆方向）: AI ペインで選択した提案テキスト（コマンド等）を、
+  // 最後にフォーカスしていたシェルペインのプロンプトへ再入力する。bracketed paste・
+  // Enter は送らない＝プロンプトに置かれた状態が「レビュー」で、実行は人が決める。
+  // 安全のための3点（#34 レビュー反映）:
+  //  - 届け先は「今見えているタブ」のペインに限る。別タブの不可視プロンプト（最悪 alt-screen の
+  //    vim バッファ）へのサイレント注入は「置かれた状態が見える」という本機能の契約を壊す。
+  //  - broadcast の複製に乗せない（enqueueInput ではなく対象ペインへ直接 write）。
+  //  - 注入後はそのペインへフォーカス＝置かれたテキストが必ず目に入り、Enter で即実行できる。
+  function sendSelectionToShell() {
+    if (paneId !== get(aiPane)) return; // AI ペインからのみ（それ以外では意味を持たせない）
+    const target = get(lastShellPane);
+    if (target == null || target === paneId) return;
+    if (!leafIds(get(layout)).includes(target)) return; // 別タブ/消滅 → 何もしない
+    const sel = term?.getSelection() ?? "";
+    if (!sel) return;
+    void invoke("write_pty", {
+      paneId: target,
+      data: Array.from(encoder.encode(frameBracketedPaste(sel))),
+    }).catch((e) => logError(`pane ${target}: send-to-shell write failed: ${String(e)}`));
+    focusedPane.set(target);
   }
 
   // semantic history（VIBE_IDEAS #37）: 出力中の `src/foo.ts:42` 形をクリックで開く。
@@ -243,6 +269,12 @@
     }
   });
 
+  // #34: 「最後にフォーカスされていたシェルペイン」を追跡（AI ペインからの逆方向注入の届け先）。
+  // role=ai のペインと、後から AI ペインに指定されたペインは対象外。
+  $effect(() => {
+    if ($focusedPane === paneId && role !== "ai" && paneId !== $aiPane) lastShellPane.set(paneId);
+  });
+
   // #21: 保存で背景画像の有無が変わったら xterm キャンバス背景の透過を切替（DOM レンダラの
   // ペインでライブ反映）。WebGL のペイン（画像なしで起動）はレンダラ切替が要るため再起動で反映。
   $effect(() => {
@@ -318,6 +350,7 @@
     if (key === "0") { e.preventDefault(); e.stopPropagation(); resetZoom(); return; }
     if (key === "=" || key === "+") { e.preventDefault(); e.stopPropagation(); zoom(1); return; }
     if (key === "-") { e.preventDefault(); e.stopPropagation(); zoom(-1); return; }
+    if (key === "l" && e.shiftKey) { e.preventDefault(); e.stopPropagation(); sendSelectionToShell(); return; }
     if (key === "l") { e.preventDefault(); e.stopPropagation(); sendSelectionToAi(); return; }
     if (key === "c" && (e.shiftKey || (term?.hasSelection() ?? false))) {
       const sel = term?.getSelection() ?? "";
@@ -613,6 +646,7 @@
   onDestroy(() => {
     disposed = true;
     logInfo(`pane ${paneId}: destroy`);
+    if (get(lastShellPane) === paneId) lastShellPane.set(null); // #34: 消えたペインを届け先に残さない
     if (resizeTimer) clearTimeout(resizeTimer);
     if (scrollbackTimer) clearTimeout(scrollbackTimer);
     unregisterTermClear(paneId);

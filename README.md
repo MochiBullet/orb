@@ -85,7 +85,7 @@ pnpm tauri build
 - **ペイン分割** — 横/縦分割、フォーカス枠グロー、スプリッタドラッグでリサイズ、閉じると兄弟が昇格。分割時は**フォーカス中ペインの cwd を継承**。ツリーは flat-geometry で、分割やタブ切替で端末（PTY）を殺さない。
 - **タブ** — 複数ワークスペース。タブを切り替えても**全タブの PTY とスクロールバックが生存**（非アクティブは display 非表示）。
 - **案件ランチャー** — `~/.config/orb/projects.toml` の案件を Ctrl+P パレットから起動。`dev3` レイアウト＝左 AI / 右上 dev / 右下 `lg`（lazygit）を正しい cwd で spawn。AI 起動プリセット（継続 `--continue` / 新規 / 危険モード `--dangerously-skip-permissions`、Tab で巡回）。**案件は現タブを潰さず案件名の新タブ**で開く。
-- **AI（Claude）ペイン** — `claude --continue` を violet 差し色の専用ペインで常駐。別ペインの選択範囲（Ctrl+L）やコマンドブロック（→AI ボタン）を AI ペインの stdin へ送る。
+- **AI（Claude）ペイン（双方向）** — `claude --continue` を violet 差し色の専用ペインで常駐。**行き**: 別ペインの選択範囲（Ctrl+L）やコマンドブロック（→AI / 失敗は 🔧fix）を **cwd/exit/コマンド/出力の構造化コンテキスト**として AI ペインの入力欄へ（bracketed paste＝複数行でも1回の貼り付け・送信は人が Enter）。**帰り**: AI の提案テキストを選択して Ctrl+Shift+L でシェルのプロンプトへ再入力（実行は人が Enter＝プロンプトがレビューの場）。ブロック履歴からは**失敗の一括→AI**（直近最大10件のダイジェスト）も可能。
 - **サイドバー** — トークン使用量（5h / 7d、80%超で赤）を 30秒ごとに表示。
 - **設定GUI** — Ctrl+, でフォント / scrollback / アクセント色 / **背景画像＋暗幕** を編集、`config.toml` に保存。フォントサイズは全ペインに即反映。背景画像は端末背後に透過表示（暗幕は画像だけに効く）。
 - **フォントズーム** — Ctrl+ホイール / Ctrl+= / Ctrl+- / Ctrl+0（行列維持の font zoom）。
@@ -107,6 +107,7 @@ pnpm tauri build
 | `Ctrl+ホイール` / `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | フォント拡大 / 縮小 / リセット |
 | `Ctrl+↑` / `Ctrl+↓` | 直前 / 直後のプロンプトへジャンプ |
 | `Ctrl+L` | 選択範囲を AI ペインへ送る |
+| `Ctrl+Shift+L` | AI ペインの選択（提案コマンド等）をシェルのプロンプトへ再入力（実行は Enter で） |
 | `Ctrl+C` / `Ctrl+V` | コピー（選択時）/ ペースト |
 
 > 注: タッチパッドのピンチは WebView2 がネイティブ処理し JS に届かないため、font zoom は Ctrl+ホイール / Ctrl+± で行う（[#10](https://github.com/MochiBullet/orb/issues/10)）。

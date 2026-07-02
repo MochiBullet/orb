@@ -88,6 +88,7 @@
     { keys: "Ctrl+↑ / Ctrl+↓", desc: "コマンドブロックを上下ジャンプ" },
     { keys: "Ctrl+F", desc: "ターミナル内を検索" },
     { keys: "Ctrl+L", desc: "選択テキストを AI ペインへ送る" },
+    { keys: "Ctrl+Shift+L", desc: "AI ペインの選択をシェルのプロンプトへ（実行は Enter）" },
     { keys: "Ctrl+= / Ctrl+- / Ctrl+0", desc: "文字サイズ 拡大 / 縮小 / リセット" },
     { keys: "Ctrl+, ", desc: "設定を開く" },
     { keys: "ダブルクリック（タブ）", desc: "タブ名をリネーム" },

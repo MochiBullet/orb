@@ -4,7 +4,8 @@ import { get } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
 import { shouldNotifyForPane, notifyThrottled } from "./notify";
 import { logError } from "../../core/log";
-import { logBlockEvent, genId } from "../../core/blocks-log";
+import { logBlockEvent, genId, capText } from "../../core/blocks-log";
+import { formatBlockForAi, formatFixRequest, frameBracketedPaste } from "../../core/ai-payload";
 
 /**
  * OSC 133/633 の D マーカー payload（rest）から終了コードを解釈する純関数。
@@ -155,7 +156,7 @@ export class CommandBlocks {
       // D 欠落のまま次プロンプトが来た＝前ブロックを中断クローズ。現在位置を終端マーカーとして
       // 捕捉し、装飾もログも中断(-1・aborted)で確定する。end=null だと本文が1行に潰れて失われる。
       const endMarker = this.term.registerMarker(0);
-      this.decorate(this.startMarker, -1, endMarker ?? null, this.pendingCommand);
+      this.decorate(this.startMarker, -1, endMarker ?? null, this.pendingCommand, this.extractOutputBody(endMarker ?? null));
       this.logBlock(this.startMarker, endMarker ?? null, -1, true);
     }
     this.startMarker = this.term.registerMarker(0) ?? null;
@@ -172,10 +173,18 @@ export class CommandBlocks {
     if (!this.startMarker) return;
     const code = parseExitCode(rest);
     const endMarker = this.term.registerMarker(0);
-    this.decorate(this.startMarker, code, endMarker ?? null, this.pendingCommand);
+    this.decorate(this.startMarker, code, endMarker ?? null, this.pendingCommand, this.extractOutputBody(endMarker ?? null));
     this.logBlock(this.startMarker, endMarker ?? null, code, false);
     this.finished = true;
     this.notifyIfBackground(code);
+  }
+
+  /** #34: 装飾ツールバー（→AI/🔧fix）が使う出力本文を確定時点で cap して取り出す。
+   *  クリック時に this.outputStart を読むと「その時の（＝別ブロックの）」境界を読んで
+   *  しまうため、ブロック確定のこの瞬間に値としてクロージャへ渡す。 */
+  private extractOutputBody(end: IMarker | null): string | null {
+    if (!this.outputStart || this.outputStart.line < 0) return null;
+    return capText(this.blockText(this.outputStart, end)).text;
   }
 
   /** #31: 確定/中断した 1 ブロックを耐久ログ（JSONL）へ追記する。
@@ -266,41 +275,67 @@ export class CommandBlocks {
     if (t) void navigator.clipboard.writeText(t);
   }
 
-  private sendBlockToAi(start: IMarker, end: IMarker | null) {
+  /** AI ペインの入力欄へペイロードを届ける共通経路（#34）。
+   *  bracketed paste で包む＝複数行でも「1回の貼り付け」として入り、素の \n が
+   *  Enter（細切れ送信）にならない。送信は人が Enter を押す。 */
+  private sendToAiPane(payload: string, label: string) {
     const target = get(aiPane);
     if (target == null || target === this.paneId) return;
-    const t = this.blockText(start, end);
-    if (t)
-      void invoke("write_pty", { paneId: target, data: Array.from(this.encoder.encode(t)) }).catch(
-        (e) => logError(`pane ${target}: send-block-to-AI write failed: ${String(e)}`),
-      );
+    void invoke("write_pty", {
+      paneId: target,
+      data: Array.from(this.encoder.encode(frameBracketedPaste(payload))),
+    }).catch((e) => logError(`pane ${target}: ${label} write failed: ${String(e)}`));
   }
 
-  /** 失敗ブロック（exit≠0）を「これ直して」依頼として AI ペインへ送る（VIBE_IDEAS #2）。
-   *  コマンド＋出力＋exit＋cwd を枠付きで現役エージェントの stdin へ。自動送信はせず確認は人に委ねる。 */
-  private fixWithAi(start: IMarker, end: IMarker | null, code: number) {
-    const target = get(aiPane);
-    if (target == null || target === this.paneId) return;
-    const block = this.blockText(start, end);
-    if (!block) return;
-    const ctx = this.cwd ? ` (cwd: ${this.cwd})` : "";
-    const msg = `次のコマンドが exit ${code} で失敗しました${ctx}。原因を説明して、修正案（必要なら修正後のコマンド）を出して:\n\n${block}\n`;
-    void invoke("write_pty", { paneId: target, data: Array.from(this.encoder.encode(msg)) }).catch(
-      (e) => logError(`pane ${target}: fix-with-AI write failed: ${String(e)}`),
+  /** ブロックを構造化コンテキスト（cwd/exit/$command/output）として AI ペインへ（#34）。
+   *  E/C マーカー不在時は生テキストへフォールバック。 */
+  private sendBlockToAi(
+    start: IMarker,
+    end: IMarker | null,
+    code: number,
+    command: string | null,
+    outputBody: string | null,
+  ) {
+    const text = capText(this.blockText(start, end)).text;
+    if (!text && command == null) return;
+    this.sendToAiPane(
+      formatBlockForAi({ cwd: this.cwd, exitCode: code, command, outputBody, text }),
+      "send-block-to-AI",
+    );
+  }
+
+  /** 失敗ブロック（exit≠0）を「これ直して」依頼として AI ペインへ送る（VIBE_IDEAS #2 の構造化版）。 */
+  private fixWithAi(
+    start: IMarker,
+    end: IMarker | null,
+    code: number,
+    command: string | null,
+    outputBody: string | null,
+  ) {
+    const text = capText(this.blockText(start, end)).text;
+    if (!text && command == null) return;
+    this.sendToAiPane(
+      formatFixRequest({ cwd: this.cwd, exitCode: code, command, outputBody, text }),
+      "fix-with-AI",
     );
   }
 
   /** #33: 確定済みコマンドラインをこのペインのプロンプトへ再入力する（Enter は送らない＝実行は人が確認）。
    *  bracketed paste で包む＝改行入りでも PSReadLine が「貼り付け」として文字通り挿入し、実行されない。 */
   private rerun(command: string) {
-    const framed = `\x1b[200~${command}\x1b[201~`;
     void invoke("write_pty", {
       paneId: this.paneId,
-      data: Array.from(this.encoder.encode(framed)),
+      data: Array.from(this.encoder.encode(frameBracketedPaste(command))),
     }).catch((e) => logError(`pane ${this.paneId}: rerun write failed: ${String(e)}`));
   }
 
-  private decorate(marker: IMarker, code: number, endMarker: IMarker | null, command: string | null) {
+  private decorate(
+    marker: IMarker,
+    code: number,
+    endMarker: IMarker | null,
+    command: string | null,
+    outputBody: string | null,
+  ) {
     const ok = code === 0;
     const dec = this.term.registerDecoration({
       marker,
@@ -333,11 +368,11 @@ export class CommandBlocks {
       };
       const aiBtn = document.createElement("button");
       aiBtn.textContent = "→AI";
-      aiBtn.title = "ブロックを AI ペインへ送る";
+      aiBtn.title = "ブロックを構造化コンテキストとして AI ペインへ送る";
       aiBtn.onpointerdown = (e) => {
         e.preventDefault();
         e.stopPropagation();
-        this.sendBlockToAi(marker, endMarker);
+        this.sendBlockToAi(marker, endMarker, code, command, outputBody);
       };
       tools.appendChild(copyBtn);
       tools.appendChild(aiBtn);
@@ -361,7 +396,7 @@ export class CommandBlocks {
         fixBtn.onpointerdown = (e) => {
           e.preventDefault();
           e.stopPropagation();
-          this.fixWithAi(marker, endMarker, code);
+          this.fixWithAi(marker, endMarker, code, command, outputBody);
         };
         tools.appendChild(fixBtn);
       }

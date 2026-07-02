@@ -5,6 +5,7 @@
   import { aiPane, sendInputToFocusedPane } from "../store/appStore";
   import { logError } from "../core/log";
   import { readBlockEvents, localDay, type BlockEvent } from "../core/blocks-log";
+  import { formatBlockForAi, formatFailureDigest, frameBracketedPaste, type BlockAiContext } from "../core/ai-payload";
 
   // #31 受け入れ条件の実証: 耐久ログ（JSONL）のみからブロック列を再構築・再描画する。
   // 稼働中の xterm 装飾には一切依存せず、read_block_events の結果だけで一覧を組む。
@@ -82,21 +83,39 @@
   function rerun(e: BlockEvent) {
     if (!e.command) return;
     const enc = new TextEncoder();
-    if (sendInputToFocusedPane(enc.encode(`\x1b[200~${e.command}\x1b[201~`), true)) onClose();
+    if (sendInputToFocusedPane(enc.encode(frameBracketedPaste(e.command)), true)) onClose();
   }
 
   function copy(e: BlockEvent) {
     if (e.text) void navigator.clipboard.writeText(e.text);
   }
 
-  function toAi(e: BlockEvent) {
+  /** BlockEvent（耐久ログのレコード）→ AI 整形用コンテキストへ。 */
+  function toCtx(e: BlockEvent): BlockAiContext {
+    return { cwd: e.cwd, exitCode: e.exit_code, command: e.command, outputBody: e.output_body, text: e.text };
+  }
+
+  function sendToAi(payload: string) {
     const target = get(aiPane);
-    if (target == null || !e.text) return;
+    if (target == null) return;
     const enc = new TextEncoder();
     void invoke("write_pty", {
       paneId: target,
-      data: Array.from(enc.encode(e.text)),
+      data: Array.from(enc.encode(frameBracketedPaste(payload))),
     }).catch((err) => logError(`block-history →AI write failed: ${String(err)}`));
+  }
+
+  function toAi(e: BlockEvent) {
+    if (!e.text && e.command == null) return;
+    sendToAi(formatBlockForAi(toCtx(e)));
+  }
+
+  /** #34: 表示中（フィルタ後）の失敗ブロックをまとめて AI ペインへ。直近優先で最大10件。 */
+  let failedVisible = $derived(filtered.filter((e) => e.exit_code > 0));
+  function failuresToAi() {
+    const picks = failedVisible.slice(0, 10).map(toCtx); // events は新しい順に並んでいる
+    if (!picks.length) return;
+    sendToAi(formatFailureDigest(picks));
   }
 
   function onKey(e: KeyboardEvent) {
@@ -122,6 +141,16 @@
         onkeydown={onKey}
         placeholder="コマンド / 出力 / cwd を検索…  (Esc)"
       />
+      {#if failedVisible.length}
+        <button
+          class="failbtn"
+          onclick={failuresToAi}
+          disabled={$aiPane == null}
+          title={$aiPane == null
+            ? "AI ペインがありません（パレット「このペインを AI ペインに設定」）"
+            : "表示中の失敗ブロック（直近最大10件）をまとめて AI ペインへ"}
+        >失敗→AI ({failedVisible.length > 10 ? `10/${failedVisible.length}` : failedVisible.length})</button>
+      {/if}
       <button class="x" onclick={onClose} aria-label="閉じる">✕</button>
     </div>
     <div class="list">
@@ -235,6 +264,25 @@
     font-size: 0.86rem;
     padding: 8px 4px;
     outline: none;
+  }
+  .failbtn {
+    flex: 0 0 auto;
+    border: 1px solid rgba(255, 92, 138, 0.4);
+    border-radius: 6px;
+    background: transparent;
+    color: #ff5c8a;
+    font-family: inherit;
+    font-size: 0.7rem;
+    padding: 4px 9px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .failbtn:hover:not(:disabled) {
+    background: rgba(255, 92, 138, 0.14);
+  }
+  .failbtn:disabled {
+    opacity: 0.35;
+    cursor: default;
   }
   .x {
     flex: 0 0 auto;
