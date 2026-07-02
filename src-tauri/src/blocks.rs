@@ -55,10 +55,10 @@ pub struct BlockEvent {
     /// text が上限で切り詰められたか。
     #[serde(default)]
     pub truncated: bool,
-    /// 予約: コマンド行のみ（#33 の B/C マーカーで確定）。現状 null。
+    /// コマンド行のみ（#33: OSC 633;E＋nonce 検証で確定）。マーカー不在は null。
     #[serde(default)]
     pub command: Option<String>,
-    /// 予約: 出力本文のみ（#33 の B/C マーカーで確定）。現状 null。
+    /// 出力本文のみ（#33: OSC 633;C の出力開始マーカーで確定）。マーカー不在は null。
     #[serde(default)]
     pub output_body: Option<String>,
 }

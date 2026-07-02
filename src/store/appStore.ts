@@ -78,9 +78,12 @@ export function unregisterPaneInput(paneId: number) {
 }
 /** フォーカス中ペイン（無ければ任意の1ペイン）の端末入力経路へバイト列を届ける。
  *  端末未フォーカス時の外部入力ソースからフォーカスペインの入力経路（#39 バッファ）へ
- *  打鍵を流すのに使う。戻り値は届け先が在ったか（＝消えずに済んだか）。 */
-export function sendInputToFocusedPane(bytes: Uint8Array): boolean {
-  const fn = paneInputRegistry.get(get(focusedPane)) ?? paneInputRegistry.values().next().value;
+ *  打鍵を流すのに使う。戻り値は届け先が在ったか（＝消えずに済んだか）。
+ *  strict=true はフォーカスペインが見つからないとき任意ペインへフォールバックしない
+ *  （#33 再実行など「意図しないペインに書くと危険」な送信用）。 */
+export function sendInputToFocusedPane(bytes: Uint8Array, strict = false): boolean {
+  const focused = paneInputRegistry.get(get(focusedPane));
+  const fn = focused ?? (strict ? undefined : paneInputRegistry.values().next().value);
   if (!fn) return false;
   fn(bytes);
   return true;

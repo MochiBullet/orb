@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { get } from "svelte/store";
   import { invoke } from "@tauri-apps/api/core";
-  import { aiPane } from "../store/appStore";
+  import { aiPane, sendInputToFocusedPane } from "../store/appStore";
   import { logError } from "../core/log";
   import { readBlockEvents, localDay, type BlockEvent } from "../core/blocks-log";
 
@@ -20,7 +20,7 @@
   let filtered = $derived(
     query.trim()
       ? events.filter((e) =>
-          `${e.text} ${e.cwd}`.toLowerCase().includes(query.trim().toLowerCase()),
+          `${e.command ?? ""} ${e.text} ${e.cwd}`.toLowerCase().includes(query.trim().toLowerCase()),
         )
       : events,
   );
@@ -66,13 +66,23 @@
     return `${Math.round(ms / 100) / 10}s`;
   }
 
-  /** ブロック全文のうち最初の非空行（≒コマンド行）をプレビューに使う。 */
-  function preview(text: string): string {
-    const line = text
+  /** プレビュー行。#33 で確定した command があればそれ、無ければ全文の最初の非空行。 */
+  function preview(e: BlockEvent): string {
+    if (e.command) return e.command;
+    const line = e.text
       .split("\n")
       .map((l) => l.trim())
       .find((l) => l.length > 0);
     return line ?? "(空)";
+  }
+
+  /** #33: 確定コマンドをフォーカス中のペインへ再入力（Enter は送らない＝実行は人が確認）。
+   *  bracketed paste で包み（改行入りでも文字通り挿入）、strict＝フォーカスペイン不在時は
+   *  任意ペインへフォールバックしない（AI ペイン等への誤配送防止）。 */
+  function rerun(e: BlockEvent) {
+    if (!e.command) return;
+    const enc = new TextEncoder();
+    if (sendInputToFocusedPane(enc.encode(`\x1b[200~${e.command}\x1b[201~`), true)) onClose();
   }
 
   function copy(e: BlockEvent) {
@@ -127,11 +137,14 @@
           <div class="row">
             <span class="badge {b.cls}">{b.sym}</span>
             <span class="time">{hhmm(e.started_at)}</span>
-            <span class="cmd" title={e.text}>{preview(e.text)}</span>
+            <span class="cmd" title={e.text}>{preview(e)}</span>
             <span class="meta">{base(e.cwd)} · {secs(e.duration_ms)}</span>
             <span class="tools">
               <button onclick={() => copy(e)} title="全文をコピー">copy</button>
               <button onclick={() => toAi(e)} title="AI ペインへ送る">→AI</button>
+              {#if e.command}
+                <button onclick={() => rerun(e)} title="フォーカス中のペインに再入力（実行は Enter で）">↻</button>
+              {/if}
             </span>
           </div>
         {/each}

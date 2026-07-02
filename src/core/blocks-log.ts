@@ -25,9 +25,9 @@ export interface BlockEvent {
   /** ブロック全文（プロンプト＋コマンド＋出力、cap 済み）。 */
   text: string;
   truncated: boolean;
-  /** 予約: #33（OSC 133 B/C マーカー）で埋める。現状 null。 */
+  /** コマンドラインのみ（#33: OSC 633;E＋nonce 検証で確定）。E 不在時は null＝嘘をつかない。 */
   command: string | null;
-  /** 予約: #33 で埋める。現状 null。 */
+  /** 出力本文のみ（#33: OSC 633;C の出力開始マーカーで確定、cap 済み）。C 不在時は null。 */
   output_body: string | null;
 }
 
@@ -95,11 +95,20 @@ export interface BlockInput {
   startedAt: number;
   endedAt: number;
   text: string;
+  /** #33: E マーカー由来のコマンドライン（nonce 検証済）。無ければ null。 */
+  command: string | null;
+  /** #33: C マーカー以降の出力本文。無ければ null。 */
+  outputBody: string | null;
 }
 
 /** 入力から BlockEvent を組む純関数（xterm 非依存＝単体テスト可能）。 */
 export function buildBlockEvent(inp: BlockInput): BlockEvent {
   const { text, truncated } = capText(inp.text);
+  // output_body も text と同じ上限で cap（長いビルド出力等の肥大防止）。
+  const outputBody = inp.outputBody != null ? capText(inp.outputBody).text : null;
+  // command は「切り詰めた半端なコマンド」を残すと再実行が別物になるため、上限超過は null に落とす
+  // （一次防衛は osc.ts parseCommandLine の COMMAND_MAX。ここは他経路向けの保険）。
+  const command = inp.command != null && inp.command.length <= 4096 ? inp.command : null;
   // startedAt が欠落（0 以下）なら duration を 0 に丸める（巨大な duration を書かない）。
   const started = inp.startedAt > 0 ? inp.startedAt : inp.endedAt;
   return {
@@ -117,8 +126,8 @@ export function buildBlockEvent(inp: BlockInput): BlockEvent {
     duration_ms: Math.max(0, inp.endedAt - started),
     text,
     truncated,
-    command: null,
-    output_body: null,
+    command,
+    output_body: outputBody,
   };
 }
 

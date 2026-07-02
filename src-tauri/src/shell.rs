@@ -57,7 +57,7 @@ fn write_integration_script() -> Result<PathBuf> {
 ///   bat/lazygit 等）を読ませる。profile が starship prompt を定義した「後」に
 ///   shell-integration.ps1 を dot-source することで、見た目を壊さず OSC を注入する。
 /// - 起動直後に出力エンコーディングを UTF-8（BOM なし）に統一して CP932 化けを防ぐ。
-pub fn build_pwsh(initial_cmd: Option<&str>) -> Result<CommandBuilder> {
+pub fn build_pwsh(initial_cmd: Option<&str>, nonce: Option<&str>) -> Result<CommandBuilder> {
     let pwsh = find_pwsh().ok_or_else(|| AppError::ShellNotFound("pwsh.exe".into()))?;
     let integration = write_integration_script()?;
 
@@ -87,6 +87,13 @@ pub fn build_pwsh(initial_cmd: Option<&str>) -> Result<CommandBuilder> {
     // orb 内で動いている目印。子プロセス（pwsh→claude→statusline.ps1）が継承し、
     // Claude Code のステータスラインがサイドバーと重複する情報を省略できる。
     cmd.env("ORB", "1");
+    // #33: OSC 633;E（コマンドライン）の偽造防止 nonce。shell-integration.ps1 が
+    // E マーカーに埋め、フロント（osc.ts）が照合する。無ければ E は emit されない。
+    if let Some(n) = nonce {
+        if !n.is_empty() {
+            cmd.env("ORB_NONCE", n);
+        }
+    }
 
     // 念には念を（多重防御）: spawn 直前にも Claude Code の子セッション印を子環境から除去する。
     // run() 先頭の sanitize_inherited_env が将来のリファクタで消えても、ここで必ず止める。

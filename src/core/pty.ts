@@ -17,6 +17,7 @@ export class PtyClient {
     rows: number,
     onData: (bytes: Uint8Array) => void,
     initialCmd?: string,
+    nonce?: string,
   ): Promise<void> {
     const channel = new Channel<ArrayBuffer>();
     channel.onmessage = (msg) => onData(new Uint8Array(msg));
@@ -27,6 +28,8 @@ export class PtyClient {
       rows,
       onOutput: channel,
       initialCmd: initialCmd ?? null,
+      // #33: OSC 633;E 偽造防止 nonce（ORB_NONCE として子シェルへ渡る）。
+      nonce: nonce ?? null,
     });
   }
 

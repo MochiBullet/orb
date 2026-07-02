@@ -12,6 +12,7 @@
   import { PtyClient } from "../core/pty";
   import { CommandBlocks } from "./blocks/osc";
   import { orbClipboardProvider } from "./blocks/clipboard";
+  import { genId } from "../core/blocks-log";
   import {
     focusedPane,
     aiPane,
@@ -40,6 +41,9 @@
     $props();
   const RESIZE_DEBOUNCE_MS = 150;
   const cfg = get(config);
+  // #33: OSC 633;E（コマンドライン）の偽造防止 nonce。spawn 時に ORB_NONCE として子シェルへ
+  // 渡し、CommandBlocks が E マーカーの照合に使う（出力に紛れた偽 E・エコー破片を弾く）。
+  const oscNonce = genId();
 
   let container: HTMLDivElement;
   let term: Terminal | undefined;
@@ -367,6 +371,7 @@
           scheduleScrollbackSave();
         },
         initialCmd,
+        oscNonce,
       );
       logInfo(`pane ${paneId}: pty spawned`);
     } catch (e) {
@@ -512,7 +517,7 @@
       }
     }
 
-    blocks = new CommandBlocks(term, paneId);
+    blocks = new CommandBlocks(term, paneId, oscNonce);
 
     // 合字 $effect の初回登録を解禁（term.open 済みでないと joiner を張れない）。
     termReady = true;

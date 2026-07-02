@@ -49,6 +49,33 @@ export function parseOsc777(data: string): { title: string; body: string } | nul
   return { title: rawTitle || "orb", body };
 }
 
+/** command として受け付ける上限。巨大ワンライナー貼り付けで JSONL/DOM を肥大させない。 */
+export const COMMAND_MAX = 4096;
+
+/**
+ * #33: `E;<nonce>;<escaped-cmdline>` の rest（"nonce;cmd"）からコマンドラインを取り出す純関数。
+ *
+ * nonce は orb が spawn 時に子シェルへ渡した値（ORB_NONCE）。一致しない E は
+ * 「コマンド出力に紛れた偽マーカー」や「ConPTY のエコー破片」なので黙って捨てる。
+ * expectedNonce が空（未配線）の場合も一切受け付けない＝安全側。
+ * コマンド部は shell 側 __orb_escape の \xNN を decodeOsc で復元する。
+ *
+ * さらに \n(0x0a)・タブ(0x09) 以外の制御文字を含む場合は丸ごと拒否する：
+ * 正規の PSReadLine 行には現れず（\r は Enter＝再実行が即実行に化ける、\x03/\x04/\x1b も
+ * 端末制御を撃てる）、偽造/破損とみなすのが安全かつログとして正直。上限超過も拒否。
+ */
+export function parseCommandLine(rest: string, expectedNonce: string): string | null {
+  if (!expectedNonce) return null;
+  const sep = rest.indexOf(";");
+  if (sep === -1) return null;
+  if (rest.slice(0, sep) !== expectedNonce) return null;
+  const cmd = decodeOsc(rest.slice(sep + 1));
+  if (cmd.length === 0 || cmd.length > COMMAND_MAX) return null;
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x08\x0b-\x1f\x7f]/.test(cmd)) return null;
+  return cmd;
+}
+
 /**
  * OSC 133/633 マーカーを解釈して Warp 風のコマンドブロック装飾を出すコントローラ。
  *
@@ -69,12 +96,18 @@ export class CommandBlocks {
   private cmdStart = 0;
   /** #31: 現在のブロックの ID（プロンプト開始で採番、耐久ログの block_id に使う）。 */
   private currentBlockId = "";
+  /** #33: 現在のブロックのコマンドライン（E マーカー・nonce 検証済）。E 不在なら null。 */
+  private pendingCommand: string | null = null;
+  /** #33: 出力開始位置（C マーカー）。コマンド行と出力本文の境界。 */
+  private outputStart: IMarker | null = null;
   /** この時間(ms)以上かかったコマンドだけ完了通知の対象にする。 */
   private static NOTIFY_MS = 6000;
 
   constructor(
     private term: Terminal,
     private paneId: number,
+    /** #33: OSC 633;E の偽造防止 nonce（spawn 時に子シェルへ渡した値と同一）。 */
+    private nonce: string = "",
   ) {
     this.disposables.push(term.parser.registerOscHandler(633, (d) => this.handle(d)));
     this.disposables.push(term.parser.registerOscHandler(133, (d) => this.handle(d)));
@@ -92,8 +125,17 @@ export class CommandBlocks {
       case "A":
         this.onPromptStart();
         break;
+      case "C":
+        // #33: 出力開始。E と同じく nonce で認証する（出力に紛れた偽 C が output_body の
+        // 境界を動かすのを防ぐ）。開いているブロックにだけ意味がある（迷子の C は無視）。
+        if (!this.finished && this.nonce && rest === this.nonce)
+          this.outputStart = this.term.registerMarker(0) ?? null;
+        break;
       case "D":
         this.onFinished(rest);
+        break;
+      case "E":
+        this.onCommandLine(rest);
         break;
       case "P":
         this.onProperty(rest);
@@ -102,12 +144,18 @@ export class CommandBlocks {
     return true;
   }
 
+  /** #33: `E;<nonce>;<escaped-cmd>` を検証してコマンドラインを確定する。 */
+  private onCommandLine(rest: string) {
+    const cmd = parseCommandLine(rest, this.nonce);
+    if (cmd != null) this.pendingCommand = cmd;
+  }
+
   private onPromptStart() {
     if (this.startMarker && !this.finished) {
       // D 欠落のまま次プロンプトが来た＝前ブロックを中断クローズ。現在位置を終端マーカーとして
       // 捕捉し、装飾もログも中断(-1・aborted)で確定する。end=null だと本文が1行に潰れて失われる。
       const endMarker = this.term.registerMarker(0);
-      this.decorate(this.startMarker, -1, endMarker ?? null);
+      this.decorate(this.startMarker, -1, endMarker ?? null, this.pendingCommand);
       this.logBlock(this.startMarker, endMarker ?? null, -1, true);
     }
     this.startMarker = this.term.registerMarker(0) ?? null;
@@ -115,13 +163,16 @@ export class CommandBlocks {
     this.finished = false;
     this.cmdStart = Date.now();
     this.currentBlockId = genId();
+    // #33: 新しいブロックの開始＝前ブロックのコマンド/出力境界を破棄。
+    this.pendingCommand = null;
+    this.outputStart = null;
   }
 
   private onFinished(rest: string) {
     if (!this.startMarker) return;
     const code = parseExitCode(rest);
     const endMarker = this.term.registerMarker(0);
-    this.decorate(this.startMarker, code, endMarker ?? null);
+    this.decorate(this.startMarker, code, endMarker ?? null, this.pendingCommand);
     this.logBlock(this.startMarker, endMarker ?? null, code, false);
     this.finished = true;
     this.notifyIfBackground(code);
@@ -129,7 +180,7 @@ export class CommandBlocks {
 
   /** #31: 確定/中断した 1 ブロックを耐久ログ（JSONL）へ追記する。
    *  xterm からテキスト・cwd・時刻・exit を取り出し、レンダラ非依存の blocks-log へ渡す。
-   *  command / output_body は #33（B/C マーカー）まで null（嘘の分割を書かない）。
+   *  command / output_body は #33 の E/C マーカー（nonce 検証済）由来。マーカー不在は null。
    *  aborted=true は「D を受け取らず次プロンプト/破棄で閉じた」＝中断（-1 の内訳を #34 が判別可能に）。
    *  ログ整形は同期実行なので、万一の例外で OSC ハンドラ（true を返す契約）を壊さないよう握り潰す。 */
   private logBlock(start: IMarker, end: IMarker | null, code: number, aborted: boolean) {
@@ -146,6 +197,12 @@ export class CommandBlocks {
         startedAt: this.cmdStart,
         endedAt: Date.now(),
         text: this.blockText(start, end),
+        // #33: E/C マーカー由来の確定分離。マーカー不在なら null（嘘の分割を書かない）。
+        command: this.pendingCommand,
+        outputBody:
+          this.outputStart && this.outputStart.line >= 0
+            ? this.blockText(this.outputStart, end)
+            : null,
       });
     } catch (e) {
       logError(`pane ${this.paneId}: block log build failed: ${String(e)}`);
@@ -233,7 +290,17 @@ export class CommandBlocks {
     );
   }
 
-  private decorate(marker: IMarker, code: number, endMarker: IMarker | null) {
+  /** #33: 確定済みコマンドラインをこのペインのプロンプトへ再入力する（Enter は送らない＝実行は人が確認）。
+   *  bracketed paste で包む＝改行入りでも PSReadLine が「貼り付け」として文字通り挿入し、実行されない。 */
+  private rerun(command: string) {
+    const framed = `\x1b[200~${command}\x1b[201~`;
+    void invoke("write_pty", {
+      paneId: this.paneId,
+      data: Array.from(this.encoder.encode(framed)),
+    }).catch((e) => logError(`pane ${this.paneId}: rerun write failed: ${String(e)}`));
+  }
+
+  private decorate(marker: IMarker, code: number, endMarker: IMarker | null, command: string | null) {
     const ok = code === 0;
     const dec = this.term.registerDecoration({
       marker,
@@ -274,6 +341,18 @@ export class CommandBlocks {
       };
       tools.appendChild(copyBtn);
       tools.appendChild(aiBtn);
+      // #33: コマンドラインを確定できたブロックだけ「↻」（プロンプトへ再入力・Enterは人が押す）。
+      if (command) {
+        const rerunBtn = document.createElement("button");
+        rerunBtn.textContent = "↻";
+        rerunBtn.title = "コマンドをプロンプトに再入力（実行は Enter で）";
+        rerunBtn.onpointerdown = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.rerun(command);
+        };
+        tools.appendChild(rerunBtn);
+      }
       // 失敗ブロックだけ「🔧 fix」（VIBE_IDEAS #2）。中断(⊘ code<0)・成功には出さない。
       if (!ok && code > 0) {
         const fixBtn = document.createElement("button");

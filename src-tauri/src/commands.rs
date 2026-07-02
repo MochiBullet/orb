@@ -118,8 +118,9 @@ pub fn spawn_pty(
     rows: u16,
     on_output: Channel<InvokeResponseBody>,
     initial_cmd: Option<String>,
+    nonce: Option<String>,
 ) -> Result<()> {
-    let cmd = shell::build_pwsh(initial_cmd.as_deref())?;
+    let cmd = shell::build_pwsh(initial_cmd.as_deref(), nonce.as_deref())?;
     let handle = PtyHandle::spawn(cmd, cols, rows, on_output)?;
     // ロックは map 更新の間だけ保持し、置き換えられた旧ハンドルの kill(=taskkill/join)
     // はロックの外で行う（ロックを握ったまま join するのを避ける）。

@@ -66,6 +66,8 @@ describe("buildBlockEvent (#31: 純粋なイベント整形)", () => {
     startedAt: 1000,
     endedAt: 3500,
     text: "echo hi\nhi",
+    command: null as string | null,
+    outputBody: null as string | null,
   };
 
   it("v=1・duration=ended-started・予約フィールドは null・aborted 反映", () => {
@@ -84,6 +86,20 @@ describe("buildBlockEvent (#31: 純粋なイベント整形)", () => {
     const e = buildBlockEvent({ ...base, exitCode: -1, aborted: true });
     expect(e.exit_code).toBe(-1);
     expect(e.aborted).toBe(true);
+  });
+
+  it("#33: command / output_body が透過し、長い output_body は cap される", () => {
+    const e = buildBlockEvent({ ...base, command: "echo hi", outputBody: "hi" });
+    expect(e.command).toBe("echo hi");
+    expect(e.output_body).toBe("hi");
+    const big = buildBlockEvent({ ...base, command: "build", outputBody: "A".repeat(20000) });
+    expect(big.output_body!.length).toBeLessThan(20000);
+    expect(big.output_body).toContain("文字省略");
+    // マーカー不在（E/C 無し）は null のまま＝嘘の分割を書かない
+    expect(buildBlockEvent(base).command).toBeNull();
+    expect(buildBlockEvent(base).output_body).toBeNull();
+    // command は切り詰めると再実行が別物になるため、上限超過は null に落とす（保険）
+    expect(buildBlockEvent({ ...base, command: "y".repeat(5000) }).command).toBeNull();
   });
 
   it("startedAt 欠落(0)は duration 0 に丸める（巨大 duration を書かない）", () => {

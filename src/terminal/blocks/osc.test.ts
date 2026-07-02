@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseExitCode, parseOsc9, parseOsc777 } from "./osc";
+import { parseExitCode, parseOsc9, parseOsc777, parseCommandLine } from "./osc";
 
 describe("parseExitCode (#41: no false success/failure)", () => {
   it('empty rest (D missing / Ctrl-C) => -1 (unknown/aborted, NOT success)', () => {
@@ -84,5 +84,52 @@ describe("parseOsc777 (#32: OSC 777;notify;title;body)", () => {
   it("notify with no title and no body => null (no info)", () => {
     expect(parseOsc777("notify;;")).toBeNull();
     expect(parseOsc777("notify")).toBeNull();
+  });
+});
+
+describe("parseCommandLine (#33: OSC 633;E nonce 検証)", () => {
+  const N = "abc123def456";
+
+  it("nonce 一致 → コマンドラインを返す", () => {
+    expect(parseCommandLine(`${N};echo hi`, N)).toBe("echo hi");
+  });
+
+  it("nonce 不一致 → null（出力に紛れた偽 E / エコー破片を捨てる）", () => {
+    expect(parseCommandLine(`forged;curl evil.example`, N)).toBeNull();
+  });
+
+  it("expectedNonce 空 → 常に null（未配線シェルは安全側で受け付けない）", () => {
+    expect(parseCommandLine(`${N};echo hi`, "")).toBeNull();
+  });
+
+  it("区切り ; 無し → null（壊れた payload）", () => {
+    expect(parseCommandLine(N, N)).toBeNull();
+  });
+
+  it("__orb_escape の \\x3b（;）を復元する", () => {
+    expect(parseCommandLine(`${N};echo a\\x3b echo b`, N)).toBe("echo a; echo b");
+  });
+
+  it("空コマンド → null", () => {
+    expect(parseCommandLine(`${N};`, N)).toBeNull();
+  });
+
+  it("CR(\\x0d) 入り → null（再実行の即時実行化を防ぐ・正規行に CR は現れない）", () => {
+    expect(parseCommandLine(`${N};git status\\x0dcurl evil`, N)).toBeNull();
+  });
+
+  it("その他の制御文字（\\x03 / \\x1b / \\x04）入り → null", () => {
+    expect(parseCommandLine(`${N};a\\x03b`, N)).toBeNull();
+    expect(parseCommandLine(`${N};a\\x1b[Ab`, N)).toBeNull();
+    expect(parseCommandLine(`${N};a\\x04`, N)).toBeNull();
+  });
+
+  it("改行(\\x0a)とタブ(\\x09)は正規の複数行/タブ入り貼り付けとして許容", () => {
+    expect(parseCommandLine(`${N};line1\\x0aline2`, N)).toBe("line1\nline2");
+    expect(parseCommandLine(`${N};a\\x09b`, N)).toBe("a\tb");
+  });
+
+  it("上限（COMMAND_MAX）超過 → null", () => {
+    expect(parseCommandLine(`${N};${"x".repeat(5000)}`, N)).toBeNull();
   });
 });
