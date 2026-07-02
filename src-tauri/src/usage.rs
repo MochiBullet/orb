@@ -70,8 +70,10 @@ pub fn fetch_usage() -> Result<Usage> {
         Err((401, _)) | Err((403, _)) => {
             std::thread::sleep(Duration::from_millis(400));
             let token = access_token()?;
-            try_fetch(&client, &token).map_err(|(_, m)| AppError::Usage(m))
+            // エラーは "status: msg" 形式で返す＝フロントが 401（レース）と 429（レート制限）を
+            // 区別してリトライ戦略を変えられるようにする。
+            try_fetch(&client, &token).map_err(|(s, m)| AppError::Usage(format!("{s}: {m}")))
         }
-        Err((_, m)) => Err(AppError::Usage(m)),
+        Err((s, m)) => Err(AppError::Usage(format!("{s}: {m}"))),
     }
 }

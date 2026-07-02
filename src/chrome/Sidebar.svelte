@@ -31,14 +31,22 @@
       .catch(() => (branch = null));
   });
 
+  let usageErr = $state("");
+  let usageBackoffUntil = 0; // 429 を食らったらこの時刻まで叩かない（自分で悪化させない）
+
   async function refreshUsage() {
+    if (Date.now() < usageBackoffUntil) return;
     try {
       usage = await getUsage();
       usageStale = false;
-    } catch {
+      usageErr = "";
+    } catch (e) {
       // 取得失敗：直前の usage を保持し、ゲージは消さない（少し薄くするだけ）。
-      // 初回未取得（usage===null）の時だけプレースホルダ「…」が出る。
+      // 初回未取得（usage===null）の時だけプレースホルダが出る（理由はツールチップで正直に）。
       usageStale = true;
+      usageErr = String(e);
+      // usage API 側のレート制限。ハンマリングすると回復が遅れるので 90 秒黙る。
+      if (usageErr.includes("429")) usageBackoffUntil = Date.now() + 90_000;
     }
   }
   async function refreshStatus() {
@@ -65,13 +73,14 @@
   }
 
   // 初回はトークン更新レース（claude --continue 直後の 401）を避けるため、
-  // 値が入るまで数回だけ短間隔で再試行する。以後は 30s 間隔。
+  // 値が入るまで短間隔（1.5s×最大6回≒9s）で再試行する。以後は 30s 間隔。
+  // 429（レート制限）だけは即あきらめて backoff に任せる＝叩くほど回復が遅れるため。
   async function initialLoad() {
     refreshStatus();
-    for (let i = 0; i < 4 && !usage; i++) {
+    for (let i = 0; i < 6 && !usage; i++) {
       await refreshUsage();
-      if (usage) break;
-      await new Promise((r) => setTimeout(r, 3000));
+      if (usage || usageErr.includes("429")) break;
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
 
@@ -146,7 +155,10 @@
         </div>
       </div>
     {:else}
-      <div class="muted">…</div>
+      <!-- 未取得の理由を隠さない: 429=API側レート制限（待てば直る）/ 詳細はツールチップ -->
+      <div class="muted" title={usageErr || "取得中…"}>
+        {usageErr.includes("429") ? "制限中（自動再試行）" : "…"}
+      </div>
     {/if}
   </div>
 
