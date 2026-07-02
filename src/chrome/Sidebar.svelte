@@ -153,8 +153,9 @@
   <div class="sec">
     <div class="label">CLAUDE</div>
     {#if status}
-      <div class="krow"><span>model</span><span class="kv">{status.model || "—"}</span></div>
-      <div class="krow"><span>effort</span><span class="kv">{status.effort || "—"}</span></div>
+      <!-- model/effort は値が長い（claude-fable-5[1m] 等）ので 2 行積みで全文表示する -->
+      <div class="krow stack"><span>model</span><span class="kv">{status.model || "—"}</span></div>
+      <div class="krow stack"><span>effort</span><span class="kv">{status.effort || "—"}</span></div>
       <div class="krow mcp" title={"MCP 生死（claude mcp list 実測）:\n✔ connected  ! needs auth  ✗ failed"}>
         <span>mcp</span>
         <span class="kv"
@@ -276,6 +277,19 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* ラベル1行目＋値2行目の縦積み。長い値（model 名等）は切らずに折り返して全文見せる。 */
+  .krow.stack {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+  }
+  .krow.stack .kv {
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-all;
+    line-height: 1.3;
+    padding-left: 8px;
   }
   .mcp {
     cursor: help;
