@@ -25,6 +25,7 @@
   import Settings from "../chrome/Settings.svelte";
   import CommandPalette, { type PaletteAction } from "../chrome/CommandPalette.svelte";
   import BlockHistory from "../chrome/BlockHistory.svelte";
+  import McpCatalog from "../chrome/McpCatalog.svelte";
   import { grid2x2, columns3, columns2, mainStack } from "./presets";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -32,6 +33,7 @@
 
   let showLauncher = $state(false);
   let showHistory = $state(false); // #31: ブロック履歴オーバーレイ（耐久ログからの再描画）
+  let showMcpCatalog = $state(false); // #46: おすすめ MCP カタログオーバーレイ
   let zoomedPane = $state<number | null>(null);
   let wsEl: HTMLDivElement;
   const FULL: Rect = { x: 0, y: 0, w: 100, h: 100 };
@@ -154,7 +156,7 @@
   });
 
   function onKey(e: KeyboardEvent) {
-    if (showLauncher || showHistory || get(showPalette) || get(showSettings)) return;
+    if (showLauncher || showHistory || showMcpCatalog || get(showPalette) || get(showSettings)) return;
     // Ctrl+, : 設定
     if (e.ctrlKey && !e.shiftKey && e.key === ",") {
       e.preventDefault();
@@ -247,6 +249,11 @@
       run: () => sidebarSide.update((s) => (s === "right" ? "left" : "right")),
     },
     { label: "ブロック履歴 / Block history", hint: "Ctrl+Shift+H", run: () => (showHistory = true) },
+    {
+      label: "おすすめ MCP / MCP catalog",
+      hint: "クリックでインストールコマンド挿入",
+      run: () => (showMcpCatalog = true),
+    },
     {
       label: "このペインを AI ペインに設定",
       hint: "サイドバーの model/effort 切替の送信先",
@@ -399,6 +406,10 @@
 
 {#if showHistory}
   <BlockHistory onClose={() => (showHistory = false)} />
+{/if}
+
+{#if showMcpCatalog}
+  <McpCatalog onClose={() => (showMcpCatalog = false)} />
 {/if}
 
 {#if $showPalette}
