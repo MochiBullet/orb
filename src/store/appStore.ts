@@ -265,17 +265,10 @@ export function clearPaneCwd(paneId: number) {
 }
 
 let paneCounter = 0;
-/** 単調増加のペイン ID を採番する。 */
+/** 単調増加のペイン ID を採番する。#48: 永続はしない＝毎起動 1 から。fresh 構成の
+ *  ペイン ID が前回起動と一致することで、paneId キーの scrollback 復元が成立する。 */
 export function nextPaneId(): number {
   return ++paneCounter;
-}
-/** セッション保存時に現在のカウンタを覗く。 */
-export function peekPaneCounter(): number {
-  return paneCounter;
-}
-/** セッション復元時、保存済み最大 ID 以上にカウンタを進める（ID 衝突防止）。 */
-export function setPaneCounter(n: number) {
-  if (n > paneCounter) paneCounter = n;
 }
 
 /** orb 起動時刻（稼働時間表示用）。 */
