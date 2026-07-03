@@ -3,6 +3,14 @@
   import { get } from "svelte/store";
   import { invoke } from "@tauri-apps/api/core";
   import { getUsage, type Usage } from "../core/usage";
+  import {
+    getLocalUsage,
+    fmtTokens,
+    pushPctSample,
+    estimateEtaMinutes,
+    type LocalUsage,
+    type PctSample,
+  } from "../core/usage-local";
   import { getClaudeStatus, getGitBranch, getMcpHealth, type ClaudeStatus, type McpStatus } from "../core/status";
   import { cwd as cwdStore, layout, startedAt, sidebarSide, aiPaneActivity, aiPane, focusedPane, paneStatus } from "../store/appStore";
   import { tabs, activeTabId, switchTab } from "../layout/tabs";
@@ -147,8 +155,22 @@
       void refreshStatus();
       // 起動中（3s デファー前）は health を触らない＝初回フェッチは #43 どおり 1 回だけ。
       if (healthPrimed) syncHealthForCwd(c);
+      // #52: アクティブ案件のローカル token 消費（org 全体の 5h/7d % とは別軸）も追従。
+      void refreshLocalUsage(c);
     }, 300);
   });
+
+  // #52: cwd 単位のローカル token 消費（直近24h/1h burn）。取得失敗は静かに前値保持しない
+  // （cwd が変われば意味が変わる数値なので、古い案件の値を新案件の見た目で残さない）。
+  let localUsage = $state<LocalUsage | null>(null);
+  async function refreshLocalUsage(c: string) {
+    const got = await getLocalUsage(c);
+    if (get(cwdStore) === c) localUsage = got; // 後着の旧 cwd の結果で上書きしない
+  }
+
+  // #52: 5h 使用率の推移から「あと何分で上限か」を推定する（refreshUsage 成功のたびにサンプル追加）。
+  let pctHistory: PctSample[] = [];
+  let etaMinutes = $state<number | null>(null);
 
   // AI ペインで Enter が押された（/model・/effort 等の可能性）→ CLAUDE ステータスを再チェック。
   // settings.json への書き込みには若干のタイムラグがあるため 2 段（1.2s / 3s）でリトライする。
@@ -168,6 +190,12 @@
       usage = await getUsage();
       usageStale = false;
       usageErr = "";
+      // #52: ETA推定用のサンプル追加。reset直後（%が下がる）は履歴をリセットして
+      // 古い周期のレートを新周期に引きずらない。
+      const prevLast = pctHistory[pctHistory.length - 1];
+      if (prevLast && usage.five_hour < prevLast.pct) pctHistory = [];
+      pctHistory = pushPctSample(pctHistory, { t: Date.now(), pct: usage.five_hour });
+      etaMinutes = estimateEtaMinutes(pctHistory);
     } catch (e) {
       // 取得失敗：直前の usage を保持し、ゲージは消さない（少し薄くするだけ）。
       // 初回未取得（usage===null）の時だけプレースホルダが出る（理由はツールチップで正直に）。
@@ -239,6 +267,9 @@
     timer = window.setInterval(() => {
       refreshUsage();
       refreshStatus();
+      // #52: 同じ案件に居座って作業し続けても「直近1h」burn が固まらないよう、
+      // cwd 変化時の debounce effect と同じ頻度感で追従させる（レビュー指摘の修正）。
+      void refreshLocalUsage(get(cwdStore));
     }, 30000);
     // MCP 生死は重い（数秒）ので起動処理から外し、起動が落ち着いた頃に一度だけ実行（#43: 起動高速化）。
     // この時点の cwd（OSC Cwd が届いていれば実 cwd）をキーに取得し、以後 cwd 追従を解禁する。
@@ -309,7 +340,7 @@
         <div class="meter">
           <div class="row"><span>5h</span><span class="pct" class:hot={usage.five_hour > 80}>{Math.round(usage.five_hour)}%</span></div>
           <div class="bar"><div class="fill" class:hot={usage.five_hour > 80} style="width:{Math.min(100, usage.five_hour)}%"></div></div>
-          <div class="reset">reset {fmtReset(usage.five_reset)}</div>
+          <div class="reset">reset {fmtReset(usage.five_reset)}{#if etaMinutes != null} · あと{etaMinutes}分{/if}</div>
         </div>
         <div class="meter">
           <div class="row"><span>7d</span><span class="pct">{Math.round(usage.seven_day)}%</span></div>
@@ -321,6 +352,15 @@
       <!-- 未取得の理由を隠さない: 429=API側レート制限（待てば直る）/ 詳細はツールチップ -->
       <div class="muted" title={usageErr || "取得中…"}>
         {usageErr.includes("429") ? "制限中（自動再試行）" : "…"}
+      </div>
+    {/if}
+    {#if localUsage && (localUsage.last_24h_tokens > 0 || localUsage.last_hour_tokens > 0)}
+      <!-- #52: この案件（アクティブタブの cwd）がローカルで使った量。org 全体の 5h/7d % とは別軸。 -->
+      <div class="krow" title="この案件（{shortCwd($cwdStore)}）の直近24hトークン消費">
+        <span>案件24h</span><span class="kv">{fmtTokens(localUsage.last_24h_tokens)}</span>
+      </div>
+      <div class="krow" title="この案件の直近1hトークン消費（burn rate）">
+        <span>直近1h</span><span class="kv">{fmtTokens(localUsage.last_hour_tokens)}</span>
       </div>
     {/if}
   </div>

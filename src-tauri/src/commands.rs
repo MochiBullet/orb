@@ -140,6 +140,15 @@ pub fn get_usage() -> Result<crate::usage::Usage> {
     crate::usage::fetch_usage()
 }
 
+/// #52: cwd の案件がローカルで直近24h/1hに消費した token 量（org 全体の 5h/7d % とは別軸）。
+/// ファイル走査を挟むため spawn_blocking で専用スレッドへ逃がす（cwd 切替のたびに叩かれる想定）。
+#[tauri::command]
+pub async fn get_local_usage(cwd: Option<String>) -> crate::usage_local::LocalUsage {
+    tauri::async_runtime::spawn_blocking(move || crate::usage_local::fetch_local_usage(cwd))
+        .await
+        .unwrap_or_default()
+}
+
 /// Claude Code の設定由来ステータス（モデル/エフォート/MCP）。
 #[tauri::command]
 pub fn get_claude_status(cwd: Option<String>) -> crate::status::ClaudeStatus {

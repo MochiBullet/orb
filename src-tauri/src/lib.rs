@@ -7,6 +7,7 @@ mod shell;
 mod state;
 mod status;
 mod usage;
+mod usage_local;
 
 use state::AppState;
 use tauri::Manager;
@@ -60,6 +61,7 @@ pub fn run() {
             commands::get_config,
             commands::save_config,
             commands::get_usage,
+            commands::get_local_usage,
             commands::get_claude_status,
             commands::get_mcp_health,
             commands::get_git_branch,

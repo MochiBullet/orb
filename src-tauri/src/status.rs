@@ -13,7 +13,7 @@ pub struct ClaudeStatus {
     pub mcp: Vec<String>,
 }
 
-fn home_dir() -> PathBuf {
+pub(crate) fn home_dir() -> PathBuf {
     std::env::var_os("USERPROFILE")
         .map(PathBuf::from)
         .unwrap_or_default()
