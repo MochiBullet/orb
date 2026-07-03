@@ -68,6 +68,7 @@ pub fn run() {
             blocks::append_block_event,
             blocks::read_block_events,
             blocks::search_block_events,
+            blocks::save_handoff_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

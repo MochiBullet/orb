@@ -362,6 +362,29 @@ pub async fn search_block_events(filters: SearchFilters) -> SearchResult {
         .unwrap_or_else(|_| SearchResult { hits: Vec::new(), scanned_days: 0, limit_hit: false })
 }
 
+// ---- #55 セッション要約の引き継ぎファイル出力 ---------------------------------------------
+
+/// 要約 MD を `<cwd>/HANDOFF-<day>.md` へ書き出す（dir 検証込み・上書き可）。戻り値=フルパス。
+fn save_handoff_to(cwd: &str, day: &str, content: &str) -> Result<String> {
+    if cwd.trim().is_empty() {
+        return Err(AppError::Config("handoff: cwd が空です".into()));
+    }
+    if !is_valid_day(day) {
+        return Err(AppError::Config(format!("handoff: 不正な day: {day}")));
+    }
+    let path = Path::new(cwd).join(format!("HANDOFF-{day}.md"));
+    std::fs::write(&path, content)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// #55: セッション要約を対象プロジェクトの cwd へ HANDOFF ファイルとして保存する。
+#[tauri::command]
+pub async fn save_handoff_file(cwd: String, day: String, content: String) -> Result<String> {
+    tauri::async_runtime::spawn_blocking(move || save_handoff_to(&cwd, &day, &content))
+        .await
+        .map_err(|e| AppError::Config(format!("handoff task: {e}")))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -594,6 +617,35 @@ mod tests {
             &SearchFilters { terms: vec![r#"say "hi""#.into()], ..filters() },
         );
         assert_eq!(got.hits.len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn handoff_writes_and_overwrites_file() {
+        let dir = temp("handoff");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cwd = dir.to_string_lossy().into_owned();
+        let path = save_handoff_to(&cwd, "2026-07-03", "# 作業ログ v1\n").unwrap();
+        assert!(path.ends_with("HANDOFF-2026-07-03.md"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "# 作業ログ v1\n");
+        // 既存ファイルは上書き。
+        save_handoff_to(&cwd, "2026-07-03", "# v2\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "# v2\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn handoff_rejects_invalid_day_and_empty_cwd() {
+        let dir = temp("handoff-reject");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cwd = dir.to_string_lossy().into_owned();
+        // パストラバーサル級の day はファイル名に使わせない。
+        assert!(save_handoff_to(&cwd, "../evil", "x").is_err());
+        assert!(save_handoff_to(&cwd, "2026-7-3", "x").is_err());
+        assert!(save_handoff_to("", "2026-07-03", "x").is_err());
+        assert!(save_handoff_to("   ", "2026-07-03", "x").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

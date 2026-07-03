@@ -30,6 +30,9 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { logError } from "../core/log";
+  import { localDay, type SearchResult } from "../core/blocks-log";
+  import { buildSessionSummary } from "../core/session-summary";
+  import { frameBracketedPaste } from "../core/ai-payload";
 
   let showLauncher = $state(false);
   let showHistory = $state(false); // #31: ブロック履歴オーバーレイ（耐久ログからの再描画）
@@ -266,7 +269,66 @@
       hint: "保存済みスクロールバック",
       run: () => restorePreviousSession(),
     },
+    {
+      label: "セッション要約 → クリップボード",
+      hint: "今日×この cwd の作業ログを MD で",
+      run: () => void summaryToClipboard(),
+    },
+    {
+      label: "セッション要約 → AI ペインへ",
+      hint: "引き継ぎ整理を依頼（Enter は人が押す）",
+      run: () => void summaryToAiPane(),
+    },
+    {
+      label: "セッション要約 → HANDOFF ファイル",
+      hint: "cwd に HANDOFF-YYYY-MM-DD.md を保存",
+      run: () => void summaryToHandoffFile(),
+    },
   ];
+
+  // ---- #55 セッション要約（引き継ぎワンキー）------------------------------------------------
+  // 今日×フォーカスペイン cwd のブロックログを #49 検索 API で取り、引き継ぎ MD を組む。
+  // ヒットは新しい順で返るので古い順に並べ直す（buildSessionSummary 内でも時系列ソートする）。
+  async function buildTodaysSummary(): Promise<{ md: string; day: string; cwd: string }> {
+    const targetCwd = get(cwdStore);
+    const day = localDay();
+    const res = await invoke<SearchResult>("search_block_events", {
+      filters: { terms: [], exit: null, cwd: targetCwd, field: "all", from: day, to: day, limit: 1000 },
+    });
+    const events = res.hits.map((h) => h.event).reverse();
+    return { md: buildSessionSummary(events, { day, cwd: targetCwd }), day, cwd: targetCwd };
+  }
+
+  async function summaryToClipboard() {
+    try {
+      const { md } = await buildTodaysSummary();
+      await navigator.clipboard.writeText(md);
+    } catch (e) {
+      logError(`session summary → clipboard failed: ${String(e)}`);
+    }
+  }
+
+  // AI ペインの入力欄へ「要約・整理して」依頼込みで挿入（Enter は送らない＝送信は人が）。
+  async function summaryToAiPane() {
+    const target = get(aiPane);
+    if (target == null) return;
+    try {
+      const { md } = await buildTodaysSummary();
+      const payload = frameBracketedPaste("以下の作業ログを引き継ぎ用に要約・整理して:\n\n" + md);
+      await invoke("write_pty", { paneId: target, data: Array.from(new TextEncoder().encode(payload)) });
+    } catch (e) {
+      logError(`session summary → AI pane failed: ${String(e)}`);
+    }
+  }
+
+  async function summaryToHandoffFile() {
+    try {
+      const { md, day, cwd } = await buildTodaysSummary();
+      await invoke("save_handoff_file", { cwd, day, content: md });
+    } catch (e) {
+      logError(`session summary → HANDOFF file failed: ${String(e)}`);
+    }
+  }
 
   // フォーカス中ペインへ、退避しておいた前回セッションの画面内容を書き戻す（#43: オンデマンド復元）。
   // 起動時の自動書き戻しは廃止したので、必要な時だけこのコマンドで戻す。
