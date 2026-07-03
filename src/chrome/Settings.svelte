@@ -99,6 +99,10 @@
       <span>合字 (=&gt; != -&gt; 等)</span>
       <input type="checkbox" bind:checked={draft.ligatures} />
     </label>
+    <label class="toggle">
+      <span>起動時に info タブを開く</span>
+      <input type="checkbox" bind:checked={draft.show_info_on_startup} />
+    </label>
     <label>
       <span>背景画像</span>
       <span class="bg-row">

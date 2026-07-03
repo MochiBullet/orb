@@ -44,6 +44,9 @@ fn default_bg_image() -> String {
 fn default_bg_dim() -> f32 {
     0.6
 }
+fn default_show_info_on_startup() -> bool {
+    true
+}
 
 /// orb 本体の設定（config.toml）。
 #[derive(Serialize, Deserialize, Clone)]
@@ -65,6 +68,10 @@ pub struct Config {
     /// 背景画像の上に敷く暗幕の不透明度 0..1（可読性確保）。画像が無ければ無効。
     #[serde(default = "default_bg_dim")]
     pub bg_dim: f32,
+    /// #47: 起動時に info（取扱説明書）タブを開くか。復元セッションに info タブが
+    /// 無いとき末尾へ非アクティブで補充する（真の初回起動は設定に依らずアクティブで開く）。
+    #[serde(default = "default_show_info_on_startup")]
+    pub show_info_on_startup: bool,
 }
 
 impl Default for Config {
@@ -77,6 +84,7 @@ impl Default for Config {
             ligatures: default_ligatures(),
             bg_image: default_bg_image(),
             bg_dim: default_bg_dim(),
+            show_info_on_startup: default_show_info_on_startup(),
         }
     }
 }

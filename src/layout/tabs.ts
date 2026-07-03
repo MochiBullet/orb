@@ -11,14 +11,19 @@ import {
   primeScrollbackRestore,
 } from "../store/appStore";
 import { leaf, leafIds, type PaneNode } from "./tree";
+import { findInfoTab, shouldAppendInfoTab, type TabKind } from "./tabs-logic";
+import { config } from "../core/config";
 
-/** 1 タブ = 独立したレイアウトツリー＋フォーカス＋AIペイン。 */
+/** 1 タブ = 独立したレイアウトツリー＋フォーカス＋AIペイン。
+ *  kind: undefined は "term"（#47 導入前の保存済みセッションとの後方互換）。
+ *  "info" は PTY を持たない取扱説明書タブ（layout: null・ai: null）。 */
 export interface Tab {
   id: number;
   layout: PaneNode | null;
   focused: number;
   ai: number | null;
   name?: string;
+  kind?: TabKind;
 }
 
 export const tabs = writable<Tab[]>([]);
@@ -97,6 +102,12 @@ function makeShellTab(): Tab {
   return { id, layout: leaf(leafId), focused: leafId, ai: null, name: "shell" };
 }
 
+/** #47: info（取扱説明書）タブ。PTY を持たない特殊タブ＝layout/ai とも null。
+ *  focused は実在しないペイン ID(-1) にして、どのレジストリにもヒットさせない。 */
+export function makeInfoTab(): Tab {
+  return { id: nextPaneId(), kind: "info", layout: null, focused: -1, ai: null, name: "info" };
+}
+
 /** 初回マウント時に最初のタブを用意する。前回セッションがあれば復元する。 */
 export function ensureFirstTab() {
   if (get(tabs).length > 0) return;
@@ -106,8 +117,13 @@ export function ensureFirstTab() {
       const data = JSON.parse(raw) as { tabs: Tab[]; active: number; counter: number };
       if (data?.tabs?.length) {
         setPaneCounter(data.counter ?? 0); // ID 衝突を防ぐ
-        tabs.set(data.tabs);
-        const active = data.tabs.find((t) => t.id === data.active) ?? data.tabs[0];
+        // #47: セッション復元起動では、設定 ON かつ復元セットに info タブが無い場合のみ
+        // 末尾へ非アクティブで補充する（アクティブは前回の作業タブのまま）。
+        const restored = shouldAppendInfoTab(data.tabs, get(config).show_info_on_startup)
+          ? [...data.tabs, makeInfoTab()]
+          : data.tabs;
+        tabs.set(restored);
+        const active = restored.find((t) => t.id === data.active) ?? restored[0];
         activeTabId.set(active.id);
         loadTab(active);
         // #43: 起動時は自動復元しない（速度）。前回の scrollback はメモリへ退避され、
@@ -120,12 +136,29 @@ export function ensureFirstTab() {
     /* 壊れたセッションは無視して新規 */
   }
   primeScrollbackRestore(false); // #43: 起動時は自動復元しない（新規起動でも同様）
-  // 真の初回起動: AI タブ + 通常シェルタブの2枚で開始（AI が最初のアクティブタブ）。
+  // 真の初回起動: AI タブ + 通常シェルタブ + info（説明書）タブの3枚で開始。
+  // #47: 初見の人がまず読めるよう info をアクティブにする。
   const aiTab = makeAiTab();
   const shellTab = makeShellTab();
-  tabs.set([aiTab, shellTab]);
-  activeTabId.set(aiTab.id);
-  loadTab(aiTab);
+  const infoTab = makeInfoTab();
+  tabs.set([aiTab, shellTab, infoTab]);
+  activeTabId.set(infoTab.id);
+  loadTab(infoTab);
+}
+
+/** #47: パレット「info / 説明書を開く」。既存の info タブがあればアクティブ化、
+ *  無ければ新規作成してアクティブ化する（重複作成しない）。 */
+export function openInfoTab() {
+  const existing = findInfoTab(get(tabs));
+  if (existing) {
+    switchTab(existing.id);
+    return;
+  }
+  saveActive();
+  const t = makeInfoTab();
+  tabs.update((ts) => [...ts, t]);
+  activeTabId.set(t.id);
+  loadTab(t);
 }
 
 export function newTab(lay?: PaneNode) {

@@ -24,7 +24,9 @@ export const aiPaneActivity = writable(0);
  *  aiPane が決まらず、手動 split/新規タブでは永遠に未設定＝サイドバーの model/effort
  *  プルダウンが常に disabled になる。パレット/ショートカットからの明示指定用。 */
 export function setFocusedAsAiPane() {
-  aiPane.set(get(focusedPane));
+  // #47: info タブ表示中の focusedPane はダミー(-1)＝AI ペインにしない（ID は 1 始まり）。
+  const f = get(focusedPane);
+  if (f > 0) aiPane.set(f);
 }
 
 /** 最後にフォーカスされていた「シェル側」ペイン（role=ai 以外）。#34 の逆方向注入

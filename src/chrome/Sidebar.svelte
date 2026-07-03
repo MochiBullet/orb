@@ -60,8 +60,13 @@
   function startClaude(preset: "fresh" | "continue") {
     let target = get(aiPane);
     if (target == null) {
-      target = get(focusedPane);
-      if (target != null) aiPane.set(target);
+      // #47: info タブ表示中は focusedPane が実在しないダミー(-1)＝フォールバック先にしない
+      // （ペイン ID は 1 始まり）。誤って aiPane を -1 に確定させると以後の切替が全部死ぬ。
+      const focused = get(focusedPane);
+      if (focused > 0) {
+        target = focused;
+        aiPane.set(target);
+      }
     }
     if (target == null) return;
     void invoke("write_pty", {

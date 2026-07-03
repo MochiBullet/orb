@@ -5,7 +5,7 @@
   import { formatImagePath, isImagePath } from "../core/insert-path";
   import { STATUS_ICON, STATUS_LABEL } from "../core/agent-status";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
+  import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, openInfoTab, type Tab } from "./tabs";
   import {
     splitPane,
     closePane,
@@ -26,6 +26,7 @@
   import CommandPalette, { type PaletteAction } from "../chrome/CommandPalette.svelte";
   import BlockHistory from "../chrome/BlockHistory.svelte";
   import McpCatalog from "../chrome/McpCatalog.svelte";
+  import InfoTab from "../chrome/InfoTab.svelte";
   import { grid2x2, columns3, columns2, mainStack } from "./presets";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -65,7 +66,8 @@
   // #53: AI ペインへの画像ドロップは claude の @添付形（@パス）にする。
   function handleDrop(paths: string[]) {
     const target = get(focusedPane);
-    if (target == null || !paths?.length) return;
+    // #47: info タブ表示中の focusedPane はダミー(-1)＝ドロップの届け先なし（ID は 1 始まり）。
+    if (target == null || target <= 0 || !paths?.length) return;
     const base = get(cwdStore);
     const forAi = target === get(aiPane);
     const text =
@@ -118,6 +120,10 @@
     return a;
   });
   let paneCount = $derived($layout ? leafIds($layout).length : 0);
+
+  // #47: アクティブタブが info（取扱説明書）か。info タブは layout: null＝leaf を
+  // 持たないので allLeaves には元々乗らず、他タブの Terminal は unmount されない。
+  let isInfoActive = $derived($tabs.find((t) => t.id === $activeTabId)?.kind === "info");
 
   onMount(() => {
     ensureFirstTab();
@@ -221,6 +227,7 @@
 
   function zoomFocused() {
     const f = get(focusedPane);
+    if (f <= 0) return; // #47: info タブ表示中（ダミー -1）はズーム対象なし
     zoomedPane = zoomedPane === f ? null : f; // フォーカスペインの全面化トグル
   }
 
@@ -256,6 +263,11 @@
       label: "おすすめ MCP / MCP catalog",
       hint: "クリックでインストールコマンド挿入",
       run: () => (showMcpCatalog = true),
+    },
+    {
+      label: "info / 説明書を開く",
+      hint: "機能ガイド・ショートカット・導入ガイド",
+      run: () => openInfoTab(),
     },
     {
       label: "このペインを AI ペインに設定",
@@ -446,6 +458,11 @@
       tabindex="-1"
     ></div>
   {/each}
+
+  {#if isInfoActive}
+    <!-- #47: info タブ。ターミナルスロット群は hidden のまま生存し、この上に説明書を敷く。 -->
+    <InfoTab />
+  {/if}
 
   {#if miniWelcome}
     {#key $tabWelcome}

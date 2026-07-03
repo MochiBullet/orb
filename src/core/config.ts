@@ -9,6 +9,8 @@ export interface OrbConfig {
   ligatures: boolean;
   bg_image: string;
   bg_dim: number;
+  /** #47: 起動時に info（取扱説明書）タブを開く（復元セッションに無ければ末尾へ補充）。 */
+  show_info_on_startup: boolean;
 }
 
 const DEFAULT: OrbConfig = {
@@ -19,6 +21,7 @@ const DEFAULT: OrbConfig = {
   ligatures: true,
   bg_image: "",
   bg_dim: 0.6,
+  show_info_on_startup: true,
 };
 
 /** ~/.config/orb/config.toml の内容。起動時に loadConfig() で埋める。 */

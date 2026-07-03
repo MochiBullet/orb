@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { KEY_REFERENCE } from "../data/reference";
 
   export interface PaletteAction {
     label: string;
@@ -74,25 +75,8 @@
     }
   }
 
-  // info（説明書）に載せる、パレットに無い純粋なキー操作リファレンス。
-  const reference: { keys: string; desc: string }[] = [
-    { keys: "Ctrl+Shift+P", desc: "コマンドパレット" },
-    { keys: "Ctrl+P", desc: "案件ランチャー" },
-    { keys: "Ctrl+T / Ctrl+W", desc: "タブ 新規 / 閉じる" },
-    { keys: "Ctrl+Tab", desc: "フォーカスを次ペインへ循環" },
-    { keys: "Ctrl+Shift+D / E", desc: "ペイン 横分割 / 縦分割" },
-    { keys: "Ctrl+Shift+W", desc: "ペインを閉じる" },
-    { keys: "Ctrl+Shift+Z", desc: "ペインをズーム（全面）切替" },
-    { keys: "Ctrl+Shift+K", desc: "ターミナルの画面をクリア" },
-    { keys: "Ctrl+Shift+B", desc: "サイドバー左右入替" },
-    { keys: "Ctrl+↑ / Ctrl+↓", desc: "コマンドブロックを上下ジャンプ" },
-    { keys: "Ctrl+F", desc: "ターミナル内を検索" },
-    { keys: "Ctrl+L", desc: "選択テキストを AI ペインへ送る" },
-    { keys: "Ctrl+Shift+L", desc: "AI ペインの選択をシェルのプロンプトへ（実行は Enter）" },
-    { keys: "Ctrl+= / Ctrl+- / Ctrl+0", desc: "文字サイズ 拡大 / 縮小 / リセット" },
-    { keys: "Ctrl+, ", desc: "設定を開く" },
-    { keys: "ダブルクリック（タブ）", desc: "タブ名をリネーム" },
-  ];
+  // キー操作リファレンス（#47: info タブと共有の単一ソース src/data/reference.ts）。
+  const reference = KEY_REFERENCE;
 
   $effect(() => { if (mode === "search") input?.focus(); });
   // クエリが変わったら選択を先頭へ。
