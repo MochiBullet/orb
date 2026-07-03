@@ -160,6 +160,15 @@ fn write_integration_script_sh() -> Result<PathBuf> {
     Ok(path.clone())
 }
 
+/// `bash` を PATH から探す（find_pwsh と同じく、無ければ spawn 前に分かりやすく失敗させる）。
+#[cfg(unix)]
+fn find_bash() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join("bash"))
+        .find(|cand| cand.is_file())
+}
+
 /// `bash --rcfile` 用の一時 rcfile を書く。bash の `--rcfile FILE` は対話シェルの通常の
 /// `~/.bashrc` 読み込みを FILE で完全に置き換えるため、この rcfile 自身の先頭で
 /// `~/.bashrc` を明示的に source する（PS1 版の「-NoProfile を付けない」と同じ意図＝
@@ -193,6 +202,7 @@ fn write_rcfile(integration: &std::path::Path, initial_cmd: Option<&str>, nonce:
 /// 同じ順序）。
 #[cfg(unix)]
 fn build_bash(initial_cmd: Option<&str>, nonce: Option<&str>) -> Result<CommandBuilder> {
+    find_bash().ok_or_else(|| crate::error::AppError::ShellNotFound("bash".into()))?;
     let integration = write_integration_script_sh()?;
     let rcfile = write_rcfile(&integration, initial_cmd, nonce)?;
 

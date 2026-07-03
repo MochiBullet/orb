@@ -11,6 +11,9 @@ use std::process::Command;
 /// （`CREATE_NO_WINDOW`、GUI アプリから CLI ツールを呼ぶ時に黒窓が一瞬出るのを防ぐ）。
 /// Unix にはこの概念自体が無い（GUI プロセスから spawn した子は元々ターミナルを持たない）
 /// ため素通し。
+// `mut` は Windows 分岐（creation_flags）でのみ必要。Unix ではその分岐が丸ごと消えるため
+// 未使用 mut 警告が出るが、両OSで同じ関数シグネチャを保つためあえて許容する。
+#[allow(unused_mut)]
 pub(crate) fn new_command(program: &str) -> Command {
     let mut cmd = Command::new(program);
     #[cfg(windows)]

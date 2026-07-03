@@ -210,6 +210,10 @@ pub fn fetch_local_usage(cwd: Option<String>) -> LocalUsage {
 mod tests {
     use super::*;
 
+    // Windows は大小文字を区別しないファイルシステムのため normalize_path が小文字化する。
+    // Unix（ext4 等）は区別するのが標準のため、同じ入力でも normalize_path の挙動が違う
+    // （#17 クロスプラットフォーム対応）＝ OS ごとに別テストで検証する。
+    #[cfg(windows)]
     #[test]
     fn normalize_and_cwd_under_are_case_insensitive_and_boundary_safe() {
         assert_eq!(normalize_path(r"C:\Users\hiyok\Orb\"), r"c:\users\hiyok\orb");
@@ -224,6 +228,23 @@ mod tests {
         assert!(!cwd_under(r"C:\Users\hiyok\orb2", r"c:\users\hiyok\orb"));
         assert!(!cwd_under(r"C:\Users\hiyok", r"c:\users\hiyok\orb"));
         assert!(!cwd_under(r"C:\Users\hiyok\other", r"c:\users\hiyok\orb"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn normalize_and_cwd_under_are_case_sensitive_and_boundary_safe() {
+        assert_eq!(normalize_path("/home/hiyok/orb/"), "/home/hiyok/orb");
+        assert_eq!(normalize_path("/home/hiyok/orb"), "/home/hiyok/orb");
+
+        // 完全一致・子孫はマッチ
+        assert!(cwd_under("/home/hiyok/orb", "/home/hiyok/orb"));
+        assert!(cwd_under("/home/hiyok/orb/src-tauri", "/home/hiyok/orb"));
+        // 大小文字違いはマッチしない（Unix は大小文字を区別するファイルシステムが標準）
+        assert!(!cwd_under("/home/HIYOK/ORB/src", "/home/hiyok/orb"));
+        // 兄弟ディレクトリ（orb2）や無関係パスは誤マッチしない（境界チェック）
+        assert!(!cwd_under("/home/hiyok/orb2", "/home/hiyok/orb"));
+        assert!(!cwd_under("/home/hiyok", "/home/hiyok/orb"));
+        assert!(!cwd_under("/home/hiyok/other", "/home/hiyok/orb"));
     }
 
     #[test]
