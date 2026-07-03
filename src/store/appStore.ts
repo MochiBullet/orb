@@ -1,5 +1,6 @@
 import { writable, get } from "svelte/store";
 import type { PaneNode } from "../layout/tree";
+import type { PaneStatus } from "../core/agent-status";
 
 /** OSC 633;P;Cwd マーカーで更新される現在の作業ディレクトリ（フォーカスペインのもの）。 */
 export const cwd = writable<string>("");
@@ -30,6 +31,32 @@ export function setFocusedAsAiPane() {
  *  （AI ペインの提案テキスト → Ctrl+Shift+L → シェルのプロンプトへ）の届け先。
  *  Terminal.svelte がフォーカス変化で更新し、破棄時に自分なら null へ戻す。 */
 export const lastShellPane = writable<number | null>(null);
+
+/** #50: ペインごとの活動状態バッジ（paneId → 状態）。TabBar/ペイン右上/INBOX の単一ソース。
+ *  osc.ts（D 確定）と Terminal.svelte（AI ペインのアイドル判定）が書き、フォーカスで
+ *  「手が要る」系だけ消える（acknowledgePane）。 */
+export const paneStatus = writable<ReadonlyMap<number, PaneStatus>>(new Map());
+
+/** 状態を設定/解除する（null = バッジ無しへ）。値が変わらない時は再通知しない。 */
+export function setPaneStatus(paneId: number, s: PaneStatus | null) {
+  paneStatus.update((m) => {
+    if ((m.get(paneId) ?? null) === s) return m;
+    const next = new Map(m);
+    if (s == null) next.delete(paneId);
+    else next.set(paneId, s);
+    return next;
+  });
+}
+
+/** フォーカス＝確認済み。「手が要る」系（waiting/attention/done/failed）のバッジを消す。
+ *  running は進行中の事実なので残す。 */
+export function acknowledgePane(paneId: number) {
+  const cur = get(paneStatus).get(paneId);
+  if (cur && cur !== "running") setPaneStatus(paneId, null);
+}
+
+// フォーカス移動そのものが「見た」の合図（#50 受け入れ条件のバッジ自動クリア）。
+focusedPane.subscribe(acknowledgePane);
 
 /** 設定パネルの表示状態（TitleBar の歯車 / Ctrl+, から開く）。 */
 export const showSettings = writable(false);

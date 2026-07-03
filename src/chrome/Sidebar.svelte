@@ -4,9 +4,10 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getUsage, type Usage } from "../core/usage";
   import { getClaudeStatus, getGitBranch, getMcpHealth, type ClaudeStatus, type McpStatus } from "../core/status";
-  import { cwd as cwdStore, layout, startedAt, sidebarSide, aiPaneActivity, aiPane, focusedPane } from "../store/appStore";
-  import { tabs } from "../layout/tabs";
+  import { cwd as cwdStore, layout, startedAt, sidebarSide, aiPaneActivity, aiPane, focusedPane, paneStatus } from "../store/appStore";
+  import { tabs, activeTabId, switchTab } from "../layout/tabs";
   import { leafIds } from "../layout/tree";
+  import { STATUS_ICON, STATUS_LABEL, STATUS_PRIORITY, type PaneStatus } from "../core/agent-status";
   import { logError } from "../core/log";
   import { buildClaudeCmd } from "../layout/launch";
 
@@ -85,6 +86,38 @@
 
   let paneCount = $derived($layout ? leafIds($layout).length : 0);
   let uptime = $derived(fmtUptime(now - startedAt));
+
+  // #50 INBOX: 「手が要る」ペイン（要承認/失敗/入力待ち）だけを全タブ横断で集約。
+  // 並びは STATUS_PRIORITY（🔔>🔴>🟡）。クリックでそのタブ＆ペインへジャンプする。
+  const INBOX_STATUSES: PaneStatus[] = ["attention", "failed", "waiting"];
+  interface InboxItem {
+    paneId: number;
+    tabId: number;
+    tabName: string;
+    status: PaneStatus;
+  }
+  let inbox = $derived.by(() => {
+    const out: InboxItem[] = [];
+    $tabs.forEach((t, i) => {
+      const l = t.id === $activeTabId ? $layout : t.layout; // アクティブタブは $layout が権威
+      if (!l) return;
+      for (const pid of leafIds(l)) {
+        const st = $paneStatus.get(pid);
+        if (st && INBOX_STATUSES.includes(st)) {
+          out.push({ paneId: pid, tabId: t.id, tabName: t.name ?? `tab ${i + 1}`, status: st });
+        }
+      }
+    });
+    out.sort((a, b) => STATUS_PRIORITY.indexOf(a.status) - STATUS_PRIORITY.indexOf(b.status));
+    return out;
+  });
+
+  /** INBOX からのジャンプ。タブ切替＋ペインフォーカス（focusedPane の購読が
+   *  acknowledgePane を発火するので、飛んだ時点でバッジは自動で消える）。 */
+  function jumpToPane(item: InboxItem) {
+    switchTab(item.tabId);
+    focusedPane.set(item.paneId);
+  }
 
   // cwd が変わるたび git ブランチを取得（非リポジトリ・detached は null）。
   $effect(() => {
@@ -285,6 +318,23 @@
     {/if}
   </div>
 
+  {#if inbox.length}
+    <div class="sec">
+      <div class="label">INBOX</div>
+      {#each inbox as item (item.paneId)}
+        <button
+          class="inbox-row"
+          onclick={() => jumpToPane(item)}
+          title="クリックでジャンプ: {item.tabName} / pane {item.paneId}"
+        >
+          <span class="inbox-ico">{STATUS_ICON[item.status]}</span>
+          <span class="inbox-name">{item.tabName} · p{item.paneId}</span>
+          <span class="inbox-what">{STATUS_LABEL[item.status]}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <div class="sec ws-sec">
     <button class="ws-toggle" onclick={() => (wsOpen = !wsOpen)} aria-expanded={wsOpen}>
       <span class="label">WORKSPACE</span>
@@ -318,6 +368,43 @@
   .sidebar.left {
     border-left: none;
     border-right: 1px solid rgba(45, 212, 191, 0.2);
+  }
+  /* #50 INBOX 行（手が要るペインへの1クリックジャンプ）。 */
+  .inbox-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    border: 1px solid rgba(45, 212, 191, 0.18);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fg);
+    font-family: inherit;
+    font-size: 0.66rem;
+    padding: 3px 6px;
+    margin-top: 4px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .inbox-row:hover {
+    background: rgba(45, 212, 191, 0.1);
+    border-color: rgba(45, 212, 191, 0.45);
+  }
+  .inbox-ico {
+    flex: 0 0 auto;
+    font-size: 0.6rem;
+  }
+  .inbox-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .inbox-what {
+    flex: 0 0 auto;
+    color: var(--grey);
+    font-size: 0.6rem;
   }
   .label {
     font-size: 0.62rem;

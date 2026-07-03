@@ -1,10 +1,11 @@
 import type { Terminal, IMarker, IDecoration, IDisposable } from "@xterm/xterm";
-import { aiPane, setPaneCwd, dnd } from "../../store/appStore";
+import { aiPane, setPaneCwd, dnd, setPaneStatus } from "../../store/appStore";
 import { get } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
 import { shouldNotifyForPane, notifyThrottled } from "./notify";
 import { logError } from "../../core/log";
 import { logBlockEvent, genId, capText } from "../../core/blocks-log";
+import { statusForClose } from "../../core/agent-status";
 import { formatBlockForAi, formatFixRequest, frameBracketedPaste } from "../../core/ai-payload";
 
 /**
@@ -129,8 +130,10 @@ export class CommandBlocks {
       case "C":
         // #33: 出力開始。E と同じく nonce で認証する（出力に紛れた偽 C が output_body の
         // 境界を動かすのを防ぐ）。開いているブロックにだけ意味がある（迷子の C は無視）。
-        if (!this.finished && this.nonce && rest === this.nonce)
+        if (!this.finished && this.nonce && rest === this.nonce) {
           this.outputStart = this.term.registerMarker(0) ?? null;
+          setPaneStatus(this.paneId, "running"); // #50: コマンド実行開始＝🟢
+        }
         break;
       case "D":
         this.onFinished(rest);
@@ -158,6 +161,7 @@ export class CommandBlocks {
       const endMarker = this.term.registerMarker(0);
       this.decorate(this.startMarker, -1, endMarker ?? null, this.pendingCommand, this.extractOutputBody(endMarker ?? null));
       this.logBlock(this.startMarker, endMarker ?? null, -1, true);
+      this.updateStatusOnClose(-1);
     }
     this.startMarker = this.term.registerMarker(0) ?? null;
     if (this.startMarker) this.promptMarkers.push(this.startMarker);
@@ -177,6 +181,21 @@ export class CommandBlocks {
     this.logBlock(this.startMarker, endMarker ?? null, code, false);
     this.finished = true;
     this.notifyIfBackground(code);
+    this.updateStatusOnClose(code);
+  }
+
+  /** #50: コマンド確定時のバッジ更新。#32/#20 と同じ「見ていない時だけ」ゲートと
+   *  #20 と同じ長時間しきい値を共有する（通知とバッジがズレない）。null は running 解除。 */
+  private updateStatusOnClose(code: number) {
+    const watching = !shouldNotifyForPane(this.paneId);
+    const longRun = this.cmdStart > 0 && Date.now() - this.cmdStart >= CommandBlocks.NOTIFY_MS;
+    setPaneStatus(this.paneId, statusForClose(code, watching, longRun));
+  }
+
+  /** #50: いまコマンド実行中か（E/C 受信済み・D 未受信）。AI ペインのアイドル判定のゲート。
+   *  プロンプトで静止しているだけの状態（A 直後）は false。 */
+  isCommandRunning(): boolean {
+    return !this.finished && (this.outputStart != null || this.pendingCommand != null);
   }
 
   /** #34: 装飾ツールバー（→AI/🔧fix）が使う出力本文を確定時点で cap して取り出す。

@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, setFocusedAsAiPane, aiPane } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, setFocusedAsAiPane, aiPane, paneStatus, acknowledgePane } from "../store/appStore";
   import { formatImagePath, isImagePath } from "../core/insert-path";
+  import { STATUS_ICON, STATUS_LABEL } from "../core/agent-status";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -42,6 +44,7 @@
   // ファイル/フォルダのドラッグ&ドロップ添付（VIBE_IDEAS #6）。起動時の操作は不要＝
   // ドロップ時だけ動く。ペイン単位だと全ペインで多重発火するので Workspace で1回だけ受ける。
   let dragUnlisten: (() => void) | undefined;
+  let winFocusUnlisten: (() => void) | undefined;
   const dropEncoder = new TextEncoder();
   function quotePath(p: string): string {
     return /\s/.test(p) ? `"${p}"` : p;
@@ -121,6 +124,14 @@
       })
       .then((un) => (dragUnlisten = un))
       .catch(() => {});
+    // #50: ウィンドウ復帰＝フォーカス中ペインは「見た」扱いでバッジを消す
+    // （focusedPane の値が変わらない alt-tab 復帰は store 購読では拾えないため）。
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused) acknowledgePane(get(focusedPane));
+      })
+      .then((un) => (winFocusUnlisten = un))
+      .catch(() => {});
     // 新規タブ作成のたびに小 welcome（初回 subscribe の即時発火はスキップ）。
     let first = true;
     welcomeUnsub = tabWelcome.subscribe(() => {
@@ -138,6 +149,7 @@
     window.removeEventListener("keydown", onKey, true);
     if (miniTimer) clearTimeout(miniTimer);
     welcomeUnsub?.();
+    winFocusUnlisten?.();
     dragUnlisten?.();
   });
 
@@ -333,6 +345,12 @@
         : ""}
     >
       <Terminal paneId={lf.id} initialCmd={lf.initialCmd} role={lf.role} />
+      {#if lf.tabId === $activeTabId && lf.id !== $focusedPane}
+        {@const st = $paneStatus.get(lf.id)}
+        {#if st}
+          <span class="pane-badge" title={STATUS_LABEL[st]} aria-label={STATUS_LABEL[st]}>{STATUS_ICON[st]}</span>
+        {/if}
+      {/if}
       {#if paneCount > 1 && lf.tabId === $activeTabId}
         <button
           class="pane-x"
@@ -403,6 +421,17 @@
   }
   .slot:hover .pane-x {
     opacity: 0.65;
+  }
+  /* #50: ペイン右上の状態バッジ（×ボタンの左隣・クリック透過・compositor-only）。 */
+  .pane-badge {
+    position: absolute;
+    top: 4px;
+    right: 28px;
+    z-index: 6;
+    font-size: 0.62rem;
+    line-height: 18px;
+    pointer-events: none;
+    filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.8));
   }
   .pane-x {
     position: absolute;

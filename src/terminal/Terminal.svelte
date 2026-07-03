@@ -32,7 +32,11 @@
     registerPaneInput,
     unregisterPaneInput,
     saveOneScrollback,
+    paneStatus,
+    setPaneStatus,
   } from "../store/appStore";
+  import { classifyIdle } from "../core/agent-status";
+  import { shouldNotifyForPane } from "./blocks/notify";
   import { leafIds } from "../layout/tree";
   import { config } from "../core/config";
   import { logInfo, logWarn, logError } from "../core/log";
@@ -397,6 +401,29 @@
     // にも一本で乗る。右クリック貼り付け（onContextMenu）は別操作なので従来どおり残す。
   }
 
+  // #50: AI(claude) ペインの「入力待ち/要承認」検知。claude は1コマンドとして走り続け
+  // OSC133 D がターン毎に出ないため、出力ストリームの静止(2.5s)＋末尾パターンで推定する。
+  // 判定は core/agent-status の純関数。ゲート2枚:
+  //  - blocks.isCommandRunning(): プロンプトで静止しているだけ（claude 終了後等）は対象外
+  //  - shouldNotifyForPane(): 見ている時はバッジ不要（#32/#20 と同じ判定を共有）
+  const AI_IDLE_MS = 2500;
+  let aiIdleTimer: number | undefined;
+  let aiTail = "";
+  const aiTailDecoder = new TextDecoder();
+  function trackAgentOutput(bytes: Uint8Array) {
+    if (paneId !== get(aiPane)) return;
+    aiTail = (aiTail + aiTailDecoder.decode(bytes, { stream: true })).slice(-800);
+    // 静止後に出力が再開したら waiting/attention → running へ戻す（C は再発火しないため）。
+    const cur = get(paneStatus).get(paneId);
+    if (cur === "waiting" || cur === "attention") setPaneStatus(paneId, "running");
+    if (aiIdleTimer) clearTimeout(aiIdleTimer);
+    aiIdleTimer = window.setTimeout(() => {
+      if (disposed || !blocks?.isCommandRunning()) return;
+      if (!shouldNotifyForPane(paneId)) return;
+      setPaneStatus(paneId, classifyIdle(aiTail));
+    }, AI_IDLE_MS);
+  }
+
   // 出力が落ち着いたら（1.5s debounce）画面内容を自動保存。閉じる処理に保存を
   // ぶら下げる方式（onCloseRequested）は close をブロックしてゾンビ化させるため、
   // 稼働中にバックグラウンドで残す。再起動時はこれを過去ログとして書き戻す。
@@ -432,6 +459,7 @@
         (bytes) => {
           term?.write(bytes);
           scheduleScrollbackSave();
+          trackAgentOutput(bytes); // #50: AI ペインのアイドル/要承認判定
         },
         initialCmd,
         oscNonce,
@@ -678,6 +706,8 @@
     if (get(lastShellPane) === paneId) lastShellPane.set(null); // #34: 消えたペインを届け先に残さない
     if (resizeTimer) clearTimeout(resizeTimer);
     if (scrollbackTimer) clearTimeout(scrollbackTimer);
+    if (aiIdleTimer) clearTimeout(aiIdleTimer);
+    setPaneStatus(paneId, null); // #50: 破棄ペインのバッジを残さない
     unregisterTermClear(paneId);
     unregisterTermWrite(paneId);
     unregisterPaneInput(paneId);

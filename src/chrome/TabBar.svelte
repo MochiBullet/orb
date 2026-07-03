@@ -1,8 +1,24 @@
 <script lang="ts">
-  import { tabs, activeTabId, newTab, closeTab, switchTab, renameTab } from "../layout/tabs";
+  import { tabs, activeTabId, newTab, closeTab, switchTab, renameTab, type Tab } from "../layout/tabs";
+  import { layout, paneStatus } from "../store/appStore";
+  import { leafIds, type PaneNode } from "../layout/tree";
+  import { aggregateStatus, STATUS_ICON, STATUS_LABEL, type PaneStatus } from "../core/agent-status";
 
   let editing = $state<number | null>(null);
   let editValue = $state("");
+
+  /** #50: タブ内全ペインの状態を1個へ集約（🔔>🔴>🟡>✅>🟢）。アクティブタブの
+   *  レイアウトはグローバル $layout が権威（Workspace の tabLayout と同じ規約）。 */
+  function tabStatus(
+    t: Tab,
+    active: number,
+    lay: PaneNode | null,
+    statuses: ReadonlyMap<number, PaneStatus>,
+  ): PaneStatus | null {
+    const l = t.id === active ? lay : t.layout;
+    if (!l) return null;
+    return aggregateStatus(leafIds(l).map((id) => statuses.get(id)));
+  }
 
   function startEdit(id: number, current: string) {
     editing = id;
@@ -22,6 +38,7 @@
 
 <div class="tabbar">
   {#each $tabs as t, i (t.id)}
+    {@const st = tabStatus(t, $activeTabId, $layout, $paneStatus)}
     <button
       class="tab"
       class:active={t.id === $activeTabId}
@@ -42,6 +59,9 @@
         />
       {:else}
         <span class="label">{t.name ?? `tab ${i + 1}`}</span>
+      {/if}
+      {#if st}
+        <span class="status" title={STATUS_LABEL[st]} aria-label={STATUS_LABEL[st]}>{STATUS_ICON[st]}</span>
       {/if}
       {#if $tabs.length > 1}
         <span
@@ -103,6 +123,10 @@
     font-size: 0.72rem;
     padding: 1px 4px;
     outline: none;
+  }
+  .status {
+    font-size: 0.58rem;
+    line-height: 1;
   }
   .x {
     font-size: 0.62rem;
