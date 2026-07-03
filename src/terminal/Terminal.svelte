@@ -546,8 +546,12 @@
       enqueueInput(encoder.encode(data));
       // AI ペインで Enter が押された＝claude 側で何か実行された合図。/model・/effort は
       // pwsh の OSC マーカーを経由しない（claude が標準入力を握っている間 ReadLine は動かない）
-      // ため、サイドバーの CLAUDE ステータスをこの合図で再チェックさせる。
-      if (role === "ai" && (data.includes("\r") || data.includes("\n"))) {
+      // ため、サイドバーの CLAUDE ステータスをこの合図で再チェックさせる（#54 のチェックポイント
+      // 捕捉もこの信号に相乗り）。判定は `role`（生成時に固定される静的プロパティ）ではなく
+      // 現在の `aiPane` ストアと比較する＝パレット「このペインを AI ペインに設定」で AI ペインが
+      // 実行時に再割り当てされた後も、新旧どちらのペインでも正しく追従する（#54 レビューで
+      // role 判定だと再割り当て後に取りこぼす／別ペイン宛の cwd で誤発火するバグを検出・修正）。
+      if (paneId === get(aiPane) && (data.includes("\r") || data.includes("\n"))) {
         aiPaneActivity.set(Date.now());
       }
     });

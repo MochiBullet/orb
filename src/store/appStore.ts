@@ -264,6 +264,13 @@ export function clearPaneCwd(paneId: number) {
   cwdRegistry.delete(paneId);
 }
 
+/** 指定ペイン自身の cwd を読む（フォーカス中ペインとは独立）。#54: チェックポイント捕捉は
+ *  「今フォーカスされているペインの cwd」ではなく「AI ペイン自身の cwd」に紐付ける必要がある
+ *  （分割ビューで別ペインにフォーカスがある間に AI が作業しても正しい案件を掴むため）。 */
+export function getPaneCwd(paneId: number): string | undefined {
+  return cwdRegistry.get(paneId);
+}
+
 let paneCounter = 0;
 /** 単調増加のペイン ID を採番する。#48: 永続はしない＝毎起動 1 から。fresh 構成の
  *  ペイン ID が前回起動と一致することで、paneId キーの scrollback 復元が成立する。 */

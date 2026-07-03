@@ -29,6 +29,8 @@
   import PromptQueue from "../chrome/PromptQueue.svelte";
   import { queues, armedPanes, cancelArmed } from "../store/promptQueue";
   import InfoTab from "../chrome/InfoTab.svelte";
+  import CheckpointPanel from "../chrome/CheckpointPanel.svelte";
+  import { initCheckpointCapture } from "../core/checkpoints";
   import { grid2x2, columns3, columns2, mainStack } from "./presets";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -41,6 +43,7 @@
   let showHistory = $state(false); // #31: ブロック履歴オーバーレイ（耐久ログからの再描画）
   let showMcpCatalog = $state(false); // #46: おすすめ MCP カタログオーバーレイ
   let showPromptQueue = $state(false); // #51: プロンプトキューオーバーレイ
+  let showCheckpoints = $state(false); // #54: チェックポイント（巻き戻し）オーバーレイ
   let zoomedPane = $state<number | null>(null);
   let wsEl: HTMLDivElement;
   const FULL: Rect = { x: 0, y: 0, w: 100, h: 100 };
@@ -49,6 +52,7 @@
   let miniWelcome = $state(false);
   let miniTimer: number | undefined;
   let welcomeUnsub: (() => void) | undefined;
+  let checkpointCaptureUnsub: (() => void) | undefined;
 
   // ファイル/フォルダのドラッグ&ドロップ添付（VIBE_IDEAS #6）。起動時の操作は不要＝
   // ドロップ時だけ動く。ペイン単位だと全ペインで多重発火するので Workspace で1回だけ受ける。
@@ -157,6 +161,8 @@
       miniWelcome = true;
       miniTimer = window.setTimeout(() => (miniWelcome = false), 1400);
     });
+    // #54: AI ペインのターン開始ごとに作業ツリーを非破壊で控える（チェックポイント）。
+    checkpointCaptureUnsub = initCheckpointCapture();
   });
 
   onDestroy(() => {
@@ -165,10 +171,11 @@
     welcomeUnsub?.();
     winFocusUnlisten?.();
     dragUnlisten?.();
+    checkpointCaptureUnsub?.();
   });
 
   function onKey(e: KeyboardEvent) {
-    if (showLauncher || showHistory || showMcpCatalog || showPromptQueue || get(showPalette) || get(showSettings)) return;
+    if (showLauncher || showHistory || showMcpCatalog || showPromptQueue || showCheckpoints || get(showPalette) || get(showSettings)) return;
     // Ctrl+, : 設定
     if (e.ctrlKey && !e.shiftKey && e.key === ",") {
       e.preventDefault();
@@ -288,6 +295,11 @@
       label: "おすすめ MCP / MCP catalog",
       hint: "クリックでインストールコマンド挿入",
       run: () => (showMcpCatalog = true),
+    },
+    {
+      label: "チェックポイント / 直前のターンに巻き戻す",
+      hint: "AI の各ターン開始を自動で控えた作業ツリーへ復元",
+      run: () => (showCheckpoints = true),
     },
     {
       label: "info / 説明書を開く",
@@ -537,6 +549,10 @@
 
 {#if showMcpCatalog}
   <McpCatalog onClose={() => (showMcpCatalog = false)} />
+{/if}
+
+{#if showCheckpoints}
+  <CheckpointPanel onClose={() => (showCheckpoints = false)} />
 {/if}
 
 {#if showPromptQueue}

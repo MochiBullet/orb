@@ -149,6 +149,38 @@ pub async fn get_local_usage(cwd: Option<String>) -> crate::usage_local::LocalUs
         .unwrap_or_default()
 }
 
+/// #54: AI ペインのターン開始ごとに呼ばれる fire-and-forget のチェックポイント捕捉。
+/// git 未導入・非リポジトリ・無変更は静かに何もしない。
+#[tauri::command]
+pub async fn checkpoint_capture(cwd: String) {
+    let _ = tauri::async_runtime::spawn_blocking(move || crate::checkpoint::capture(&cwd)).await;
+}
+
+/// #54: 対象 cwd（の git リポジトリ）が持つチェックポイント一覧（新しい順）。
+#[tauri::command]
+pub async fn checkpoint_list(cwd: String) -> Vec<crate::checkpoint::Checkpoint> {
+    tauri::async_runtime::spawn_blocking(move || crate::checkpoint::list(&cwd))
+        .await
+        .unwrap_or_default()
+}
+
+/// #54: チェックポイント時点と現在の作業ツリーの差分（ロールバック前のプレビュー用）。
+#[tauri::command]
+pub async fn checkpoint_diff(cwd: String, hash: String) -> Result<String> {
+    tauri::async_runtime::spawn_blocking(move || crate::checkpoint::diff(&cwd, &hash))
+        .await
+        .map_err(|e| AppError::Config(format!("checkpoint diff task: {e}")))?
+}
+
+/// #54: 唯一の破壊的操作。`git reset --hard` で作業ツリーをチェックポイント時点へ戻す。
+/// 呼び出しは UI 側の明示確認（diff プレビュー→確認クリック）を経た後にのみ行われる契約。
+#[tauri::command]
+pub async fn checkpoint_restore(cwd: String, hash: String) -> Result<()> {
+    tauri::async_runtime::spawn_blocking(move || crate::checkpoint::restore(&cwd, &hash))
+        .await
+        .map_err(|e| AppError::Config(format!("checkpoint restore task: {e}")))?
+}
+
 /// Claude Code の設定由来ステータス（モデル/エフォート/MCP）。
 #[tauri::command]
 pub fn get_claude_status(cwd: Option<String>) -> crate::status::ClaudeStatus {

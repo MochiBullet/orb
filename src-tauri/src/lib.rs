@@ -1,4 +1,5 @@
 mod blocks;
+mod checkpoint;
 mod commands;
 mod config;
 mod error;
@@ -62,6 +63,10 @@ pub fn run() {
             commands::save_config,
             commands::get_usage,
             commands::get_local_usage,
+            commands::checkpoint_capture,
+            commands::checkpoint_list,
+            commands::checkpoint_diff,
+            commands::checkpoint_restore,
             commands::get_claude_status,
             commands::get_mcp_health,
             commands::get_git_branch,
