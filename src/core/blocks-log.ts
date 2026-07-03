@@ -191,32 +191,33 @@ export function parseSearchQuery(raw: string): SearchSpec {
     const m = /^([a-zA-Z]+):(.*)$/.exec(tok);
     const key = m?.[1].toLowerCase();
     const val = m?.[2] ?? "";
+    const v = val.toLowerCase(); // 値もキー同様に大小無視（cwd と日付は素の val を使う）
     if (key === "exit" && val) {
-      if (val === "ok" || val === "fail") {
-        spec.exit = val;
+      if (v === "ok" || v === "fail") {
+        spec.exit = v;
         continue;
       }
-      if (val === "!0" || val === "≠0") {
+      if (v === "!0" || v === "≠0") {
         spec.exit = "fail";
         continue;
       }
-      if (/^-?\d+$/.test(val)) {
-        spec.exit = val;
+      if (/^-?\d+$/.test(v)) {
+        spec.exit = v;
         continue;
       }
     } else if (key === "cwd" && val) {
       spec.cwd = val;
       continue;
     } else if (key === "in") {
-      if (val === "command" || val === "cmd") {
+      if (v === "command" || v === "cmd") {
         spec.field = "command";
         continue;
       }
-      if (val === "output" || val === "out") {
+      if (v === "output" || v === "out") {
         spec.field = "output";
         continue;
       }
-      if (val === "all") {
+      if (v === "all") {
         spec.field = "all";
         continue;
       }

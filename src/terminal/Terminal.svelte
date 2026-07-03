@@ -145,10 +145,15 @@
   // #40 エラー処理・broadcast にも一本で乗る（Ctrl+V と同じ挙動）。
   function onContextMenu(e: MouseEvent) {
     e.preventDefault();
-    void navigator.clipboard.readText().then((t) => {
-      if (t) term?.paste(t);
-      else pasteClipboardImage(); // #53: テキストが無ければ「画像のみ」かを確認して @パス挿入
-    });
+    // #53: テキストが無ければ「画像のみ」かを確認して @パス挿入。readText はブラウザ実装に
+    // よって「テキスト無し」を空文字ではなく reject で返すことがあるため、両経路で拾う。
+    void navigator.clipboard.readText().then(
+      (t) => {
+        if (t) term?.paste(t);
+        else pasteClipboardImage();
+      },
+      () => pasteClipboardImage(),
+    );
   }
 
   // #53: クリップボード画像の貼り付け（Win+Shift+S 直後の Ctrl+V）。
@@ -366,7 +371,8 @@
     if (key === "f") { e.preventDefault(); e.stopPropagation(); openSearch(); return; }
     // #53: Ctrl+V — 画像のみクリップボードなら @パス挿入（fire-and-forget）。
     // preventDefault しない＝テキストがあれば従来の native paste がそのまま走る。
-    if (key === "v" && !e.shiftKey && !e.altKey && !e.isComposing) {
+    // e.repeat 除外＝キー長押しのオートリピートで PNG が量産されるのを防ぐ。
+    if (key === "v" && !e.shiftKey && !e.altKey && !e.isComposing && !e.repeat) {
       pasteClipboardImage();
       return;
     }

@@ -51,7 +51,32 @@ fn save_image_to(dir: &std::path::Path, bytes: &[u8], mime: &str) -> Result<Stri
         n += 1;
     }
     std::fs::write(&path, bytes)?;
+    prune_shots(dir, MAX_SHOTS);
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// orb-shots に残す最大ファイル数。貼り付けのたびに保存されるので上限で刈る。
+const MAX_SHOTS: usize = 300;
+
+/// 新しい方 keep 件を残して古い orb-* ファイルを消す（best-effort・失敗は無視）。
+/// 直近の貼り付けを claude が読む分には十分で、%TEMP% の無限肥大を防ぐ。
+fn prune_shots(dir: &std::path::Path, keep: usize) {
+    let rd = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = rd
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("orb-"))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    if files.len() <= keep {
+        return;
+    }
+    files.sort_by(|a, b| b.cmp(a)); // (mtime, path) 降順＝新しい順
+    for (_, p) in files.into_iter().skip(keep) {
+        let _ = std::fs::remove_file(p);
+    }
 }
 
 /// RGBA8（row-major・w*h*4 bytes）を PNG にエンコードする。寸法とバッファ長の不一致は拒否。
@@ -273,6 +298,27 @@ mod tests {
         assert!(p1.ends_with(".png"));
         assert_ne!(p1, p2); // 同一ミリ秒でも上書きしない
         assert_eq!(std::fs::read(&p1).unwrap(), TINY_PNG);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_shots_keeps_newest() {
+        let dir = std::env::temp_dir().join("orb-shots-test-prune");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..5 {
+            std::fs::write(dir.join(format!("orb-{i}.png")), b"x").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(15)); // mtime に順序を付ける
+        }
+        std::fs::write(dir.join("other.txt"), b"keep").unwrap(); // orb-* 以外は対象外
+        prune_shots(&dir, 2);
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["orb-3.png", "orb-4.png", "other.txt"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

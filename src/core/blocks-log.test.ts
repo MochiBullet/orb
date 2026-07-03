@@ -183,3 +183,14 @@ describe("parseSearchQuery (#49: 横断検索 DSL)", () => {
     expect(s.from).toBe("2026-06-01");
   });
 });
+
+describe("parseSearchQuery 値の大小無視 (#49 レビュー修正)", () => {
+  it("exit:/in: の値は大文字でも解釈される", () => {
+    expect(parseSearchQuery("exit:FAIL").exit).toBe("fail");
+    expect(parseSearchQuery("exit:OK").exit).toBe("ok");
+    expect(parseSearchQuery("in:CMD").field).toBe("command");
+    expect(parseSearchQuery("in:Output").field).toBe("output");
+    // cwd の値は素のまま保持（比較は Rust 側で大小無視）
+    expect(parseSearchQuery("cwd:OrB").cwd).toBe("OrB");
+  });
+});
