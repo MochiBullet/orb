@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, setFocusedAsAiPane } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, setFocusedAsAiPane, aiPane } from "../store/appStore";
+  import { formatImagePath, isImagePath } from "../core/insert-path";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, type Tab } from "./tabs";
   import {
     splitPane,
@@ -53,11 +54,19 @@
     return abs;
   }
   // フォーカス中ペインへ、cwd 相対化したパスを挿入（Enter は送らず人が確認して使う）。
+  // #53: AI ペインへの画像ドロップは claude の @添付形（@パス）にする。
   function handleDrop(paths: string[]) {
     const target = get(focusedPane);
     if (target == null || !paths?.length) return;
     const base = get(cwdStore);
-    const text = paths.map((p) => quotePath(relToCwd(p, base))).join(" ") + " ";
+    const forAi = target === get(aiPane);
+    const text =
+      paths
+        .map((p) => {
+          const rel = relToCwd(p, base);
+          return forAi && isImagePath(p) ? formatImagePath(rel, true) : quotePath(rel);
+        })
+        .join(" ") + " ";
     void invoke("write_pty", { paneId: target, data: Array.from(dropEncoder.encode(text)) }).catch(
       (e) => logError(`pane ${target}: drag-drop write failed: ${String(e)}`),
     );

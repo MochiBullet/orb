@@ -15,6 +15,50 @@ pub fn list_projects() -> Vec<Project> {
     config::load_projects()
 }
 
+/// #53: クリップボード画像の貼り付け。フロントの paste イベントが取り出した画像バイト列を
+/// `%TEMP%\orb-shots\` に保存してフルパスを返す（claude ペインへは @パス で挿入される）。
+/// 中身が申告 mime のマジックバイトで始まらない場合は保存しない＝ゴミ画像ファイルを作らない。
+fn save_image_to(dir: &std::path::Path, bytes: &[u8], mime: &str) -> Result<String> {
+    let ext = match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/bmp" => "bmp",
+        _ => return Err(AppError::Config(format!("unsupported image mime: {mime}"))),
+    };
+    let magic_ok = match ext {
+        "png" => bytes.starts_with(&[0x89, 0x50, 0x4e, 0x47]),
+        "jpg" => bytes.starts_with(&[0xff, 0xd8, 0xff]),
+        "gif" => bytes.starts_with(b"GIF8"),
+        "webp" => bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP",
+        "bmp" => bytes.starts_with(b"BM"),
+        _ => false,
+    };
+    if !magic_ok {
+        return Err(AppError::Config("clipboard bytes do not match the claimed image type".into()));
+    }
+    std::fs::create_dir_all(dir)?;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    // 同一ミリ秒の連続貼り付けでも上書きしない。
+    let mut path = dir.join(format!("orb-{ts}.{ext}"));
+    let mut n = 1;
+    while path.exists() {
+        path = dir.join(format!("orb-{ts}-{n}.{ext}"));
+        n += 1;
+    }
+    std::fs::write(&path, bytes)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn save_pasted_image(bytes: Vec<u8>, mime: String) -> Result<String> {
+    save_image_to(&std::env::temp_dir().join("orb-shots"), &bytes, &mime)
+}
+
 /// config.toml（font/scrollback 等）。
 #[tauri::command]
 pub fn get_config() -> Config {
@@ -166,5 +210,44 @@ pub fn close_all_ptys(state: State<'_, AppState>) {
     let drained: Vec<_> = state.ptys.lock().unwrap().drain().collect();
     for (_, mut handle) in drained {
         handle.kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 1x1 の実 PNG（マジック含む最小構成）。
+    const TINY_PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+        0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78,
+        0x9c, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    #[test]
+    fn save_pasted_image_writes_png_and_uniquifies() {
+        let dir = std::env::temp_dir().join("orb-shots-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let p1 = save_image_to(&dir, TINY_PNG, "image/png").unwrap();
+        let p2 = save_image_to(&dir, TINY_PNG, "image/png").unwrap();
+        assert!(p1.ends_with(".png"));
+        assert_ne!(p1, p2); // 同一ミリ秒でも上書きしない
+        assert_eq!(std::fs::read(&p1).unwrap(), TINY_PNG);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_pasted_image_rejects_mismatch_and_unknown_mime() {
+        let dir = std::env::temp_dir().join("orb-shots-test-rej");
+        let _ = std::fs::remove_dir_all(&dir);
+        // 申告 mime とマジック不一致（テキストを png と偽る）
+        assert!(save_image_to(&dir, b"hello world", "image/png").is_err());
+        // 未対応 mime
+        assert!(save_image_to(&dir, TINY_PNG, "image/tiff").is_err());
+        // 拒否時はディレクトリ自体作られない（副作用なし）
+        assert!(!dir.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

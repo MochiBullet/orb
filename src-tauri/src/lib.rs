@@ -64,6 +64,7 @@ pub fn run() {
             commands::get_mcp_health,
             commands::get_git_branch,
             commands::open_in_editor,
+            commands::save_pasted_image,
             blocks::append_block_event,
             blocks::read_block_events,
             blocks::search_block_events,

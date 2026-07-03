@@ -14,6 +14,7 @@
   import { orbClipboardProvider } from "./blocks/clipboard";
   import { genId } from "../core/blocks-log";
   import { frameBracketedPaste } from "../core/ai-payload";
+  import { formatImagePath } from "../core/insert-path";
   import {
     focusedPane,
     aiPane,
@@ -147,6 +148,35 @@
     void navigator.clipboard.readText().then((t) => {
       if (t) term?.paste(t);
     });
+  }
+
+  // #53: クリップボード画像の貼り付け（Win+Shift+S 直後の Ctrl+V）。
+  // keydown ではなく paste イベントで受ける＝clipboardData.items で「画像を含むか」が
+  // 同期的に分かるので、画像の時だけ preventDefault+stopPropagation で xterm から横取りし、
+  // テキスト貼り付けは一切触らず従来どおり xterm 本体へ流す（二重ペースト前科の再発防止）。
+  // capture=true の ancestor リスナーなので xterm textarea 本体のハンドラより先に走る。
+  function onPaste(e: ClipboardEvent) {
+    const item = Array.from(e.clipboardData?.items ?? []).find(
+      (i) => i.kind === "file" && i.type.startsWith("image/"),
+    );
+    if (!item) return; // 画像なし＝xterm のネイティブ paste に任せる
+    e.preventDefault();
+    e.stopPropagation();
+    const file = item.getAsFile();
+    if (!file) return;
+    const mime = item.type;
+    void file
+      .arrayBuffer()
+      .then(async (buf) => {
+        // Rust 側で %TEMP%\orb-shots\ に保存（マジックバイト検証込み）→ パスを挿入。
+        // AI ペインなら claude の @添付形。Enter は送らない＝実行/送信は人が決める。
+        const path = await invoke<string>("save_pasted_image", {
+          bytes: Array.from(new Uint8Array(buf)),
+          mime,
+        });
+        term?.paste(formatImagePath(path, paneId === get(aiPane)) + " ");
+      })
+      .catch((err) => logError(`pane ${paneId}: image paste failed: ${String(err)}`));
   }
 
   function focusThis() {
@@ -525,6 +555,7 @@
     });
 
     container.addEventListener("keydown", onCopyPaste, true);
+    container.addEventListener("paste", onPaste, true);
     container.addEventListener("wheel", onWheel, { passive: false, capture: true });
     container.addEventListener("mouseup", onMouseUp);
     container.addEventListener("contextmenu", onContextMenu);
@@ -654,6 +685,7 @@
     unregisterPaneInput(paneId);
     inputBuffer = [];
     container?.removeEventListener("keydown", onCopyPaste, true);
+    container?.removeEventListener("paste", onPaste, true);
     container?.removeEventListener("wheel", onWheel, { capture: true });
     container?.removeEventListener("mouseup", onMouseUp);
     container?.removeEventListener("contextmenu", onContextMenu);
