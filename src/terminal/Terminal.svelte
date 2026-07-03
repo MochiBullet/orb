@@ -278,6 +278,7 @@
       if (isVisible()) {
         fit?.fit();
         pty?.resize(term.cols, term.rows);
+        blocks?.onResize(); // #56: cols が変わったらブロック装飾の幅を作り直す
       }
     }
   });
@@ -319,12 +320,14 @@
     term.options.fontSize = Math.min(28, Math.max(8, cur + delta));
     fit?.fit();
     pty?.resize(term.cols, term.rows);
+    blocks?.onResize(); // #56
   }
   function resetZoom() {
     if (!term) return;
     term.options.fontSize = cfg.font_size;
     fit?.fit();
     pty?.resize(term.cols, term.rows);
+    blocks?.onResize(); // #56
   }
   function onWheel(e: WheelEvent) {
     if (!e.ctrlKey) return;
@@ -672,6 +675,7 @@
         fit.fit();
         pty?.resize(term.cols, term.rows);
         term.refresh(0, term.rows - 1);
+        blocks?.onResize(); // #56
       });
     });
     io.observe(container);
@@ -694,6 +698,9 @@
         fit.fit();
         pty?.resize(term.cols, term.rows);
         term.refresh(0, term.rows - 1);
+        // #56: 分割/ウィンドウリサイズ/ペインズーム(Ctrl+Shift+Z)後、cols 固定で登録済みの
+        // 旧ブロック装飾（ツールバー/badge）を現在幅で作り直す（幅一致なら no-op）。
+        blocks?.onResize();
       }, RESIZE_DEBOUNCE_MS);
     });
     observer.observe(container);

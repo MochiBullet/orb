@@ -79,6 +79,22 @@ export function parseCommandLine(rest: string, expectedNonce: string): string | 
 }
 
 /**
+ * #56: 1 ブロック分の装飾と、resize 時に同じ装飾を作り直すためのパラメータ一式。
+ * xterm の IDecoration は width を後から変えられない（setter 無し）ため、cols が変わったら
+ * dispose→同じ marker で再登録する。その再登録に必要な decorate 呼び出し時の値を保持する。
+ */
+interface BlockDeco {
+  marker: IMarker;
+  endMarker: IMarker | null;
+  code: number;
+  command: string | null;
+  outputBody: string | null;
+  /** 登録時の term.cols。現在の cols と違えば作り直しが要る（planResize の stale 判定）。 */
+  width: number;
+  dec: IDecoration | undefined;
+}
+
+/**
  * OSC 133/633 マーカーを解釈して Warp 風のコマンドブロック装飾を出すコントローラ。
  *
  * - 単一 xterm グリッドは維持し、ブロック境界は decoration（DOM オーバーレイ）で乗せる。
@@ -88,7 +104,8 @@ export function parseCommandLine(rest: string, expectedNonce: string): string | 
  */
 export class CommandBlocks {
   private disposables: IDisposable[] = [];
-  private decorations: IDecoration[] = [];
+  /** #56: ブロック装飾レジストリ（resize 時の作り直しに必要なパラメータ込み）。 */
+  private blockDecos: BlockDeco[] = [];
   private startMarker: IMarker | null = null;
   private promptMarkers: IMarker[] = [];
   private finished = true;
@@ -116,6 +133,32 @@ export class CommandBlocks {
     // #32: TUI（Claude Code 等）が完了/確認待ちで撃つ通知エスケープを OS 通知へ転送。
     this.disposables.push(term.parser.registerOscHandler(9, (d) => this.onOsc9(d)));
     this.disposables.push(term.parser.registerOscHandler(777, (d) => this.onOsc777(d)));
+    // #56: alt-screen（vim 等）中は onResize をスキップするため、normal 復帰の瞬間に
+    // 作り直しを追いかける（alt 中に分割/リサイズされた場合の幅ズレ取りこぼし防止）。
+    this.disposables.push(
+      term.buffer.onBufferChange((buf) => {
+        if (buf.type === "normal") this.onResize();
+      }),
+    );
+  }
+
+  /**
+   * #56: 分割/ウィンドウリサイズ/ズームで cols が変わった後、既存ブロック装飾を現在幅で
+   * 作り直す（Terminal.svelte の fit 確定点から呼ばれる）。dispose 済み marker はレジストリ
+   * から掃除する。幅が合っているエントリには触れない＝cols 不変の resize は比較だけの no-op。
+   * alt-screen 中は何もしない（handle() と同じガード。復帰は onBufferChange で拾う）。
+   */
+  onResize() {
+    if (this.term.buffer.active.type === "alternate") return;
+    const { keep, drop, stale } = planResize(this.blockDecos, this.term.cols);
+    for (const e of drop) e.dec?.dispose();
+    this.blockDecos = keep;
+    for (const e of stale) {
+      // 旧 decoration を dispose してから同じ marker で再登録＝DOM 要素は新規に作られるので
+      // onRender の orbReady ガードと合わせてツールバー二重表示・リスナー多重登録は起きない。
+      e.dec?.dispose();
+      e.dec = this.registerBlockDecoration(e);
+    }
   }
 
   private handle(data: string): boolean {
@@ -355,14 +398,26 @@ export class CommandBlocks {
     command: string | null,
     outputBody: string | null,
   ) {
+    // #56: 再生成に必要なパラメータごとレジストリへ。装飾の実登録は共通経路に委ねる。
+    const entry: BlockDeco = { marker, endMarker, code, command, outputBody, width: 0, dec: undefined };
+    entry.dec = this.registerBlockDecoration(entry);
+    if (!entry.dec) return;
+    this.blockDecos.push(entry);
+  }
+
+  /** entry のパラメータで decoration を現在の term.cols 幅で登録し、装飾 DOM を構築する
+   *  （初回作成と #56 の resize 再生成の共通経路）。entry.width は登録幅で更新する。
+   *  marker が dispose 済みなら xterm が undefined を返す（呼び元/次の掃除で捨てられる）。 */
+  private registerBlockDecoration(entry: BlockDeco): IDecoration | undefined {
+    const { marker, endMarker, code, command, outputBody } = entry;
     const ok = code === 0;
+    entry.width = this.term.cols;
     const dec = this.term.registerDecoration({
       marker,
       width: this.term.cols,
       overviewRulerOptions: { color: ok ? "#2dd4bf" : "#ff5c8a", position: "left" },
     });
-    if (!dec) return;
-    this.decorations.push(dec);
+    if (!dec) return undefined;
     dec.onRender((el) => {
       el.classList.add("orb-block");
       el.classList.toggle("ok", ok);
@@ -421,6 +476,7 @@ export class CommandBlocks {
       }
       el.appendChild(tools);
     });
+    return dec;
   }
 
   /** 直前/直後のプロンプト行へスクロール（Ctrl+↑ / Ctrl+↓）。 */
@@ -443,13 +499,41 @@ export class CommandBlocks {
     // 「実行中コマンドを抱えたまま閉じた」と「アイドルのプロンプトで閉じただけ」を区別できず、
     // ペインを閉じるたびに末尾のアイドルブロックが aborted -1 のゴミ記録になる（#3 の幻ブロックと同質）。
     // 実行中コマンドの取りこぼし捕捉は、C マーカーで開始を検知できる #33 で gate 付きで入れる。
-    for (const d of this.decorations) d.dispose();
+    for (const d of this.blockDecos) d.dec?.dispose();
     for (const d of this.disposables) d.dispose();
-    this.decorations = [];
+    this.blockDecos = [];
     this.disposables = [];
     this.promptMarkers = [];
     this.startMarker = null;
   }
+}
+
+/**
+ * #56: resize 時のブロック装飾レジストリ整理（純関数）。
+ *
+ * - dispose 済み / スクロールバックから溢れた（line<0）marker のエントリは drop（掃除対象）。
+ * - 生存エントリのうち登録時幅 width が現在の cols と違うものだけ stale（作り直し対象）。
+ *
+ * 幅は「最後の resize 時の cols」ではなくエントリごとに持つ＝alt-screen 中のスキップ等で
+ * 一部のエントリだけ古い幅のまま残っても、次の呼び出しで必ず作り直し対象になる（自己修復）。
+ * cols 不変の resize（行数だけ変化）では stale が空＝数値比較 O(n) だけで済む。
+ */
+export function planResize<E extends { marker: { line: number; isDisposed: boolean }; width: number }>(
+  entries: E[],
+  cols: number,
+): { keep: E[]; drop: E[]; stale: E[] } {
+  const keep: E[] = [];
+  const drop: E[] = [];
+  const stale: E[] = [];
+  for (const e of entries) {
+    if (e.marker.isDisposed || e.marker.line < 0) {
+      drop.push(e);
+      continue;
+    }
+    keep.push(e);
+    if (e.width !== cols) stale.push(e);
+  }
+  return { keep, drop, stale };
 }
 
 /** PowerShell 側 __orb_escape の逆変換（\xNN → 文字）。 */

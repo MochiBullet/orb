@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseExitCode, parseOsc9, parseOsc777, parseCommandLine } from "./osc";
+import { parseExitCode, parseOsc9, parseOsc777, parseCommandLine, planResize } from "./osc";
 
 describe("parseExitCode (#41: no false success/failure)", () => {
   it('empty rest (D missing / Ctrl-C) => -1 (unknown/aborted, NOT success)', () => {
@@ -131,5 +131,56 @@ describe("parseCommandLine (#33: OSC 633;E nonce 検証)", () => {
 
   it("上限（COMMAND_MAX）超過 → null", () => {
     expect(parseCommandLine(`${N};${"x".repeat(5000)}`, N)).toBeNull();
+  });
+});
+
+describe("planResize (#56: resize 時のブロック装飾レジストリ整理)", () => {
+  const entry = (id: string, width: number, line = 10, isDisposed = false) => ({
+    id,
+    width,
+    marker: { line, isDisposed },
+  });
+  const ids = (arr: Array<{ id: string }>) => arr.map((e) => e.id);
+
+  it("幅が cols と違う生存エントリだけ stale（作り直し対象）", () => {
+    const a = entry("a", 120);
+    const b = entry("b", 80);
+    const { keep, drop, stale } = planResize([a, b], 80);
+    expect(ids(keep)).toEqual(["a", "b"]);
+    expect(drop).toEqual([]);
+    expect(ids(stale)).toEqual(["a"]);
+  });
+
+  it("全エントリの幅が cols 一致 → stale 空（cols 不変 resize は no-op）", () => {
+    const { keep, drop, stale } = planResize([entry("a", 80), entry("b", 80)], 80);
+    expect(keep.length).toBe(2);
+    expect(drop).toEqual([]);
+    expect(stale).toEqual([]);
+  });
+
+  it("dispose 済み marker は drop（掃除）で stale に入らない", () => {
+    const dead = entry("dead", 120, 10, true);
+    const alive = entry("alive", 120);
+    const { keep, drop, stale } = planResize([dead, alive], 80);
+    expect(ids(keep)).toEqual(["alive"]);
+    expect(ids(drop)).toEqual(["dead"]);
+    expect(ids(stale)).toEqual(["alive"]);
+  });
+
+  it("line < 0（スクロールバックから溢れた marker）も drop", () => {
+    const fell = entry("fell", 80, -1);
+    const { keep, drop, stale } = planResize([fell], 80);
+    expect(keep).toEqual([]);
+    expect(ids(drop)).toEqual(["fell"]);
+    expect(stale).toEqual([]);
+  });
+
+  it("混在幅も全部 stale になる（alt-screen 中スキップで一部だけ古い幅 → 自己修復）", () => {
+    const { stale } = planResize([entry("a", 120), entry("b", 100), entry("c", 80)], 90);
+    expect(ids(stale)).toEqual(["a", "b", "c"]);
+  });
+
+  it("空レジストリ → 全部空", () => {
+    expect(planResize([], 80)).toEqual({ keep: [], drop: [], stale: [] });
   });
 });
