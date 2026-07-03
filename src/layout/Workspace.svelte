@@ -26,6 +26,8 @@
   import CommandPalette, { type PaletteAction } from "../chrome/CommandPalette.svelte";
   import BlockHistory from "../chrome/BlockHistory.svelte";
   import McpCatalog from "../chrome/McpCatalog.svelte";
+  import PromptQueue from "../chrome/PromptQueue.svelte";
+  import { queues, armedPanes, cancelArmed } from "../store/promptQueue";
   import InfoTab from "../chrome/InfoTab.svelte";
   import { grid2x2, columns3, columns2, mainStack } from "./presets";
   import { invoke } from "@tauri-apps/api/core";
@@ -38,6 +40,7 @@
   let showLauncher = $state(false);
   let showHistory = $state(false); // #31: ブロック履歴オーバーレイ（耐久ログからの再描画）
   let showMcpCatalog = $state(false); // #46: おすすめ MCP カタログオーバーレイ
+  let showPromptQueue = $state(false); // #51: プロンプトキューオーバーレイ
   let zoomedPane = $state<number | null>(null);
   let wsEl: HTMLDivElement;
   const FULL: Rect = { x: 0, y: 0, w: 100, h: 100 };
@@ -165,7 +168,7 @@
   });
 
   function onKey(e: KeyboardEvent) {
-    if (showLauncher || showHistory || showMcpCatalog || get(showPalette) || get(showSettings)) return;
+    if (showLauncher || showHistory || showMcpCatalog || showPromptQueue || get(showPalette) || get(showSettings)) return;
     // Ctrl+, : 設定
     if (e.ctrlKey && !e.shiftKey && e.key === ",") {
       e.preventDefault();
@@ -222,8 +225,25 @@
     } else if (k === "h") {
       e.preventDefault();
       showHistory = true; // ブロック履歴 (Ctrl+Shift+H, #31)
+    } else if (k === "q") {
+      e.preventDefault();
+      showPromptQueue = true; // プロンプトキュー (Ctrl+Shift+Q, #51)
     }
   }
+
+  // #51: 送信予約トーストのカウントダウン用現在時刻（予約が無い間はタイマーを回さない）。
+  let nowTick = $state(Date.now());
+  $effect(() => {
+    if ($armedPanes.size === 0) return;
+    const t = setInterval(() => (nowTick = Date.now()), 200);
+    return () => clearInterval(t);
+  });
+  let armedList = $derived(
+    [...$armedPanes.entries()].map(([paneId, a]) => ({
+      paneId,
+      secs: Math.max(0, Math.ceil((a.sendAt - nowTick) / 1000)),
+    })),
+  );
 
   function zoomFocused() {
     const f = get(focusedPane);
@@ -259,6 +279,11 @@
       run: () => sidebarSide.update((s) => (s === "right" ? "left" : "right")),
     },
     { label: "ブロック履歴 / Block history", hint: "Ctrl+Shift+H", run: () => (showHistory = true) },
+    {
+      label: "プロンプトキュー / Prompt queue",
+      hint: "Ctrl+Shift+Q · 次の指示を積む→アイドルで自動投入",
+      run: () => (showPromptQueue = true),
+    },
     {
       label: "おすすめ MCP / MCP catalog",
       hint: "クリックでインストールコマンド挿入",
@@ -432,6 +457,17 @@
           <span class="pane-badge" title={STATUS_LABEL[st]} aria-label={STATUS_LABEL[st]}>{STATUS_ICON[st]}</span>
         {/if}
       {/if}
+      {#if lf.tabId === $activeTabId}
+        {@const pq = $queues.get(lf.id)}
+        {#if pq?.items.length}
+          <!-- #51: キュー残数（.pane-badge と同じ流儀・空なら出さない・⏸=一時停止中）。 -->
+          <span
+            class="queue-badge"
+            title={`プロンプトキュー ${pq.items.length} 件${pq.paused ? " · 一時停止中" : ""} (Ctrl+Shift+Q)`}
+            aria-label={`プロンプトキュー ${pq.items.length} 件`}
+          >{pq.paused ? "⏸" : "⧗"}{pq.items.length}</span>
+        {/if}
+      {/if}
       {#if paneCount > 1 && lf.tabId === $activeTabId}
         <button
           class="pane-x"
@@ -473,6 +509,18 @@
   {#if $dnd}
     <div class="dnd-badge" title="フォーカスモード: 成功通知オフ・失敗のみ通知 (Ctrl+Shift+N)">🔕 focus</div>
   {/if}
+
+  {#if armedList.length}
+    <!-- #51: 送信予約の可視キャンセル猶予（どの画面でも見える・キャンセルでキューに残す）。 -->
+    <div class="queue-arm-stack">
+      {#each armedList as a (a.paneId)}
+        <div class="queue-arm">
+          <span>⧗ ペイン {a.paneId} へ {a.secs}秒後に送信…</span>
+          <button onclick={() => cancelArmed(a.paneId)}>キャンセル</button>
+        </div>
+      {/each}
+    </div>
+  {/if}
 </div>
 
 {#if showLauncher}
@@ -489,6 +537,10 @@
 
 {#if showMcpCatalog}
   <McpCatalog onClose={() => (showMcpCatalog = false)} />
+{/if}
+
+{#if showPromptQueue}
+  <PromptQueue onClose={() => (showPromptQueue = false)} />
 {/if}
 
 {#if $showPalette}
@@ -520,6 +572,18 @@
     z-index: 6;
     font-size: 0.62rem;
     line-height: 18px;
+    pointer-events: none;
+    filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.8));
+  }
+  /* #51: キュー残数バッジ（.pane-badge の左隣・クリック透過）。 */
+  .queue-badge {
+    position: absolute;
+    top: 4px;
+    right: 50px;
+    z-index: 6;
+    font-size: 0.62rem;
+    line-height: 18px;
+    color: var(--teal, #2dd4bf);
     pointer-events: none;
     filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.8));
   }
@@ -580,6 +644,49 @@
     letter-spacing: 0.04em;
     pointer-events: none;
     box-shadow: 0 2px 12px -6px rgba(167, 139, 250, 0.5);
+  }
+
+  /* #51: 送信予約中のカウントダウントースト（下中央・キャンセルだけ操作可）。 */
+  .queue-arm-stack {
+    position: absolute;
+    left: 50%;
+    bottom: 10px;
+    transform: translateX(-50%);
+    z-index: 8;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+  }
+  .queue-arm {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 6px 4px 12px;
+    border-radius: 999px;
+    background: #05100e;
+    border: 1px solid rgba(45, 212, 191, 0.5);
+    color: var(--teal, #2dd4bf);
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    box-shadow: 0 4px 18px -6px rgba(45, 212, 191, 0.5);
+    white-space: nowrap;
+  }
+  .queue-arm span {
+    font-variant-numeric: tabular-nums;
+  }
+  .queue-arm button {
+    border: 1px solid rgba(255, 92, 138, 0.45);
+    border-radius: 999px;
+    background: transparent;
+    color: #ff5c8a;
+    font-family: inherit;
+    font-size: 0.68rem;
+    padding: 2px 10px;
+    cursor: pointer;
+  }
+  .queue-arm button:hover {
+    background: rgba(255, 92, 138, 0.14);
   }
 
   /* 新規タブで一瞬出る小さな welcome（中央・自動フェード・操作は透過）。 */

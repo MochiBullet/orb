@@ -37,6 +37,7 @@
     clearPaneCwd,
   } from "../store/appStore";
   import { classifyIdle } from "../core/agent-status";
+  import { disposePaneQueue } from "../store/promptQueue";
   import { shouldNotifyForPane } from "./blocks/notify";
   import { leafIds } from "../layout/tree";
   import { config } from "../core/config";
@@ -716,6 +717,7 @@
     if (scrollbackTimer) clearTimeout(scrollbackTimer);
     if (aiIdleTimer) clearTimeout(aiIdleTimer);
     setPaneStatus(paneId, null); // #50: 破棄ペインのバッジを残さない
+    disposePaneQueue(paneId); // #51: 破棄ペインのプロンプトキュー/送信予約を残さない
     clearPaneCwd(paneId); // #45: 破棄ペインの cwd を残さない
     unregisterTermClear(paneId);
     unregisterTermWrite(paneId);

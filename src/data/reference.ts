@@ -26,6 +26,7 @@ export const KEY_REFERENCE: KeyReference[] = [
   { keys: "Ctrl+Shift+L", desc: "AI ペインの選択をシェルのプロンプトへ（実行は Enter）" },
   { keys: "Ctrl+Shift+H", desc: "ブロック履歴（耐久ログから検索・再構築）" },
   { keys: "Ctrl+Shift+N", desc: "フォーカスモード(DND) 切替" },
+  { keys: "Ctrl+Shift+Q", desc: "プロンプトキュー（次の指示を積む→入力待ちで自動投入）" },
   { keys: "Shift+Enter", desc: "改行を送る（Claude Code 等の複数行入力）" },
   { keys: "Ctrl+= / Ctrl+- / Ctrl+0", desc: "文字サイズ 拡大 / 縮小 / リセット" },
   { keys: "Ctrl+, ", desc: "設定を開く" },
