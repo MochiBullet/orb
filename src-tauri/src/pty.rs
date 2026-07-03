@@ -1,5 +1,4 @@
 use std::io::{Read, Write};
-use std::os::windows::process::CommandExt;
 use std::sync::Mutex;
 use std::thread::JoinHandle;
 
@@ -8,8 +7,25 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 
 use crate::error::{AppError, Result};
 
-/// taskkill をコンソール窓なしで起動するためのフラグ。
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// 子プロセスツリーを倒す。Windows は `taskkill /T /F` でツリーごと、Unix は PTY
+/// セッションリーダー（`portable-pty` が spawn 時に setsid する想定＝子の pgid が
+/// 自分自身の pid と一致する）のプロセスグループへ `kill -9 -<pid>`（負の PID＝グループ
+/// 全体が対象）を送ることで、シェルが起こした孫プロセス（npm run dev / vim 等）も
+/// 巻き込んで倒す。**Unix 版は実機未検証**（#17 クロスプラットフォーム対応の一環。
+/// setsid の前提が崩れていた場合は直下の子だけが倒れ孫が孤児化しうる＝実機 CI で要確認）。
+#[cfg(windows)]
+fn kill_tree(pid: u32) {
+    let _ = crate::procutil::new_command("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .output();
+}
+
+#[cfg(unix)]
+fn kill_tree(pid: u32) {
+    let _ = crate::procutil::new_command("kill")
+        .args(["-9", &format!("-{pid}")])
+        .output();
+}
 
 /// 1 ペイン分の PTY ライフサイクルを保持する。
 ///
@@ -122,10 +138,7 @@ impl PtyHandle {
         // 1. プロセスツリーごと強制終了。pwsh が起こした子・孫(npm run dev / vim 等)も
         //    巻き込んで倒し、孤児プロセス化を防ぐ。
         if let Some(pid) = self.child_pid.take() {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/T", "/F", "/PID", &pid.to_string()])
-                .creation_flags(CREATE_NO_WINDOW)
-                .output();
+            kill_tree(pid);
         }
         if let Ok(mut child) = self.child.lock() {
             let _ = child.kill();

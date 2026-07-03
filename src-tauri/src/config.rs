@@ -133,11 +133,7 @@ pub(crate) fn config_dir() -> PathBuf {
     if let Some(x) = std::env::var_os("XDG_CONFIG_HOME") {
         return PathBuf::from(x).join("orb");
     }
-    std::env::var_os("USERPROFILE")
-        .map(PathBuf::from)
-        .unwrap_or_default()
-        .join(".config")
-        .join("orb")
+    crate::status::home_dir().join(".config").join("orb")
 }
 
 /// projects.toml を読む（read 専用＝FS を書き換えない。初回 seed は seed_defaults）。

@@ -14,16 +14,14 @@
 //! - 状態はプロセスメモリのみ（永続化しない）。再起動を跨いだ巻き戻しは対象外＝シンプルさ優先。
 
 use std::collections::HashMap;
-use std::os::windows::process::CommandExt;
 use std::path::Path;
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
+use crate::procutil::new_command;
 
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// リポジトリごとに保持するチェックポイントの上限。古いものから捨てる。
 const MAX_CHECKPOINTS: usize = 20;
 
@@ -58,10 +56,9 @@ fn checkpoints_state() -> &'static Mutex<HashMap<String, Vec<Checkpoint>>> {
 }
 
 fn run_git(repo_root: &str, args: &[&str]) -> Result<String> {
-    let out = Command::new("git")
+    let out = new_command("git")
         .args(args)
         .current_dir(repo_root)
-        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| AppError::Config(format!("git spawn failed: {e}")))?;
     if !out.status.success() {
@@ -72,16 +69,20 @@ fn run_git(repo_root: &str, args: &[&str]) -> Result<String> {
 
 /// cwd から git リポジトリのルートを解決する。git 未導入・非リポジトリは None（静かに無効）。
 fn repo_root(cwd: &str) -> Option<String> {
-    let out = Command::new("git")
+    let out = new_command("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(cwd)
-        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
     if !out.status.success() {
         return None;
     }
+    // git は常に `/` 区切りで返す。Windows のパス表記に合わせるのはそちら側だけでよく、
+    // Unix は既に正しい形（そもそも `\` は区切り文字ではなくファイル名に使える文字）。
+    #[cfg(windows)]
     let root = String::from_utf8_lossy(&out.stdout).trim().replace('/', "\\");
+    #[cfg(not(windows))]
+    let root = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if root.is_empty() {
         None
     } else {
@@ -89,9 +90,20 @@ fn repo_root(cwd: &str) -> Option<String> {
     }
 }
 
-/// リポジトリキー（大小文字を無視した正規化パス）。Windows パスの比較用。
+/// リポジトリキー（HashMap のキーとして安定していればよい）。Windows は大小文字を
+/// 区別しないファイルシステムのため小文字化して比較、Unix（特に ext4 等）は大小文字を
+/// 区別するファイルシステムが標準のため、小文字化すると別ディレクトリを誤って同一視
+/// しうる＝素通しにする（macOS の既定 APFS は大小文字非区別だが、Unix 全体で安全側に
+/// 倒すため一律で区別する）。
 fn repo_key(root: &str) -> String {
-    root.to_lowercase()
+    #[cfg(windows)]
+    {
+        root.to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        root.to_string()
+    }
 }
 
 /// 7〜64桁の16進のみ許可（下限は git の省略 hash の実用的な最小長に合わせた defense-in-depth。

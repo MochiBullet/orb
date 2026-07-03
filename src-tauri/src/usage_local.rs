@@ -68,15 +68,26 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
-/// パス比較用に正規化する（小文字化＋ `/` を `\` に統一＋末尾セパレータを落とす）。
-/// Windows のパスは大小文字を区別しないため、prefix 一致もそれに合わせる。
+/// OS 固有のパス区切り文字。Windows は `\`、Unix は `/`（Claude Code の transcript の
+/// `cwd` フィールドは実行時の OS ネイティブな形式で記録されるため、比較側もそれに合わせる）。
+#[cfg(windows)]
+const PATH_SEP: char = '\\';
+#[cfg(not(windows))]
+const PATH_SEP: char = '/';
+
+/// パス比較用に正規化する（末尾セパレータを落とす。Windows のみ追加で小文字化＋
+/// `/` を `\` に統一——大小文字を区別しないファイルシステムのため prefix 一致もそれに
+/// 合わせる。Unix は ext4 等の大小文字を区別するファイルシステムが標準のため素通し）。
 fn normalize_path(p: &str) -> String {
+    #[cfg(windows)]
     let s = p.trim().to_lowercase().replace('/', "\\");
-    s.strip_suffix('\\').map(str::to_string).unwrap_or(s)
+    #[cfg(not(windows))]
+    let s = p.trim().to_string();
+    s.strip_suffix(PATH_SEP).map(str::to_string).unwrap_or(s)
 }
 
 /// `line_cwd` が `target`（正規化済み）配下（＝ target 自身、または target の子孫）かを判定する。
-/// 単純な `starts_with` だとディレクトリ境界を無視して `...\orb` が `...\orb2` にも
+/// 単純な `starts_with` だとディレクトリ境界を無視して `.../orb` が `.../orb2` にも
 /// マッチしてしまうため、次の文字が区切り or 終端であることまで確認する。
 fn cwd_under(line_cwd: &str, target_norm: &str) -> bool {
     let line_norm = normalize_path(line_cwd);
@@ -85,7 +96,7 @@ fn cwd_under(line_cwd: &str, target_norm: &str) -> bool {
     }
     line_norm
         .strip_prefix(target_norm)
-        .is_some_and(|rest| rest.starts_with('\\'))
+        .is_some_and(|rest| rest.starts_with(PATH_SEP))
 }
 
 /// 1 JSONL 行から (発生時刻ms, トークン数, cwd) を取り出す。`type:"assistant"` 以外・

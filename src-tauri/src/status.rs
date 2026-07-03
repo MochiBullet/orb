@@ -1,4 +1,3 @@
-use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -13,10 +12,17 @@ pub struct ClaudeStatus {
     pub mcp: Vec<String>,
 }
 
+/// ホームディレクトリ（クロスプラットフォーム）。Claude Code 自身が `~/.claude/...` を
+/// 全 OS 共通の規約で使うため、orb 側の `~/.claude/*` 参照（本ファイル・usage.rs・
+/// usage_local.rs）もここに寄せて一箇所で解決する。config.rs の `config_dir()` の
+/// フォールバック・shell.rs の既定 cwd もここを使う（元は4ファイルに Windows 専用の
+/// `USERPROFILE` 決め打ちが重複していた）。
 pub(crate) fn home_dir() -> PathBuf {
-    std::env::var_os("USERPROFILE")
-        .map(PathBuf::from)
-        .unwrap_or_default()
+    #[cfg(windows)]
+    let var = "USERPROFILE";
+    #[cfg(not(windows))]
+    let var = "HOME";
+    std::env::var_os(var).map(PathBuf::from).unwrap_or_default()
 }
 
 fn claude_dir() -> PathBuf {
@@ -109,19 +115,32 @@ pub struct McpHealth {
 /// そのディレクトリで実行する（存在しないパスは無視＝user スコープのみの測定になる）。
 /// claude には `git -C` 相当のディレクトリ指定オプションが無いため current_dir が唯一の手段。
 ///
-/// セキュリティ: cmd.exe は既定でカレントディレクトリを PATH より先に検索するため、
-/// 信頼できない cwd（clone した第三者リポ等）に `claude.bat` を置かれると PATH の
+/// セキュリティ（Windows）: cmd.exe は既定でカレントディレクトリを PATH より先に検索する
+/// ため、信頼できない cwd（clone した第三者リポ等）に `claude.bat` を置かれると PATH の
 /// claude より先に自動実行されてしまう。`NoDefaultCurrentDirectoryInExePath` を
 /// セットしてこの cwd 優先解決を無効化する（NeedCurrentDirectoryForExePathW 準拠の
 /// 公式機構）。env は子プロセスにも継承されるので、claude.cmd シム内部の `node`
 /// 解決など下流の cmd 連鎖も同時に守られる（実機で claude.bat 差し置き→PATH 側が
-/// 実行されることを検証済み）。
-pub fn fetch_mcp_health(cwd: Option<String>) -> Vec<McpHealth> {
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let mut cmd = std::process::Command::new("cmd");
+/// 実行されることを検証済み）。Unix には npm が作る通常の実行ファイル（PATH 直接）を
+/// 呼ぶだけで、cmd.exe のような「カレントディレクトリ優先解決」の概念自体が無いため
+/// この防御が不要（claude を直接 spawn する）。
+#[cfg(windows)]
+fn claude_command() -> std::process::Command {
+    let mut cmd = crate::procutil::new_command("cmd");
     cmd.args(["/C", "claude", "mcp", "list"])
-        .env("NoDefaultCurrentDirectoryInExePath", "1")
-        .creation_flags(CREATE_NO_WINDOW);
+        .env("NoDefaultCurrentDirectoryInExePath", "1");
+    cmd
+}
+
+#[cfg(not(windows))]
+fn claude_command() -> std::process::Command {
+    let mut cmd = crate::procutil::new_command("claude");
+    cmd.args(["mcp", "list"]);
+    cmd
+}
+
+pub fn fetch_mcp_health(cwd: Option<String>) -> Vec<McpHealth> {
+    let mut cmd = claude_command();
     if let Some(dir) = cwd {
         let path = PathBuf::from(&dir);
         if path.is_dir() {

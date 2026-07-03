@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -16,11 +15,7 @@ pub struct Usage {
 
 /// ~/.claude/.credentials.json から OAuth アクセストークンを読む。
 fn access_token() -> Result<String> {
-    let path = std::env::var_os("USERPROFILE")
-        .map(PathBuf::from)
-        .unwrap_or_default()
-        .join(".claude")
-        .join(".credentials.json");
+    let path = crate::status::home_dir().join(".claude").join(".credentials.json");
     let text = std::fs::read_to_string(path)?;
     let json: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| AppError::Usage(e.to_string()))?;

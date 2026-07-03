@@ -1,5 +1,3 @@
-use std::os::windows::process::CommandExt;
-
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::State;
 
@@ -201,10 +199,8 @@ pub async fn get_mcp_health(cwd: Option<String>) -> Vec<crate::status::McpHealth
 #[tauri::command]
 pub fn get_git_branch(cwd: Option<String>) -> Option<String> {
     let dir = cwd?;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let out = std::process::Command::new("git")
+    let out = crate::procutil::new_command("git")
         .args(["-C", &dir, "rev-parse", "--abbrev-ref", "HEAD"])
-        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
     if !out.status.success() {
@@ -220,11 +216,11 @@ pub fn get_git_branch(cwd: Option<String>) -> Option<String> {
 
 /// 出力中の `path:line` リンク（VIBE_IDEAS #37 semantic history）をクリックしたとき、
 /// ペインの cwd 基準で解決してエディタの該当行を開く。
-/// 既定は Zed（`zed <path>:<line>`）。zed が PATH に無い/失敗時は OS 既定アプリで開く（行ジャンプ無し）。
+/// 既定は Zed（`zed <path>:<line>`、全OS共通）。zed が PATH に無い/失敗時は OS 既定アプリ
+/// で開く（行ジャンプ無し。Windows=`cmd start`／macOS=`open`／Linux=`xdg-open`）。
 /// regex の誤マッチで存在しないパスが来ることもあるので、その場合は黙って無視する。
 #[tauri::command]
 pub fn open_in_editor(cwd: Option<String>, path: String, line: Option<u32>) -> Result<()> {
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let p = std::path::Path::new(&path);
     let abs = if p.is_absolute() {
         p.to_path_buf()
@@ -240,19 +236,30 @@ pub fn open_in_editor(cwd: Option<String>, path: String, line: Option<u32>) -> R
         None => abs_str.clone(),
     };
     // まず Zed（行ジャンプ対応）。PATH に無ければ spawn が Err になるのでフォールバックへ。
-    if std::process::Command::new("zed")
-        .arg(&target)
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .is_ok()
-    {
+    if crate::procutil::new_command("zed").arg(&target).spawn().is_ok() {
         return Ok(());
     }
-    // フォールバック: OS 既定アプリで開く（cmd start。行ジャンプは無し）。
-    std::process::Command::new("cmd")
-        .args(["/C", "start", "", abs_str.as_str()])
-        .creation_flags(CREATE_NO_WINDOW)
+    open_with_os_default(&abs_str)
+}
+
+/// OS 既定アプリでファイルを開く（行ジャンプ無し・Zed 不在時のフォールバック）。
+#[cfg(windows)]
+fn open_with_os_default(abs_str: &str) -> Result<()> {
+    crate::procutil::new_command("cmd")
+        .args(["/C", "start", "", abs_str])
         .spawn()?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn open_with_os_default(abs_str: &str) -> Result<()> {
+    crate::procutil::new_command("open").arg(abs_str).spawn()?;
+    Ok(())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_with_os_default(abs_str: &str) -> Result<()> {
+    crate::procutil::new_command("xdg-open").arg(abs_str).spawn()?;
     Ok(())
 }
 
@@ -268,7 +275,7 @@ pub fn spawn_pty(
     initial_cmd: Option<String>,
     nonce: Option<String>,
 ) -> Result<()> {
-    let cmd = shell::build_pwsh(initial_cmd.as_deref(), nonce.as_deref())?;
+    let cmd = shell::build_shell(initial_cmd.as_deref(), nonce.as_deref())?;
     let handle = PtyHandle::spawn(cmd, cols, rows, on_output)?;
     // ロックは map 更新の間だけ保持し、置き換えられた旧ハンドルの kill(=taskkill/join)
     // はロックの外で行う（ロックを握ったまま join するのを避ける）。

@@ -1,0 +1,59 @@
+name: ci
+
+# #17 クロスプラットフォーム対応の実地検証。release.yml（Windows専業・タグpush時のみ）とは
+# 別に、push のたびに Linux/macOS でもコンパイル＋テストが通るかを確認する。
+# ローカル（Windows開発機）は GTK 系のシステムライブラリが無く Linux 向け型検査すら
+# pkg-config で詰まるため、ここが cfg(unix) 分岐の唯一の実地検証経路になる。
+# macOS は WKWebView 差異等の未知数が残るため「動けば儲けもの」程度の位置付け（本命は
+# Windows/Linux）。Windows は release.yml 側で普段からビルド確認されているため matrix に
+# 含めない。
+on:
+  push:
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux system deps (Tauri v2 prerequisites)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend tests
+        run: pnpm test
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked

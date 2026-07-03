@@ -1,6 +1,7 @@
 mod blocks;
 mod checkpoint;
 mod commands;
+mod procutil;
 mod config;
 mod error;
 mod pty;
