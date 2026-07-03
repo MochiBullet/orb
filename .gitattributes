@@ -1,0 +1,4 @@
+# shell-integration.sh は bash（Linux/macOS）が直接 source する。Windows 側の
+# core.autocrlf=true 既定で CRLF 化されると \r がスクリプト中に混入し、bash 実行が
+# 壊れる（コマンドが見つからない・変数末尾に \r が付く等）。強制 LF で恒久固定する。
+src-tauri/resources/shell-integration.sh text eol=lf
