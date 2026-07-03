@@ -37,6 +37,9 @@ toml = "1.1.2"
 reqwest = { version = "0.13.4", features = ["blocking", "json"] }
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-dialog = "2.7.1"
+# #53 画像貼り付け: クリップボード直読み（WebView2 は画像のみだと paste イベントを発火しない）
+arboard = { version = "3", default-features = false, features = ["image-data"] }
+png = "0.17"
 
 # 16GB・4コアの非力ノートでもヌルヌル動く軽量バイナリを狙うリリース最適化。
 # opt-level "s" = サイズ最適化＋実行速度のバランス（ターミナルは描画速度も要るので "z" より "s"）。

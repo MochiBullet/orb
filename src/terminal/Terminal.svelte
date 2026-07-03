@@ -147,34 +147,21 @@
     e.preventDefault();
     void navigator.clipboard.readText().then((t) => {
       if (t) term?.paste(t);
+      else pasteClipboardImage(); // #53: テキストが無ければ「画像のみ」かを確認して @パス挿入
     });
   }
 
   // #53: クリップボード画像の貼り付け（Win+Shift+S 直後の Ctrl+V）。
-  // keydown ではなく paste イベントで受ける＝clipboardData.items で「画像を含むか」が
-  // 同期的に分かるので、画像の時だけ preventDefault+stopPropagation で xterm から横取りし、
-  // テキスト貼り付けは一切触らず従来どおり xterm 本体へ流す（二重ペースト前科の再発防止）。
-  // capture=true の ancestor リスナーなので xterm textarea 本体のハンドラより先に走る。
-  function onPaste(e: ClipboardEvent) {
-    const item = Array.from(e.clipboardData?.items ?? []).find(
-      (i) => i.kind === "file" && i.type.startsWith("image/"),
-    );
-    if (!item) return; // 画像なし＝xterm のネイティブ paste に任せる
-    e.preventDefault();
-    e.stopPropagation();
-    const file = item.getAsFile();
-    if (!file) return;
-    const mime = item.type;
-    void file
-      .arrayBuffer()
-      .then(async (buf) => {
-        // Rust 側で %TEMP%\orb-shots\ に保存（マジックバイト検証込み）→ パスを挿入。
-        // AI ペインなら claude の @添付形。Enter は送らない＝実行/送信は人が決める。
-        const path = await invoke<string>("save_pasted_image", {
-          bytes: Array.from(new Uint8Array(buf)),
-          mime,
-        });
-        term?.paste(formatImagePath(path, paneId === get(aiPane)) + " ");
+  // paste イベント方式は不採用＝WebView2 は「画像のみ」のクリップボードだと textarea に
+  // paste イベント自体を発火しない（分離プロファイル実測）。代わりに Ctrl+V の keydown から
+  // Rust(arboard) がクリップボードを直接読む。preventDefault はしない＝テキスト貼り付けは
+  // 従来どおり xterm ネイティブに流れ、Rust は「画像のみ」の時だけパスを返すので、
+  // どちらか一方しか書かない＝二重ペースト（#27 の前科）が構造的に起きない。
+  function pasteClipboardImage() {
+    void invoke<string | null>("save_clipboard_image")
+      .then((path) => {
+        // AI ペインなら claude の @添付形、通常シェルは素のパス。Enter は送らない。
+        if (path) term?.paste(formatImagePath(path, paneId === get(aiPane)) + " ");
       })
       .catch((err) => logError(`pane ${paneId}: image paste failed: ${String(err)}`));
   }
@@ -377,6 +364,12 @@
     if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); blocks?.jumpNext(); return; }
     const key = e.key.toLowerCase();
     if (key === "f") { e.preventDefault(); e.stopPropagation(); openSearch(); return; }
+    // #53: Ctrl+V — 画像のみクリップボードなら @パス挿入（fire-and-forget）。
+    // preventDefault しない＝テキストがあれば従来の native paste がそのまま走る。
+    if (key === "v" && !e.shiftKey && !e.altKey && !e.isComposing) {
+      pasteClipboardImage();
+      return;
+    }
     if (key === "0") { e.preventDefault(); e.stopPropagation(); resetZoom(); return; }
     if (key === "=" || key === "+") { e.preventDefault(); e.stopPropagation(); zoom(1); return; }
     if (key === "-") { e.preventDefault(); e.stopPropagation(); zoom(-1); return; }
@@ -555,7 +548,6 @@
     });
 
     container.addEventListener("keydown", onCopyPaste, true);
-    container.addEventListener("paste", onPaste, true);
     container.addEventListener("wheel", onWheel, { passive: false, capture: true });
     container.addEventListener("mouseup", onMouseUp);
     container.addEventListener("contextmenu", onContextMenu);
@@ -685,7 +677,6 @@
     unregisterPaneInput(paneId);
     inputBuffer = [];
     container?.removeEventListener("keydown", onCopyPaste, true);
-    container?.removeEventListener("paste", onPaste, true);
     container?.removeEventListener("wheel", onWheel, { capture: true });
     container?.removeEventListener("mouseup", onMouseUp);
     container?.removeEventListener("contextmenu", onContextMenu);

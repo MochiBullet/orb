@@ -54,9 +54,47 @@ fn save_image_to(dir: &std::path::Path, bytes: &[u8], mime: &str) -> Result<Stri
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// RGBA8（row-major・w*h*4 bytes）を PNG にエンコードする。寸法とバッファ長の不一致は拒否。
+fn encode_png(w: usize, h: usize, rgba: &[u8]) -> Result<Vec<u8>> {
+    if w == 0 || h == 0 || rgba.len() != w.checked_mul(h).and_then(|n| n.checked_mul(4)).unwrap_or(0) {
+        return Err(AppError::Config("invalid clipboard image dimensions".into()));
+    }
+    let mut out = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut out, w as u32, h as u32);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut writer = enc.write_header().map_err(|e| AppError::Config(e.to_string()))?;
+        writer
+            .write_image_data(rgba)
+            .map_err(|e| AppError::Config(e.to_string()))?;
+    }
+    Ok(out)
+}
+
+/// #53: クリップボードが「画像のみ」なら PNG 化して `%TEMP%\orb-shots\` に保存しパスを返す。
+/// テキストが載っている時は None＝通常のテキスト貼り付けに譲る（Ctrl+V keydown から
+/// fire-and-forget で呼ばれるため、どちらか一方しか書かない＝二重ペーストが起きない）。
+/// クリップボード API はブロッキングなので専用スレッドへ逃がす。
 #[tauri::command]
-pub fn save_pasted_image(bytes: Vec<u8>, mime: String) -> Result<String> {
-    save_image_to(&std::env::temp_dir().join("orb-shots"), &bytes, &mime)
+pub async fn save_clipboard_image() -> Result<Option<String>> {
+    tauri::async_runtime::spawn_blocking(|| -> Result<Option<String>> {
+        let mut cb = match arboard::Clipboard::new() {
+            Ok(c) => c,
+            Err(_) => return Ok(None),
+        };
+        if cb.get_text().map(|t| !t.trim().is_empty()).unwrap_or(false) {
+            return Ok(None);
+        }
+        let img = match cb.get_image() {
+            Ok(i) => i,
+            Err(_) => return Ok(None), // 画像なし＝何もしない
+        };
+        let bytes = encode_png(img.width, img.height, &img.bytes)?;
+        save_image_to(&std::env::temp_dir().join("orb-shots"), &bytes, "image/png").map(Some)
+    })
+    .await
+    .map_err(|e| AppError::Config(format!("clipboard image task: {e}")))?
 }
 
 /// config.toml（font/scrollback 等）。
@@ -236,6 +274,22 @@ mod tests {
         assert_ne!(p1, p2); // 同一ミリ秒でも上書きしない
         assert_eq!(std::fs::read(&p1).unwrap(), TINY_PNG);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn encode_png_roundtrips_magic_and_rejects_bad_dims() {
+        // 2x1 RGBA（赤・緑）→ PNG マジックで始まり、save_image_to の検証も通る。
+        let rgba = [255u8, 0, 0, 255, 0, 255, 0, 255];
+        let png = encode_png(2, 1, &rgba).unwrap();
+        assert!(png.starts_with(&[0x89, 0x50, 0x4e, 0x47]));
+        let dir = std::env::temp_dir().join("orb-shots-test-enc");
+        let _ = std::fs::remove_dir_all(&dir);
+        let p = save_image_to(&dir, &png, "image/png").unwrap();
+        assert!(p.ends_with(".png"));
+        let _ = std::fs::remove_dir_all(&dir);
+        // 寸法とバッファ長の不一致・ゼロ寸法は拒否
+        assert!(encode_png(2, 2, &rgba).is_err());
+        assert!(encode_png(0, 1, &[]).is_err());
     }
 
     #[test]
