@@ -15,8 +15,8 @@ pub fn list_projects() -> Vec<Project> {
     config::load_projects()
 }
 
-/// #53: クリップボード画像の貼り付け。フロントの paste イベントが取り出した画像バイト列を
-/// `%TEMP%\orb-shots\` に保存してフルパスを返す（claude ペインへは @パス で挿入される）。
+/// #53: 画像バイト列を `%TEMP%\orb-shots\` に保存してフルパスを返す（呼び元は
+/// save_clipboard_image。claude ペインへは @パス で挿入される）。
 /// 中身が申告 mime のマジックバイトで始まらない場合は保存しない＝ゴミ画像ファイルを作らない。
 fn save_image_to(dir: &std::path::Path, bytes: &[u8], mime: &str) -> Result<String> {
     let ext = match mime {
@@ -290,7 +290,7 @@ mod tests {
     ];
 
     #[test]
-    fn save_pasted_image_writes_png_and_uniquifies() {
+    fn save_image_to_writes_png_and_uniquifies() {
         let dir = std::env::temp_dir().join("orb-shots-test");
         let _ = std::fs::remove_dir_all(&dir);
         let p1 = save_image_to(&dir, TINY_PNG, "image/png").unwrap();
@@ -339,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn save_pasted_image_rejects_mismatch_and_unknown_mime() {
+    fn save_image_to_rejects_mismatch_and_unknown_mime() {
         let dir = std::env::temp_dir().join("orb-shots-test-rej");
         let _ = std::fs::remove_dir_all(&dir);
         // 申告 mime とマジック不一致（テキストを png と偽る）
