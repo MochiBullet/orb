@@ -18,8 +18,9 @@ export interface McpHealth {
 }
 
 /// `claude mcp list` 実測の生死。重い（数秒）ので長間隔＋手動リロードでのみ呼ぶ。
-export function getMcpHealth(): Promise<McpHealth[]> {
-  return invoke("get_mcp_health");
+/// #45: cwd を渡すとそのディレクトリで実行（プロジェクトスコープの .mcp.json も測る）。
+export function getMcpHealth(cwd?: string): Promise<McpHealth[]> {
+  return invoke("get_mcp_health", { cwd: cwd ?? null });
 }
 
 export function getGitBranch(cwd?: string): Promise<string | null> {

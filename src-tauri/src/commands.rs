@@ -150,8 +150,8 @@ pub fn get_claude_status(cwd: Option<String>) -> crate::status::ClaudeStatus {
 /// Tauri v2 の同期コマンドはメインスレッドで走り UI を固めるため、async にして
 /// `spawn_blocking` でブロッキング処理を専用スレッドプールへ逃がす（起動時＋5分毎＋手動↻で発火）。
 #[tauri::command]
-pub async fn get_mcp_health() -> Vec<crate::status::McpHealth> {
-    tauri::async_runtime::spawn_blocking(crate::status::fetch_mcp_health)
+pub async fn get_mcp_health(cwd: Option<String>) -> Vec<crate::status::McpHealth> {
+    tauri::async_runtime::spawn_blocking(move || crate::status::fetch_mcp_health(cwd))
         .await
         .unwrap_or_default()
 }

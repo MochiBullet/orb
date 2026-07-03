@@ -256,6 +256,12 @@ export function setPaneCwd(paneId: number, dir: string) {
 // フォーカス変化で即その paneId の cwd へ追従（次の OSC Cwd を待たない＝残置を防ぐ）。
 focusedPane.subscribe((pid) => cwd.set(cwdRegistry.get(pid) ?? ""));
 
+/** ペイン破棄時のレジストリ掃除（Terminal.svelte の onDestroy から）。
+ *  消さないと閉じたペインの cwd が残り、ID 再利用や誤参照で嘘の cwd を映しうる。 */
+export function clearPaneCwd(paneId: number) {
+  cwdRegistry.delete(paneId);
+}
+
 let paneCounter = 0;
 /** 単調増加のペイン ID を採番する。 */
 export function nextPaneId(): number {

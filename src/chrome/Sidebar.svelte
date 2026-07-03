@@ -79,6 +79,11 @@
   let branch = $state<string | null>(null);
   let health = $state<Record<string, McpStatus>>({}); // 短縮名 -> 生死（claude mcp list 実測）
   let healthLoading = $state(false);
+  // #43: 重い claude mcp list（npx MCP 群を全 spawn、数秒〜十数秒）は起動処理に混ぜない。
+  // onMount の 3s デファーが走るまで cwd 追従からの health フェッチを封じるゲート
+  // （それまでキャッシュは空なので表示面の損失もない）。マウント直後の $effect（cwd=""）や
+  // 最初の OSC Cwd 到着で起動中に重フェッチが先行・多重発火するのを防ぐ。
+  let healthPrimed = false;
   let timer: number | undefined;
   let healthTimer: number | undefined;
   let healthDeferTimer: number | undefined;
@@ -119,12 +124,25 @@
     focusedPane.set(item.paneId);
   }
 
-  // cwd が変わるたび git ブランチを取得（非リポジトリ・detached は null）。
+  // #45: cwd が変わるたび（タブ切替・OSC Cwd 更新）branch / CLAUDE ステータス / MCP を追従。
+  // 直前の表示は消さず、取得成功時に差し替える（ちらつき防止）。連続切替でコマンドを
+  // 乱発しないよう 300ms debounce。
+  let cwdDebounce: number | undefined;
   $effect(() => {
     const c = $cwdStore;
-    getGitBranch(c || undefined)
-      .then((b) => (branch = b))
-      .catch(() => (branch = null));
+    if (cwdDebounce) clearTimeout(cwdDebounce);
+    cwdDebounce = window.setTimeout(() => {
+      getGitBranch(c || undefined)
+        .then((b) => {
+          if (get(cwdStore) === c) branch = b; // 後着の旧 cwd の結果で上書きしない
+        })
+        .catch(() => {
+          if (get(cwdStore) === c) branch = null;
+        });
+      void refreshStatus();
+      // 起動中（3s デファー前）は health を触らない＝初回フェッチは #43 どおり 1 回だけ。
+      if (healthPrimed) syncHealthForCwd(c);
+    }, 300);
   });
 
   // AI ペインで Enter が押された（/model・/effort 等の可能性）→ CLAUDE ステータスを再チェック。
@@ -161,20 +179,42 @@
       /* settings 読めない時はサイドバーが欠けるだけ */
     }
   }
-  // MCP の生死（claude mcp list 実測）。重い（数秒）ので手動リロード＋長間隔でのみ叩く。
-  async function refreshHealth() {
+  // MCP の生死（claude mcp list 実測）。重い（数秒）ので手動リロード＋長間隔でのみ叩き、
+  // #45: 結果は cwd をキーにキャッシュしてタブ切替では即差し替え・裏で鮮度補充する。
+  const HEALTH_TTL = 300_000; // 5 分。これより古いキャッシュは表示しつつ裏で再取得
+  const healthCache = new Map<string, { health: Record<string, McpStatus>; at: number }>();
+  async function refreshHealth(force = false) {
     if (healthLoading) return; // 連打・タイマー重なりでの二重起動を防ぐ
+    const key = get(cwdStore) || "";
+    const cached = healthCache.get(key);
+    if (!force && cached && Date.now() - cached.at < HEALTH_TTL) {
+      health = cached.health; // 新鮮なキャッシュがあるなら重い実測は省略
+      return;
+    }
     healthLoading = true;
     try {
-      const list = await getMcpHealth();
+      const list = await getMcpHealth(key || undefined);
       const map: Record<string, McpStatus> = {};
       for (const h of list) map[h.name] = h.status;
-      health = map;
+      healthCache.set(key, { health: map, at: Date.now() });
+      // 取得中に別タブへ移っていたら表示は差し替えない（古い cwd の結果で上書きしない）。
+      if ((get(cwdStore) || "") === key) health = map;
     } catch {
       /* 取れなければ従来どおりグレー表示のまま（config 一覧は残る） */
     } finally {
       healthLoading = false;
     }
+    // 取得中に cwd が変わっていたら、その cwd の分をもう一周（キャッシュが新鮮なら即終了）。
+    const cur = get(cwdStore) || "";
+    if (cur !== key) syncHealthForCwd(cur);
+  }
+
+  /** cwd 変化時の MCP 生死の追従。キャッシュがあれば即表示し（UI をブロックしない）、
+   *  未取得か 5 分以上 stale なら裏で再取得して差し替える。 */
+  function syncHealthForCwd(c: string) {
+    const cached = healthCache.get(c || "");
+    if (cached) health = cached.health;
+    if (!cached || Date.now() - cached.at >= HEALTH_TTL) void refreshHealth();
   }
 
   // 初回はトークン更新レース（claude --continue 直後の 401）を避けるため、
@@ -196,7 +236,11 @@
       refreshStatus();
     }, 30000);
     // MCP 生死は重い（数秒）ので起動処理から外し、起動が落ち着いた頃に一度だけ実行（#43: 起動高速化）。
-    healthDeferTimer = window.setTimeout(() => void refreshHealth(), 3000);
+    // この時点の cwd（OSC Cwd が届いていれば実 cwd）をキーに取得し、以後 cwd 追従を解禁する。
+    healthDeferTimer = window.setTimeout(() => {
+      healthPrimed = true;
+      void refreshHealth();
+    }, 3000);
     // 生死は重いので usage/status とは別に 5 分間隔。鮮度は ↻ 手動リロードで補う。
     healthTimer = window.setInterval(() => void refreshHealth(), 300000);
     clock = window.setInterval(() => (now = Date.now()), 10000);
@@ -206,6 +250,7 @@
     if (healthTimer) clearInterval(healthTimer);
     if (healthDeferTimer) clearTimeout(healthDeferTimer);
     if (clock) clearInterval(clock);
+    if (cwdDebounce) clearTimeout(cwdDebounce);
     for (const t of aiActivityTimers) clearTimeout(t);
   });
 
@@ -302,7 +347,7 @@
           >{status.mcp.length}<button
             class="reload"
             class:spin={healthLoading}
-            onclick={() => void refreshHealth()}
+            onclick={() => void refreshHealth(true)}
             title="MCP の生死を再取得"
             aria-label="reload MCP health">↻</button
           ></span

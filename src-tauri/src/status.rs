@@ -105,13 +105,30 @@ pub struct McpHealth {
 /// （`claude.exe` 実体は PATH に出ない — memory reference-claude-exe-path-windows）。
 /// npx stdio 系サーバを毎回起動して接続試行するので数秒〜十数秒かかる重い呼び出し。
 /// サイドバーからは長間隔（5分）＋手動リロード時のみ叩く。
-pub fn fetch_mcp_health() -> Vec<McpHealth> {
+/// #45: プロジェクトスコープの MCP（cwd の .mcp.json）も測るため、cwd があれば
+/// そのディレクトリで実行する（存在しないパスは無視＝user スコープのみの測定になる）。
+/// claude には `git -C` 相当のディレクトリ指定オプションが無いため current_dir が唯一の手段。
+///
+/// セキュリティ: cmd.exe は既定でカレントディレクトリを PATH より先に検索するため、
+/// 信頼できない cwd（clone した第三者リポ等）に `claude.bat` を置かれると PATH の
+/// claude より先に自動実行されてしまう。`NoDefaultCurrentDirectoryInExePath` を
+/// セットしてこの cwd 優先解決を無効化する（NeedCurrentDirectoryForExePathW 準拠の
+/// 公式機構）。env は子プロセスにも継承されるので、claude.cmd シム内部の `node`
+/// 解決など下流の cmd 連鎖も同時に守られる（実機で claude.bat 差し置き→PATH 側が
+/// 実行されることを検証済み）。
+pub fn fetch_mcp_health(cwd: Option<String>) -> Vec<McpHealth> {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let Ok(out) = std::process::Command::new("cmd")
-        .args(["/C", "claude", "mcp", "list"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-    else {
+    let mut cmd = std::process::Command::new("cmd");
+    cmd.args(["/C", "claude", "mcp", "list"])
+        .env("NoDefaultCurrentDirectoryInExePath", "1")
+        .creation_flags(CREATE_NO_WINDOW);
+    if let Some(dir) = cwd {
+        let path = PathBuf::from(&dir);
+        if path.is_dir() {
+            cmd.current_dir(path);
+        }
+    }
+    let Ok(out) = cmd.output() else {
         return Vec::new();
     };
 

@@ -34,6 +34,7 @@
     saveOneScrollback,
     paneStatus,
     setPaneStatus,
+    clearPaneCwd,
   } from "../store/appStore";
   import { classifyIdle } from "../core/agent-status";
   import { shouldNotifyForPane } from "./blocks/notify";
@@ -708,6 +709,7 @@
     if (scrollbackTimer) clearTimeout(scrollbackTimer);
     if (aiIdleTimer) clearTimeout(aiIdleTimer);
     setPaneStatus(paneId, null); // #50: 破棄ペインのバッジを残さない
+    clearPaneCwd(paneId); // #45: 破棄ペインの cwd を残さない
     unregisterTermClear(paneId);
     unregisterTermWrite(paneId);
     unregisterPaneInput(paneId);
