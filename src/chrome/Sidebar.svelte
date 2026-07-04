@@ -12,31 +12,14 @@
     type PctSample,
   } from "../core/usage-local";
   import { getClaudeStatus, getGitBranch, getMcpHealth, type ClaudeStatus, type McpStatus } from "../core/status";
-  import { cwd as cwdStore, layout, startedAt, sidebarSide, aiPaneActivity, aiPane, focusedPane, paneStatus } from "../store/appStore";
+  import { cwd as cwdStore, layout, startedAt, sidebarSide, aiPaneActivity, aiPane, focusedPane, paneStatus, paneModelEffort, setPaneModelEffort } from "../store/appStore";
   import { tabs, activeTabId, switchTab } from "../layout/tabs";
   import { leafIds } from "../layout/tree";
   import { STATUS_ICON, STATUS_LABEL, STATUS_PRIORITY, type PaneStatus } from "../core/agent-status";
   import { logError } from "../core/log";
   import { buildClaudeCmd } from "../layout/launch";
+  import { MODEL_OPTIONS, EFFORT_OPTIONS } from "../core/model-effort";
 
-  // #34 系: サイドバーから直接 model/effort を切替。値は Claude CLI の非対話引数
-  // （`/model <alias>` `/effort <level>` は Enter で即反映）。
-  // ultracode は誤操作で強制発火すると影響が大きいため一覧には含めない（要れば手打ちで）。
-  const MODEL_OPTIONS = [
-    { value: "opus", label: "Opus 4.8" },
-    { value: "sonnet", label: "Sonnet 5" },
-    { value: "haiku", label: "Haiku 4.5" },
-    { value: "fable", label: "Fable 5" },
-    { value: "default", label: "Default" },
-  ];
-  const EFFORT_OPTIONS = [
-    { value: "low", label: "low" },
-    { value: "medium", label: "medium" },
-    { value: "high", label: "high" },
-    { value: "xhigh", label: "xhigh" },
-    { value: "max", label: "max（このセッションのみ）" },
-    { value: "auto", label: "auto" },
-  ];
   const cmdEncoder = new TextEncoder();
 
   /** AI ペイン（フォーカスとは無関係に固定の aiPane store）へスラッシュコマンドを Enter 込みで
@@ -54,12 +37,18 @@
   function onModelChange(e: Event) {
     const v = (e.currentTarget as HTMLSelectElement).value;
     (e.currentTarget as HTMLSelectElement).value = ""; // プレースホルダに戻す（現在値は下のkvで見える）
-    if (v) sendAiCommand(`/model ${v}`);
+    if (!v) return;
+    sendAiCommand(`/model ${v}`);
+    const target = get(aiPane);
+    if (target != null) setPaneModelEffort(target, { model: v === "default" ? null : v });
   }
   function onEffortChange(e: Event) {
     const v = (e.currentTarget as HTMLSelectElement).value;
     (e.currentTarget as HTMLSelectElement).value = "";
-    if (v) sendAiCommand(`/effort ${v}`);
+    if (!v) return;
+    sendAiCommand(`/effort ${v}`);
+    const target = get(aiPane);
+    if (target != null) setPaneModelEffort(target, { effort: v === "auto" ? null : v });
   }
 
   /** claude 起動ボタン。aiPane 未設定ならフォーカス中のペインへフォールバックし、
@@ -86,6 +75,11 @@
 
   let usage = $state<Usage | null>(null);
   let status = $state<ClaudeStatus | null>(null);
+  /** 案件ランチャーの一括起動で model/effort を具体値付き起動した場合、config 由来の
+   *  status だけでは全ペイン共通の値しか出せず表示がズレる。paneModelEffort に記録が
+   *  あればそちらを優先表示する（無ければ従来どおり status.model/effort にフォールバック）。 */
+  let displayModel = $derived($aiPane != null ? $paneModelEffort.get($aiPane)?.model ?? status?.model : status?.model);
+  let displayEffort = $derived($aiPane != null ? $paneModelEffort.get($aiPane)?.effort ?? status?.effort : status?.effort);
   let usageStale = $state(false); // 直近の取得が失敗＝直前の値を表示中（ゲージは消さない）
   let now = $state(Date.now());
   let wsOpen = $state(false);
@@ -372,7 +366,7 @@
            プルダウンは「変更する」専用（選ぶたびプレースホルダへ戻る）、現在値は kv 側の表示で見る。 -->
       <div class="krow stack">
         <span>model</span>
-        <span class="kv">{status.model || "—"}</span>
+        <span class="kv">{displayModel || "—"}</span>
         <select class="switcher" onchange={onModelChange} disabled={$aiPane == null} title={$aiPane == null ? "AI ペインがありません" : "モデルを切替"}>
           <option value="">変更…</option>
           {#each MODEL_OPTIONS as o}<option value={o.value}>{o.label}</option>{/each}
@@ -380,7 +374,7 @@
       </div>
       <div class="krow stack">
         <span>effort</span>
-        <span class="kv">{status.effort || "—"}</span>
+        <span class="kv">{displayEffort || "—"}</span>
         <select class="switcher" onchange={onEffortChange} disabled={$aiPane == null} title={$aiPane == null ? "AI ペインがありません" : "effort を切替"}>
           <option value="">変更…</option>
           {#each EFFORT_OPTIONS as o}<option value={o.value}>{o.label}</option>{/each}

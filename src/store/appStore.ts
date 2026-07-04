@@ -57,6 +57,39 @@ export function acknowledgePane(paneId: number) {
   if (cur && cur !== "running") setPaneStatus(paneId, null);
 }
 
+/** 案件ランチャーの一括起動やサイドバーの手動切替で「このペインは具体的にこの model/effort
+ *  で動いている」と分かっている時だけ記録する上書き（paneId → 部分上書き）。
+ *  status.rs の fetch_status は settings.json 由来の値を返す＝全ペイン共通の1個しか持てない
+ *  ため、案件ごとに違う model/effort で起動すると素の status 表示がズレる。ここに具体値が
+ *  あればサイドバーはそちらを優先表示し、無ければ従来どおり config 由来にフォールバックする。
+ *  "default"/"auto"（＝具体値不明）を指定した時はそのフィールドのキー自体を持たない。 */
+export const paneModelEffort = writable<ReadonlyMap<number, { model?: string; effort?: string }>>(
+  new Map(),
+);
+
+/** model/effort の一方または両方を更新する。値に null を渡すとそのフィールドの上書きを解除
+ *  （config 由来の表示へ戻す）、undefined を渡すとそのフィールドには触れない。 */
+export function setPaneModelEffort(
+  paneId: number,
+  patch: { model?: string | null; effort?: string | null },
+) {
+  paneModelEffort.update((m) => {
+    const next = new Map(m);
+    const cur = { ...(next.get(paneId) ?? {}) };
+    if (patch.model !== undefined) {
+      if (patch.model) cur.model = patch.model;
+      else delete cur.model;
+    }
+    if (patch.effort !== undefined) {
+      if (patch.effort) cur.effort = patch.effort;
+      else delete cur.effort;
+    }
+    if (cur.model || cur.effort) next.set(paneId, cur);
+    else next.delete(paneId);
+    return next;
+  });
+}
+
 // フォーカス移動そのものが「見た」の合図（#50 受け入れ条件のバッジ自動クリア）。
 focusedPane.subscribe(acknowledgePane);
 

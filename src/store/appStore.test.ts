@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { get } from "svelte/store";
-import { cwd, focusedPane, setPaneCwd, clearPaneCwd } from "./appStore";
+import { cwd, focusedPane, setPaneCwd, clearPaneCwd, paneModelEffort, setPaneModelEffort } from "./appStore";
 
 describe("cwd レジストリ (#45: タブ切替でサイドバーの cwd が旧ペインのまま残らない)", () => {
   it("非フォーカスペインへの setPaneCwd はグローバル cwd を変えず、フォーカス切替で反映される", () => {
@@ -43,5 +43,34 @@ describe("cwd レジストリ (#45: タブ切替でサイドバーの cwd が旧
     clearPaneCwd(105); // Terminal.svelte onDestroy 相当
     focusedPane.set(105);
     expect(get(cwd)).toBe("");
+  });
+});
+
+describe("paneModelEffort（案件ランチャーの一括起動でペインごとに model/effort を上書き表示）", () => {
+  it("model のみ設定すると effort キーは持たない（フォールバックの余地を残す）", () => {
+    setPaneModelEffort(201, { model: "opus" });
+    expect(get(paneModelEffort).get(201)).toEqual({ model: "opus" });
+  });
+
+  it("model と effort を別々に設定すると両方がマージされる（後の呼び出しで前の値を消さない）", () => {
+    setPaneModelEffort(202, { model: "sonnet" });
+    setPaneModelEffort(202, { effort: "xhigh" });
+    expect(get(paneModelEffort).get(202)).toEqual({ model: "sonnet", effort: "xhigh" });
+  });
+
+  it("null を渡すとそのフィールドだけ解除され、他方は残る", () => {
+    setPaneModelEffort(203, { model: "opus", effort: "high" });
+    setPaneModelEffort(203, { model: null });
+    expect(get(paneModelEffort).get(203)).toEqual({ effort: "high" });
+  });
+
+  it("両フィールドが無くなるとエントリ自体が消える（config 由来へのフォールバックが効く）", () => {
+    setPaneModelEffort(204, { model: "opus" });
+    setPaneModelEffort(204, { model: null });
+    expect(get(paneModelEffort).has(204)).toBe(false);
+  });
+
+  it("一度も設定していないペインは undefined（未知＝上書き無し）", () => {
+    expect(get(paneModelEffort).get(9999)).toBeUndefined();
   });
 });
