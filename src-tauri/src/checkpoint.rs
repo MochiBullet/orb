@@ -21,7 +21,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -71,6 +71,78 @@ fn run_git(repo_root: &str, args: &[&str]) -> Result<String> {
         return Err(AppError::Config(String::from_utf8_lossy(&out.stderr).trim().to_string()));
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// diff プレビューの捕捉上限。`git diff <hash>` はブロック単位の上限が無く（blocks.rs /
+/// usage_local.rs は末尾バイト上限を持つ）、生成物・ロックファイル・コミット済みデータセット
+/// 等を `git add` したターンのプレビューでは ± の全文が流れてくる。`Command::output()` は
+/// stdout 全体を Vec に貯め、`from_utf8_lossy` がさらにもう一度全コピーする＝二重確保で
+/// 16GB 機では allocator OOM-abort に到達しうる（state.rs: この経路は panic hook を迂回し
+/// PTY 子プロセスを孤児化する）。ここは restore 前に人間が眺めるプレビューなので、上限で
+/// 打ち切って注記を添えれば十分＝OOM より遥かにマシ。
+const MAX_DIFF_BYTES: usize = 3 * 1024 * 1024;
+
+/// diff 専用の上限付き git 実行。stdout を先頭 `MAX_DIFF_BYTES` までしか読まず、超過分は
+/// 捨てて注記を付ける。`run_git`（全 stdout を Vec に貯める）と違い、巨大 diff でもメモリは
+/// 上限で頭打ちになる。捕捉/一覧/restore の git 出力は hash や status で小さいため対象外。
+fn run_git_diff_bounded(repo_root: &str, args: &[&str]) -> Result<String> {
+    use std::io::Read;
+    let mut child = new_command("git")
+        .args(args)
+        .current_dir(repo_root)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| AppError::Config(format!("git spawn failed: {e}")))?;
+    let mut stdout = child.stdout.take().expect("stdout is piped");
+    // 上限＋1バイトだけ読む＝超過を検知しつつ、確保するバッファ自体を上限で頭打ちにする。
+    let mut buf = Vec::new();
+    (&mut stdout)
+        .take(MAX_DIFF_BYTES as u64 + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| AppError::Config(format!("git diff read failed: {e}")))?;
+
+    if buf.len() > MAX_DIFF_BYTES {
+        buf.truncate(MAX_DIFF_BYTES);
+        // これ以上読まない＝git が満杯のパイプでブロックし続けないよう、子を落としてから回収する。
+        let _ = child.kill();
+        let _ = child.wait();
+        let mut s = String::from_utf8_lossy(&buf).into_owned();
+        s.push_str(&format!(
+            "\n... (diff truncated at {} MB — restore preview only)\n",
+            MAX_DIFF_BYTES / (1024 * 1024)
+        ));
+        return Ok(s);
+    }
+
+    // 全部読めた（EOF）＝通常サイズ。終了コードを見て、失敗なら run_git と同様に stderr を返す。
+    let status = child
+        .wait()
+        .map_err(|e| AppError::Config(format!("git wait failed: {e}")))?;
+    if !status.success() {
+        let mut err = String::new();
+        if let Some(mut se) = child.stderr.take() {
+            let _ = se.read_to_string(&mut err);
+        }
+        return Err(AppError::Config(err.trim().to_string()));
+    }
+    Ok(String::from_utf8_lossy(&buf).trim().to_string())
+}
+
+/// #3: リポジトリごとの「git 操作」直列化ロック。`checkpoints_state` の Mutex は HashMap
+/// （メモリ状態）だけを守り、実際の `git stash create`(capture) / `git restore`(restore) は
+/// spawn_blocking 経由でロック外を走る。同一リポで restore と capture が同時発火すると、
+/// 両者が `.git/index.lock` を掴んで一方が失敗、または半分 restore した worktree を捕捉して
+/// 壊れたチェックポイントを黙って記録しうる。repo_key ごとの Mutex で直列化し、別リポは
+/// 引き続き並列に動けるようにする。ロック順序は必ず「op-lock → state-lock」で統一する
+/// （capture/restore とも op-lock を先に取ってから state を触る）＝デッドロックしない。
+fn repo_git_lock(root: &str) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    let map = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut m = map.lock().unwrap_or_else(|p| p.into_inner());
+    m.entry(repo_key(root))
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
 }
 
 /// cwd から git リポジトリのルートを解決する。git 未導入・非リポジトリは None（静かに無効）。
@@ -135,6 +207,9 @@ fn rev_parse_tree(root: &str, hash: &str) -> Result<String> {
 /// 戻り値は捕捉できたか（テスト用・呼び出し側は結果を待たない fire-and-forget）。
 pub fn capture(cwd: &str) -> bool {
     let Some(root) = repo_root(cwd) else { return false };
+    // #3: 同一リポの restore と index.lock を奪い合わないよう、git 操作は op-lock で直列化する。
+    let op_lock = repo_git_lock(&root);
+    let _op = op_lock.lock().unwrap_or_else(|p| p.into_inner());
     // stash create は index+worktree の差分がゼロなら空文字を返す（非破壊・no-op）。
     let Ok(hash) = run_git(&root, &["stash", "create"]) else { return false };
     if hash.is_empty() {
@@ -187,7 +262,35 @@ pub fn diff(cwd: &str, hash: &str) -> Result<String> {
     if !is_valid_hash(hash) {
         return Err(AppError::Config("invalid checkpoint hash".into()));
     }
-    run_git(&root, &["diff", hash])
+    // #1: 巨大 diff で OOM しないよう上限付きで捕捉する（run_git_diff_bounded の doc 参照）。
+    run_git_diff_bounded(&root, &["diff", hash])
+}
+
+/// #2: 進行中のマージ/リベースを best-effort で中断する。AI のターンが `git merge`/`git rebase`
+/// で衝突したまま止まった状態で restore すると、restore は worktree/index を戻すが
+/// `.git/MERGE_HEAD`・`.git/rebase-merge`(-apply) は残る＝`git status` は「まだマージ中」と言い、
+/// 次の `git commit` が黙ってチェックポイント tree のマージコミットを作ってしまう。これを避ける。
+/// **restore の前に**呼ぶこと: `git merge --abort` は worktree をマージ前(HEAD)へ戻すため、
+/// その後の restore で確実にチェックポイント tree で上書きし直せる（後に呼ぶと restore 内容を
+/// 潰す）。進行中でなければ git は "no merge/rebase in progress" 等で非ゼロ終了するが、それは
+/// 想定内なので握り潰す（＝何も進行していなければ完全に no-op）。
+fn abort_in_progress_merge_or_rebase(root: &str) {
+    let _ = run_git(root, &["merge", "--abort"]);
+    let _ = run_git(root, &["rebase", "--abort"]);
+}
+
+/// #4: チェックポイント以降に新規作成された untracked ファイル（baseline に無い＝巻き戻したい
+/// ターンが作ったもの）を削除し、実際に消したパスを返す。呼び出し側でログ等に surface する
+/// 前提＝サイレント削除（out-of-band でユーザ/ビルドツールが作った `secret.env`・`dist/` 等も
+/// 巻き込みうる data-loss footgun）にしないための純ロジック（テスト可能なよう分離）。
+fn remove_post_checkpoint_untracked(root: &str, baseline: &[String]) -> Vec<String> {
+    let mut removed = Vec::new();
+    for path in list_untracked(root) {
+        if !baseline.contains(&path) && std::fs::remove_file(Path::new(root).join(&path)).is_ok() {
+            removed.push(path);
+        }
+    }
+    removed
 }
 
 pub fn restore(cwd: &str, hash: &str) -> Result<()> {
@@ -195,8 +298,13 @@ pub fn restore(cwd: &str, hash: &str) -> Result<()> {
     if !is_valid_hash(hash) {
         return Err(AppError::Config("invalid checkpoint hash".into()));
     }
+    // #3: 同一リポの capture と index.lock を奪い合わないよう、git 操作は op-lock で直列化する。
+    let op_lock = repo_git_lock(&root);
+    let _op = op_lock.lock().unwrap_or_else(|p| p.into_inner());
     // restore 前に基準集合を取得。
     let baseline = checkpoint_untracked(&root, hash);
+    // #2: restore の前に進行中のマージ/リベースを畳んで単一親のクリーンな状態にする（doc 参照）。
+    abort_in_progress_merge_or_rebase(&root);
     // git restore はブランチ参照（HEAD）に触れず、作業ツリー/インデックスの内容だけを
     // チェックポイント時点へ戻す（reset --hard との違いは冒頭の doc comment 参照）。
     run_git(&root, &["restore", "--source", hash, "--staged", "--worktree", "--", "."])?;
@@ -205,10 +313,14 @@ pub fn restore(cwd: &str, hash: &str) -> Result<()> {
     // 捕捉時から存在した untracked ファイルはそのまま残す（内容の巻き戻しまでは対応しない
     // 既知の割り切り）。baseline が None（記録なし）なら何が新規か判別できないため触れない。
     if let Some(baseline) = baseline {
-        for path in list_untracked(&root) {
-            if !baseline.contains(&path) {
-                let _ = std::fs::remove_file(Path::new(&root).join(&path)); // best-effort
-            }
+        let removed = remove_post_checkpoint_untracked(&root, &baseline);
+        // #4: サイレント削除にしない。out-of-band で作られたファイルまで消しうるので必ず surface。
+        if !removed.is_empty() {
+            eprintln!(
+                "checkpoint restore: removed {} untracked file(s): {}",
+                removed.len(),
+                removed.join(", ")
+            );
         }
     }
     Ok(())
@@ -490,6 +602,147 @@ mod tests {
         // 最新（最後に書いた v{MAX_CHECKPOINTS+3}）が先頭に残っている。
         let latest_hash = &got[0].hash;
         assert_eq!(diff(cwd, latest_hash).unwrap(), "");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #1: 巨大な diff（生成物/データセットを add したターン）でも OOM せず、上限で打ち切って
+    /// 注記を付けることを確認する（全文を二重確保しない）。
+    #[test]
+    fn diff_truncates_huge_output_instead_of_ooming() {
+        let dir = std::env::temp_dir().join("orb-checkpoint-test-diff-cap");
+        init_repo(&dir);
+        let cwd = dir.to_str().unwrap();
+
+        // MAX_DIFF_BYTES を優に超える tracked テキストファイルを作ってコミット。
+        let line = "lorem ipsum dolor sit amet consectetur adipiscing\n"; // 50 bytes
+        let reps = (MAX_DIFF_BYTES + 2_000_000) / line.len() + 1;
+        std::fs::write(dir.join("big.txt"), line.repeat(reps)).unwrap();
+        run_git(cwd, &["add", "-A"]).unwrap();
+        run_git(cwd, &["commit", "-q", "-m", "add big"]).unwrap();
+
+        // big.txt を含む状態でチェックポイントを取る（変化を出すため a.txt も触る）。
+        std::fs::write(dir.join("a.txt"), "changed\n").unwrap();
+        assert!(capture(cwd));
+        let hash = list(cwd)[0].hash.clone();
+
+        // big.txt を空にする＝diff に数 MB の削除が出る。
+        std::fs::write(dir.join("big.txt"), "").unwrap();
+        let d = diff(cwd, &hash).unwrap();
+        assert!(
+            d.len() <= MAX_DIFF_BYTES + 256,
+            "diff は上限＋注記程度に収まる: {} bytes",
+            d.len()
+        );
+        assert!(d.contains("diff truncated"), "打ち切り注記が付く");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #2: マージ衝突で止まった状態から restore すると、MERGE_HEAD が残って次の commit が
+    /// 黙ってマージコミットになる。restore が進行中マージを畳んでクリーンな単一親状態に戻す
+    /// ことを確認する。
+    #[test]
+    fn restore_clears_in_progress_merge_state() {
+        let dir = std::env::temp_dir().join("orb-checkpoint-test-merge-abort");
+        init_repo(&dir);
+        let cwd = dir.to_str().unwrap();
+        let base = run_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap();
+
+        // feature 側で a.txt の同じ行を別内容に変更してコミット。
+        run_git(cwd, &["checkout", "-q", "-b", "feature"]).unwrap();
+        std::fs::write(dir.join("a.txt"), "feature-line\n").unwrap();
+        run_git(cwd, &["add", "-A"]).unwrap();
+        run_git(cwd, &["commit", "-q", "-m", "feature change"]).unwrap();
+
+        // base 側でも同じ行を別内容に変更してコミット（restore ターゲットにする）。
+        run_git(cwd, &["checkout", "-q", &base]).unwrap();
+        std::fs::write(dir.join("a.txt"), "base-line\n").unwrap();
+        run_git(cwd, &["add", "-A"]).unwrap();
+        run_git(cwd, &["commit", "-q", "-m", "base change"]).unwrap();
+        let target = run_git(cwd, &["rev-parse", "HEAD"]).unwrap();
+
+        // マージ → 衝突 → MERGE_HEAD が立つ。
+        assert!(run_git(cwd, &["merge", "feature"]).is_err(), "衝突でマージは失敗する");
+        assert!(dir.join(".git").join("MERGE_HEAD").exists(), "マージ進行中の目印");
+
+        // restore で進行中マージを畳み、worktree をターゲット tree に戻す。
+        restore(cwd, &target).unwrap();
+        assert!(
+            !dir.join(".git").join("MERGE_HEAD").exists(),
+            "restore 後は MERGE_HEAD が消える"
+        );
+        assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "base-line\n");
+        // 次の commit が黙ってマージコミットにならない＝クリーンな単一親状態。
+        let status = run_git(cwd, &["status", "--porcelain"]).unwrap();
+        assert!(status.is_empty(), "restore 後の作業ツリーはクリーン: {status:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #4: チェックポイント以降に作られた untracked ファイルの削除がサイレントにならず、
+    /// 消したパスを返して surface できることを確認する（baseline にある既存ファイルは残す）。
+    #[test]
+    fn restore_reports_removed_untracked_paths() {
+        let dir = std::env::temp_dir().join("orb-checkpoint-test-removed-report");
+        init_repo(&dir);
+        let root = dir.to_str().unwrap().to_string();
+
+        // baseline に含まれる既存 untracked（消してはいけない）。
+        std::fs::write(dir.join("keep.txt"), "keep\n").unwrap();
+        // baseline に無い新規 untracked（削除対象）。
+        std::fs::write(dir.join("new_a.txt"), "a\n").unwrap();
+        std::fs::write(dir.join("new_b.txt"), "b\n").unwrap();
+
+        let baseline = vec!["keep.txt".to_string()];
+        let mut removed = remove_post_checkpoint_untracked(&root, &baseline);
+        removed.sort();
+        assert_eq!(removed, vec!["new_a.txt".to_string(), "new_b.txt".to_string()]);
+        assert!(dir.join("keep.txt").exists(), "baseline の既存ファイルは残る");
+        assert!(!dir.join("new_a.txt").exists());
+        assert!(!dir.join("new_b.txt").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #3: 同一リポで capture と restore を多数スレッドから同時に叩いても、op-lock で直列化
+    /// されるため index.lock 衝突でパニック/破損せず完走し、記録済みハッシュは常に解決可能な
+    /// ままである（＝半分 restore した worktree の壊れたチェックポイントを記録しない）。
+    #[test]
+    fn concurrent_capture_and_restore_serialize_without_corruption() {
+        let dir = std::env::temp_dir().join("orb-checkpoint-test-concurrency");
+        init_repo(&dir);
+        let cwd = dir.to_str().unwrap().to_string();
+
+        // まず1つチェックポイントを作る（restore ターゲット）。
+        std::fs::write(dir.join("a.txt"), "seed\n").unwrap();
+        assert!(capture(&cwd));
+        let hash = list(&cwd)[0].hash.clone();
+
+        let mut handles = Vec::new();
+        for i in 0..6 {
+            let c = cwd.clone();
+            let d = dir.clone();
+            let h = hash.clone();
+            handles.push(std::thread::spawn(move || {
+                for _ in 0..4 {
+                    if i % 2 == 0 {
+                        std::fs::write(d.join("a.txt"), format!("t{i}\n")).unwrap();
+                        let _ = capture(&c);
+                    } else {
+                        let _ = restore(&c, &h);
+                    }
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // 記録された全チェックポイントの tree が解決できる＝壊れたハッシュを記録していない。
+        for cp in list(&cwd) {
+            assert!(rev_parse_tree(&cwd, &cp.hash).is_ok(), "記録済みハッシュは解決可能: {}", cp.hash);
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }
