@@ -8,6 +8,7 @@
     type Checkpoint,
   } from "../core/checkpoints";
   import { logError } from "../core/log";
+  import { aiPane, paneStatus } from "../store/appStore";
 
   // #54: 「直前のターンに巻き戻す」。一覧 → 選択で diff プレビュー → 明示確認 → 復元。
   // 破壊的操作（git reset --hard）はこのパネルの confirm クリックでしか発火しない。
@@ -25,6 +26,13 @@
   let restoring = $state(false);
   let restoreError = $state("");
 
+  // Fable5 レビュー指摘（#54 フォローアップ）: AI ペインが実行中（claude が今まさに
+  // ファイルを書いているかもしれない）のに reset --hard を打つと、進行中の変更と衝突して
+  // 中途半端な状態を作りかねない。running 中は既定で復元ボタンを無効化し、それでも実行したい
+  // 場合だけ明示チェックで解除できるようにする（ハード禁止ではなく既定オフの安全弁）。
+  let overrideRunningGuard = $state(false);
+  let aiPaneRunning = $derived($aiPane != null && $paneStatus.get($aiPane) === "running");
+
   async function load() {
     loading = true;
     checkpoints = await listCheckpointsForAiPane();
@@ -36,6 +44,7 @@
     diffText = "";
     diffError = "";
     restoreError = "";
+    overrideRunningGuard = false; // 選び直すたびに解除チェックはリセット（前回の解除を持ち越さない）
     if (!cwd) return;
     diffLoading = true;
     try {
@@ -50,6 +59,7 @@
 
   async function confirmRestore() {
     if (!cwd || !selected) return;
+    if (aiPaneRunning && !overrideRunningGuard) return; // ボタン無効化の防御を UI 外からも担保
     restoring = true;
     restoreError = "";
     try {
@@ -123,11 +133,25 @@
             <div class="empty err">差分の取得に失敗しました: {diffError}</div>
           {:else}
             <pre class="diff">{diffText || "(このチェックポイント以降、変更はありません)"}</pre>
+            <p class="hint-warn">
+              AI の変更だけでなく、あなたがこの時点より後に手で編集した内容もこの時点まで戻ります。
+            </p>
+            {#if aiPaneRunning}
+              <label class="running-guard">
+                <input type="checkbox" bind:checked={overrideRunningGuard} />
+                AI ペインが実行中です。今戻すと進行中の変更と衝突する可能性があります。それでも実行する
+              </label>
+            {/if}
             <div class="confirm-row">
               {#if restoreError}
                 <span class="err">{restoreError}</span>
               {/if}
-              <button class="restore" onclick={confirmRestore} disabled={restoring}>
+              <button
+                class="restore"
+                onclick={confirmRestore}
+                disabled={restoring || (aiPaneRunning && !overrideRunningGuard)}
+                title={aiPaneRunning && !overrideRunningGuard ? "AI ペインが実行中のため無効化中（上のチェックで解除）" : ""}
+              >
                 {restoring ? "巻き戻し中…" : "この時点に巻き戻す（作業ツリーを上書き）"}
               </button>
             </div>
@@ -262,6 +286,27 @@
     color: var(--fg);
     white-space: pre-wrap;
     word-break: break-word;
+  }
+  .hint-warn {
+    flex: 0 0 auto;
+    margin: 8px 0 0;
+    font-size: 0.7rem;
+    color: var(--grey);
+    opacity: 0.85;
+  }
+  .running-guard {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 6px 8px;
+    border: 1px solid rgba(255, 92, 138, 0.4);
+    border-radius: 6px;
+    background: rgba(255, 92, 138, 0.08);
+    color: #ffb3c6;
+    font-size: 0.72rem;
+    cursor: pointer;
   }
   .confirm-row {
     flex: 0 0 auto;
