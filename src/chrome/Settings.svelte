@@ -2,6 +2,7 @@
   import { get } from "svelte/store";
   import { config, saveConfig, type OrbConfig } from "../core/config";
   import { applyBgVars } from "../core/theme";
+  import { BG_ZOOM_MAX } from "../core/bg";
   import { open } from "@tauri-apps/plugin-dialog";
 
   let { onClose }: { onClose: () => void } = $props();
@@ -36,7 +37,10 @@
       const path = await open({
         multiple: false,
         directory: false,
-        filters: [{ name: "画像", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "gif"] }],
+        // #66: 動画(mp4/webm)は <video> で GPU デコード再生＝GIF/WebP の CPU デコードより滑らか。
+        filters: [
+          { name: "背景（画像・動画）", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "gif", "mp4", "webm"] },
+        ],
       });
       if (typeof path === "string") draft.bg_image = path;
     } catch {
@@ -108,7 +112,7 @@
       <input type="checkbox" bind:checked={draft.show_info_on_startup} />
     </label>
     <label>
-      <span>背景画像</span>
+      <span>背景（画像・動画）</span>
       <span class="bg-row">
         {#if bgName}<span class="bg-name" title={draft.bg_image}>{bgName}</span>{/if}
         <button class="bg-btn" onclick={pickBg}>選ぶ…</button>
@@ -133,6 +137,10 @@
         </span>
       </label>
       <label>
+        <span>ズーム（{Math.round(draft.bg_zoom * 100)}%）</span>
+        <input type="range" min="1" max={BG_ZOOM_MAX} step="0.05" bind:value={draft.bg_zoom} />
+      </label>
+      <label>
         <span>水平位置（{Math.round(draft.bg_pos_x)}%）</span>
         <input type="range" min="0" max="100" step="1" bind:value={draft.bg_pos_x} />
       </label>
@@ -141,7 +149,7 @@
         <input type="range" min="0" max="100" step="1" bind:value={draft.bg_pos_y} />
       </label>
     {/if}
-    <div class="note">フォント・アクセント色・合字は保存で反映 / 背景画像とスクロールバックは新しいペイン・再起動から反映</div>
+    <div class="note">フォント・アクセント色・合字は保存で反映 / 背景の透過とスクロールバックは新しいペイン・再起動から反映</div>
 
     <div class="btns">
       <button onclick={cancel}>キャンセル</button>

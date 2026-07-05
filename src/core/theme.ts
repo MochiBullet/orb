@@ -1,18 +1,30 @@
 import { config, type OrbConfig } from "./config";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { bgLayerVars, type BgConfig } from "./bg";
+import { writable } from "svelte/store";
+import { bgLayerVars, isVideoPath, type BgConfig } from "./bg";
+
+/** 背景メディア（App.svelte の <img>/<video> が読む）。src は asset プロトコル URL。 */
+export type BgMedia = { src: string; video: boolean } | null;
 
 /**
- * #21: 背景画像・暗幕・端末背景の CSS 変数を documentElement へ流し込む。
- * - `--bg-image`: 背景画像（asset プロトコル URL）/ 無ければ none
- * - `--bg-dim`/`--term-bg`/`--bg-size`/`--bg-position`: bgLayerVars（純関数）で算出
+ * #66: 背景メディアの src/種別。CSS 変数では要素の src を渡せないため専用ストアで App.svelte へ。
+ * config ストアとは別系統＝Terminal は購読しないので、ライブプレビューで書いても端末の
+ * 再描画/フォーカス移動を起こさない（旧 `--bg-image` CSS 変数が担っていた役目のメディア版）。
+ */
+export const bgMedia = writable<BgMedia>(null);
+
+/**
+ * #21/#66: 背景の暗幕・端末背景・フィット/位置/ズームの CSS 変数を documentElement へ流し込み、
+ * メディア要素の src/種別を bgMedia ストアへ流す。
+ * - `--bg-dim`/`--term-bg`/`--bg-fit`/`--bg-position`/`--bg-transform`/`--bg-origin`: bgLayerVars（純関数）
+ * - bgMedia: 画像/動画の URL と種別（convertFileSrc + isVideoPath）
  *
  * Settings のライブプレビューからも呼ぶ（config ストアを経由せず＝端末フォーカスを奪わない）。
  */
 export function applyBgVars(c: BgConfig) {
   const root = document.documentElement.style;
-  root.setProperty("--bg-image", c.bg_image ? `url("${convertFileSrc(c.bg_image)}")` : "none");
   for (const [k, v] of Object.entries(bgLayerVars(c))) root.setProperty(k, v);
+  bgMedia.set(c.bg_image ? { src: convertFileSrc(c.bg_image), video: isVideoPath(c.bg_image) } : null);
 }
 
 /** config のアクセント色・背景を CSS 変数へ流し込む（config が変わるたび自動適用）。 */

@@ -50,6 +50,9 @@ fn default_bg_size() -> String {
 fn default_bg_pos() -> f32 {
     50.0
 }
+fn default_bg_zoom() -> f32 {
+    1.0
+}
 fn default_show_info_on_startup() -> bool {
     true
 }
@@ -82,6 +85,10 @@ pub struct Config {
     pub bg_pos_x: f32,
     #[serde(default = "default_bg_pos")]
     pub bg_pos_y: f32,
+    /// 背景メディアのズーム倍率 1.0..（cover/contain の基準フィットから寄せてクロップを詰める）。
+    /// object-fit＋transform:scale で縦横比を保ったまま拡大＝歪まない（#66 で img/video 共通経路）。
+    #[serde(default = "default_bg_zoom")]
+    pub bg_zoom: f32,
     /// #47: 起動時に info（取扱説明書）タブを開くか。復元セッションに info タブが
     /// 無いとき末尾へ非アクティブで補充する（真の初回起動は設定に依らずアクティブで開く）。
     #[serde(default = "default_show_info_on_startup")]
@@ -101,6 +108,7 @@ impl Default for Config {
             bg_size: default_bg_size(),
             bg_pos_x: default_bg_pos(),
             bg_pos_y: default_bg_pos(),
+            bg_zoom: default_bg_zoom(),
             show_info_on_startup: default_show_info_on_startup(),
         }
     }
