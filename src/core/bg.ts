@@ -25,6 +25,23 @@ export function clampZoom(z: number): number {
   return Math.min(BG_ZOOM_MAX, Math.max(1, z));
 }
 
+/** 既定背景センチネル。config.toml に永続化される可搬な既定値で、実行時に Rust が
+ *  config_dir 下へ展開した bg-default.mp4 の実パスへ解決する（マシン非依存）。
+ *  Rust 側 config.rs の DEFAULT_BG_SENTINEL と一致させること。 */
+export const DEFAULT_BG = "__default__";
+
+/** bg_image が既定センチネル（"__default__"）か。 */
+export function isDefaultBg(path: string): boolean {
+  return path === DEFAULT_BG;
+}
+
+/** 表示に使う実パスへ解決する。センチネルなら展開済みの既定パス、それ以外はそのまま返す。
+ *  既定パス未解決（"")のときは "" を返す＝解決完了後の再適用で正しい src になる（過渡的に無背景）。 */
+export function resolveBgPath(bgImage: string, defaultBgPath: string): string {
+  if (bgImage === DEFAULT_BG) return defaultBgPath || "";
+  return bgImage;
+}
+
 /**
  * #21/#66: 背景レイヤの CSS 変数値を算出する純関数（DOM/Tauri 非依存＝テスト可能）。
  * 背景は <img>/<video> 共通のメディア要素1枚に統一し、cover/contain・位置・ズームを

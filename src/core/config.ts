@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { writable } from "svelte/store";
+import { DEFAULT_BG } from "./bg";
 
 export interface OrbConfig {
   font_size: number;
@@ -26,11 +27,11 @@ const DEFAULT: OrbConfig = {
   scrollback: 1000,
   accent: "#2dd4bf",
   ligatures: true,
-  bg_image: "",
-  bg_dim: 0.6,
+  bg_image: DEFAULT_BG,
+  bg_dim: 0.5,
   bg_size: "cover",
-  bg_pos_x: 50,
-  bg_pos_y: 50,
+  bg_pos_x: 65,
+  bg_pos_y: 100,
   bg_zoom: 1,
   show_info_on_startup: true,
 };

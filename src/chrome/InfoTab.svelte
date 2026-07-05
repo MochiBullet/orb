@@ -6,11 +6,21 @@
   import { KEY_REFERENCE } from "../data/reference";
   import { MCP_CATALOG } from "../data/mcp-catalog";
   import { STATUS_ICON, STATUS_LABEL, STATUS_PRIORITY } from "../core/agent-status";
+  import orbHero from "../assets/orb-hero.png";
 
   interface Guide {
     title: string;
     items: string[];
   }
+
+  // 最近のアップデート（実装済み機能のみ）。README/実装と齟齬が出ないよう事実だけを列挙する。
+  const updates: string[] = [
+    "案件ランチャー（Ctrl+P）で複数案件をまとめて選択→model/effort を事前承認→一括起動（候補にカーソルを合わせて Ctrl+Space、Enter で承認画面へ）。auto mode で長時間放置する時、起動後に個別確認で割り込まれずに済む",
+    "チェックポイント復元の安全性強化：AI ペインが実行中の間は復元ボタンを既定で無効化（明示チェックで解除可）。確認画面に「手で編集した内容もこの時点まで戻る」旨を明記。加えて、復元がブランチの参照ごと動かしてしまい大事なコミットが迷子になる不具合を修正済み",
+    "「🕐 前例」：失敗したコマンドのツールバーから、同じコマンド・同じディレクトリの過去の失敗と、その後の解決履歴を検索して AI ペインへ渡すワンキー",
+    "ブロックログ（JSONL）は90日を超えた古いものを自動整理、無限に肥大化しない",
+    "背景画像は GIF・動画（mp4/webm）に対応。トリミング（覆う/全体）・位置・ズームを設定パネルから調整可能",
+  ];
 
   const guides: Guide[] = [
     {
@@ -83,7 +93,7 @@
     {
       title: "設定 (Ctrl+,)",
       items: [
-        "フォント / スクロールバック / アクセント色 / 背景画像＋暗幕 / 起動時の info タブ",
+        "フォント / スクロールバック / アクセント色 / 背景（画像・GIF・動画＋暗幕・位置・ズーム）/ 起動時の info タブ",
         "保存先は ~/.config/orb/config.toml（直接編集も可）",
       ],
     },
@@ -102,7 +112,8 @@
 <div class="info-tab">
   <div class="inner">
     <header>
-      <h1>orb <span class="sub">取扱説明書</span></h1>
+      <img class="hero" src={orbHero} alt="orb" />
+      <div class="sub">取扱説明書</div>
       <p class="tagline">
         agent-native terminal — Claude Code と並走するための、バイブコーディング専用ターミナル。
       </p>
@@ -110,6 +121,15 @@
         このタブは閉じても、コマンドパレット（Ctrl+Shift+P）の「info / 説明書を開く」からいつでも戻せます。
       </p>
     </header>
+
+    <section>
+      <h2>最近のアップデート</h2>
+      <ul class="updates">
+        {#each updates as u}
+          <li>{u}</li>
+        {/each}
+      </ul>
+    </section>
 
     <section>
       <h2>機能ガイド</h2>
@@ -195,18 +215,22 @@
     margin: 0 auto;
     padding: 34px 28px 60px;
   }
-  header h1 {
-    margin: 0;
-    font-size: 1.5rem;
-    letter-spacing: 0.3em;
-    color: var(--teal, #2dd4bf);
-    text-shadow: 0 0 14px rgba(45, 212, 191, 0.4);
+  header {
+    text-align: center;
+  }
+  /* TitleBar のロゴマークと同系の hero 版。310KB のラスタなので header 相応に縮小表示。 */
+  .hero {
+    display: block;
+    width: auto;
+    max-width: min(240px, 70%);
+    height: auto;
+    margin: 0 auto 8px;
+    filter: drop-shadow(0 0 16px rgba(45, 212, 191, 0.35));
   }
   header .sub {
     font-size: 0.8rem;
     letter-spacing: 0.2em;
     color: var(--violet, #a78bfa);
-    margin-left: 10px;
   }
   .tagline {
     margin: 10px 0 2px;
@@ -221,6 +245,18 @@
   }
   section {
     margin-top: 30px;
+  }
+  .updates {
+    margin: 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .updates li {
+    font-size: 0.76rem;
+    line-height: 1.6;
+    color: var(--grey);
   }
   h2 {
     margin: 0 0 12px;

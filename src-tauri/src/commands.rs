@@ -132,6 +132,13 @@ pub fn save_config(config: Config) -> Result<()> {
     crate::config::save_config(&config)
 }
 
+/// 埋め込んだ既定背景動画を config_dir 下へ冪等展開し、その絶対パスを返す。
+/// フロントは bg_image の "__default__" センチネルをこのパスへ解決して表示する。
+#[tauri::command]
+pub fn get_default_bg() -> Result<String> {
+    config::ensure_default_bg().map(|p| p.to_string_lossy().into_owned())
+}
+
 /// Claude のトークン使用率（サイドバー用、ブロッキング HTTP は別スレッドで実行される）。
 #[tauri::command]
 pub fn get_usage() -> Result<crate::usage::Usage> {

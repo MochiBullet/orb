@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { bgLayerVars, isVideoPath, clampZoom, BG_ZOOM_MAX, type BgConfig } from "./bg";
+import {
+  bgLayerVars,
+  isVideoPath,
+  clampZoom,
+  isDefaultBg,
+  resolveBgPath,
+  DEFAULT_BG,
+  BG_ZOOM_MAX,
+  type BgConfig,
+} from "./bg";
 
 const base: BgConfig = {
   bg_image: "C:/pics/wall.jpg",
@@ -74,5 +83,21 @@ describe("clampZoom", () => {
     expect(clampZoom(0.2)).toBe(1);
     expect(clampZoom(100)).toBe(BG_ZOOM_MAX);
     expect(clampZoom(NaN)).toBe(1);
+  });
+});
+
+describe("resolveBgPath / isDefaultBg", () => {
+  it("センチネルは既定の実パスへ解決", () => {
+    expect(isDefaultBg(DEFAULT_BG)).toBe(true);
+    expect(resolveBgPath(DEFAULT_BG, "C:/cfg/bg-default.mp4")).toBe("C:/cfg/bg-default.mp4");
+  });
+  it("既定パス未解決（空）のセンチネルは空＝過渡的に無背景", () => {
+    expect(resolveBgPath(DEFAULT_BG, "")).toBe("");
+  });
+  it("実パス・空文字はそのまま（センチネル扱いしない）", () => {
+    expect(isDefaultBg("C:/pics/wall.jpg")).toBe(false);
+    expect(isDefaultBg("")).toBe(false);
+    expect(resolveBgPath("C:/pics/wall.jpg", "C:/cfg/bg-default.mp4")).toBe("C:/pics/wall.jpg");
+    expect(resolveBgPath("", "C:/cfg/bg-default.mp4")).toBe("");
   });
 });

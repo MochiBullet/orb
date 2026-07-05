@@ -4,7 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import "./styles/app.css";
 import App from "./App.svelte";
 import { loadConfig } from "./core/config";
-import "./core/theme";
+import { initDefaultBg } from "./core/theme";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 
 // top-level await はビルド target(es2020)で不可なので即時 async 関数に包む。
@@ -21,6 +21,8 @@ async function boot() {
 
   // 端末生成前に設定を読み込んでおく（Terminal は get(config) を同期参照する）。
   await loadConfig();
+  // 既定背景センチネルを実パスへ解決（mount 前に済ませ、初回描画から正しい背景を出す）。
+  await initDefaultBg();
 
   mount(App, { target: document.getElementById("app")! });
 }

@@ -2,7 +2,7 @@
   import { get } from "svelte/store";
   import { config, saveConfig, type OrbConfig } from "../core/config";
   import { applyBgVars } from "../core/theme";
-  import { BG_ZOOM_MAX } from "../core/bg";
+  import { BG_ZOOM_MAX, DEFAULT_BG } from "../core/bg";
   import { open } from "@tauri-apps/plugin-dialog";
 
   let { onClose }: { onClose: () => void } = $props();
@@ -14,6 +14,12 @@
   const BG_SIZES = [
     { value: "cover", label: "覆う" },
     { value: "contain", label: "全体" },
+  ];
+  // 背景の3択。デフォルト=同梱動画（センチネル）/ なし=黒（空）/ カスタム=ファイルピッカー。
+  const BG_MODES = [
+    { value: "default", label: "デフォルト" },
+    { value: "none", label: "なし" },
+    { value: "custom", label: "カスタム" },
   ];
 
   // ライブプレビュー: ドラフトのアクセント色を即 --teal に反映。
@@ -29,8 +35,18 @@
     applyBgVars(draft);
   });
 
-  // 背景画像の basename 表示用。
-  const bgName = $derived(draft.bg_image ? draft.bg_image.split(/[\\/]/).pop() : "");
+  // 現在どの背景モードか（センチネル=default / 空=none / 実パス=custom）。
+  const bgMode = $derived(
+    draft.bg_image === "" ? "none" : draft.bg_image === DEFAULT_BG ? "default" : "custom",
+  );
+  // カスタム時のファイル名表示用（センチネル/空では出さない）。
+  const bgName = $derived(bgMode === "custom" ? draft.bg_image.split(/[\\/]/).pop() : "");
+
+  function selectBgMode(mode: string) {
+    // カスタムはファイルピッカーを開く（選択で custom パスが入る）。デフォルト/なしは即設定。
+    if (mode === "custom") void pickBg();
+    else draft.bg_image = mode === "default" ? DEFAULT_BG : "";
+  }
 
   async function pickBg() {
     try {
@@ -46,10 +62,6 @@
     } catch {
       /* ダイアログのキャンセル/失敗は無視 */
     }
-  }
-
-  function clearBg() {
-    draft.bg_image = "";
   }
 
   async function save() {
@@ -113,12 +125,19 @@
     </label>
     <label>
       <span>背景（画像・動画）</span>
-      <span class="bg-row">
-        {#if bgName}<span class="bg-name" title={draft.bg_image}>{bgName}</span>{/if}
-        <button class="bg-btn" onclick={pickBg}>選ぶ…</button>
-        {#if draft.bg_image}<button class="bg-btn clear" onclick={clearBg}>クリア</button>{/if}
+      <span class="seg">
+        {#each BG_MODES as m}
+          <button
+            class="seg-btn"
+            class:sel={bgMode === m.value}
+            onclick={() => selectBgMode(m.value)}>{m.label}</button
+          >
+        {/each}
       </span>
     </label>
+    {#if bgMode === "custom" && bgName}
+      <div class="bg-name-row"><span class="bg-name" title={draft.bg_image}>{bgName}</span></div>
+    {/if}
     {#if draft.bg_image}
       <label>
         <span>暗幕（{Math.round(draft.bg_dim * 100)}%）</span>
@@ -238,39 +257,18 @@
     background: none;
     cursor: pointer;
   }
-  .bg-row {
+  .bg-name-row {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: 1;
-    max-width: 230px;
-    min-width: 0;
     justify-content: flex-end;
+    margin-top: -4px;
   }
   .bg-name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    max-width: 260px;
     color: var(--fg);
     font-size: 0.7rem;
-  }
-  .bg-btn {
-    flex: 0 0 auto;
-    border: 1px solid rgba(45, 212, 191, 0.3);
-    background: transparent;
-    color: var(--teal);
-    font-family: inherit;
-    font-size: 0.72rem;
-    padding: 3px 10px;
-    border-radius: 5px;
-    cursor: pointer;
-  }
-  .bg-btn:hover {
-    background: rgba(45, 212, 191, 0.12);
-  }
-  .bg-btn.clear {
-    color: var(--grey);
-    border-color: rgba(255, 255, 255, 0.15);
   }
   .seg {
     display: flex;

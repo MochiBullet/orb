@@ -62,6 +62,7 @@ pub fn run() {
             commands::list_projects,
             commands::get_config,
             commands::save_config,
+            commands::get_default_bg,
             commands::get_usage,
             commands::get_local_usage,
             commands::checkpoint_capture,
