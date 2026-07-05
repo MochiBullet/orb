@@ -118,12 +118,49 @@ fn read_events_from(dir: &Path, day: &str) -> Vec<BlockEvent> {
         .collect()
 }
 
+/// 保持する日次 JSONL ファイルの最大数（≒日数）。#49 の検索対象もこの範囲に限られる。
+/// Fable5 レビュー指摘: retention 方針が未定で `~/.config/orb/blocks/` が無限に肥大する。
+const MAX_LOG_DAYS: usize = 90;
+
+/// 新しい方 keep 件（日）を残して古い日次 JSONL を消す（best-effort・失敗は無視）。
+/// ファイル名が `YYYY-MM-DD.jsonl` なので文字列ソートがそのまま時系列ソートになる。
+fn prune_old_logs(dir: &Path, keep: usize) {
+    let rd = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    let mut files: Vec<PathBuf> = rd
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl"))
+        .filter(|p| {
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .map(is_valid_day)
+                .unwrap_or(false)
+        })
+        .collect();
+    files.sort();
+    if files.len() > keep {
+        for p in &files[..files.len() - keep] {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
 /// フロントから 1 ブロック分を追記する（#31）。書き込みは専用スレッドへ逃がす。
 #[tauri::command]
 pub async fn append_block_event(day: String, event: BlockEvent) -> Result<()> {
-    tauri::async_runtime::spawn_blocking(move || write_event_to(&blocks_dir(), &day, &event))
-        .await
-        .map_err(|e| AppError::Config(format!("block log task: {e}")))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = blocks_dir();
+        let res = write_event_to(&dir, &day, &event);
+        if res.is_ok() {
+            prune_old_logs(&dir, MAX_LOG_DAYS);
+        }
+        res
+    })
+    .await
+    .map_err(|e| AppError::Config(format!("block log task: {e}")))?
 }
 
 /// 指定日のブロックログを読み戻す（履歴オーバーレイの再描画＝#31 の受け入れ条件）。
@@ -428,6 +465,57 @@ mod tests {
         // 予約フィールドは往復しても null のまま。
         assert_eq!(got[1].command, None);
         assert_eq!(got[1].output_body, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_old_logs_keeps_newest_n_days() {
+        let dir = temp("prune-keep");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for day in ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04", "2026-06-05"] {
+            write_event_to(&dir, day, &ev("b", 0)).unwrap();
+        }
+        prune_old_logs(&dir, 2);
+        let mut remaining: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        remaining.sort();
+        // 文字列ソート＝時系列ソートなので、新しい2日分（06-04・06-05）だけが残る。
+        assert_eq!(remaining, vec!["2026-06-04.jsonl", "2026-06-05.jsonl"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_old_logs_is_noop_when_under_the_limit() {
+        let dir = temp("prune-under");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        write_event_to(&dir, "2026-06-01", &ev("b", 0)).unwrap();
+        prune_old_logs(&dir, 90);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_old_logs_ignores_non_jsonl_and_malformed_names() {
+        let dir = temp("prune-ignore");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        write_event_to(&dir, "2026-06-01", &ev("b", 0)).unwrap();
+        std::fs::write(dir.join("not-a-day.jsonl"), "{}").unwrap();
+        std::fs::write(dir.join("README.md"), "hi").unwrap();
+        prune_old_logs(&dir, 0); // keep=0 でも不正な名前のファイルは対象外＝消えない
+        let remaining: std::collections::HashSet<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(remaining.contains("not-a-day.jsonl"));
+        assert!(remaining.contains("README.md"));
+        assert!(!remaining.contains("2026-06-01.jsonl")); // 正当な日次ファイルだけ keep=0 で消える
         let _ = std::fs::remove_dir_all(&dir);
     }
 
