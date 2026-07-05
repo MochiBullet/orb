@@ -4,6 +4,8 @@ import {
   parseOsc9,
   parseOsc777,
   parseCommandLine,
+  isAuthedPromptStart,
+  parseNoncedPayload,
   planResize,
   isAltScreenModeParams,
 } from "./osc";
@@ -138,6 +140,66 @@ describe("parseCommandLine (#33: OSC 633;E nonce 検証)", () => {
 
   it("上限（COMMAND_MAX）超過 → null", () => {
     expect(parseCommandLine(`${N};${"x".repeat(5000)}`, N)).toBeNull();
+  });
+});
+
+describe("isAuthedPromptStart (#71: A マーカーの nonce 認証・偽ブロック偽造防止)", () => {
+  const N = "abc123def456";
+
+  it("nonce 一致（633;A;<nonce>）→ true（正規のプロンプト開始を処理する）", () => {
+    expect(isAuthedPromptStart(N, N)).toBe(true);
+  });
+
+  it("nonce 無し（旧 633;A 相当・rest 空）→ false（敵対的出力の中断クローズ偽造を弾く）", () => {
+    expect(isAuthedPromptStart("", N)).toBe(false);
+  });
+
+  it("nonce 不一致 → false（出力に紛れた偽 A を弾く）", () => {
+    expect(isAuthedPromptStart("forged", N)).toBe(false);
+  });
+
+  it("expectedNonce 空（未配線）→ 常に false（安全側・空 rest でも通さない）", () => {
+    expect(isAuthedPromptStart("", "")).toBe(false);
+    expect(isAuthedPromptStart(N, "")).toBe(false);
+  });
+});
+
+describe("parseNoncedPayload (#71: D/P マーカーの nonce 認証・偽 exit/偽 cwd 防止)", () => {
+  const N = "abc123def456";
+
+  it("D: nonce 一致（633;D;<nonce>;<code>）→ 終了コード文字列を返す", () => {
+    expect(parseNoncedPayload(`${N};0`, N)).toBe("0");
+    expect(parseNoncedPayload(`${N};137`, N)).toBe("137");
+  });
+
+  it("P: nonce 一致（633;P;<nonce>;Cwd=…）→ プロパティ部を返す", () => {
+    expect(parseNoncedPayload(`${N};Cwd=C:\\proj`, N)).toBe("Cwd=C:\\proj");
+    expect(parseNoncedPayload(`${N};PromptType=starship`, N)).toBe("PromptType=starship");
+  });
+
+  it("D: nonce 無し（旧 633;D;0 相当）→ null（偽の成功✓＝偽 exit code を弾く）", () => {
+    expect(parseNoncedPayload("0", N)).toBeNull();
+  });
+
+  it("P: nonce 無し（旧 633;P;Cwd=… 相当）→ null（cwd 偽装を弾く）", () => {
+    expect(parseNoncedPayload("Cwd=/evil", N)).toBeNull();
+  });
+
+  it("nonce 不一致 → null（出力に紛れた偽 D/P を弾く）", () => {
+    expect(parseNoncedPayload("forged;0", N)).toBeNull();
+    expect(parseNoncedPayload("forged;Cwd=/evil", N)).toBeNull();
+  });
+
+  it("expectedNonce 空（未配線）→ 常に null（安全側）", () => {
+    expect(parseNoncedPayload(`${N};0`, "")).toBeNull();
+  });
+
+  it("区切り ; 無し（nonce だけ）→ null（壊れた payload）", () => {
+    expect(parseNoncedPayload(N, N)).toBeNull();
+  });
+
+  it("最初の ; だけで割る（nonce 部が一致すれば payload 内の ; は保持）", () => {
+    expect(parseNoncedPayload(`${N};Cwd=a;b`, N)).toBe("Cwd=a;b");
   });
 });
 

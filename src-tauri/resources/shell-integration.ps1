@@ -2,8 +2,11 @@
 # profile.ps1 が定義した prompt（starship 等）をラップし、見た目を壊さず OSC を
 # 前後に挿入する。手本: VS Code shellIntegration.ps1。
 #
-# マーカー: A=プロンプト開始 / B=コマンド入力開始 / C=実行開始 / D;<code>=実行終了
-#           E;<cmd>=コマンドライン / P;Cwd=<path>=作業ディレクトリ
+# マーカー: A;<nonce>=プロンプト開始 / B=コマンド入力開始 / C;<nonce>=実行開始
+#           D;<nonce>;<code>=実行終了 / E;<nonce>;<cmd>=コマンドライン
+#           P;<nonce>;Cwd=<path>=作業ディレクトリ
+# SEC(#71): B 以外は全マーカーに nonce を付ける。フロント(osc.ts)は自分の nonce を持つ
+#           マーカーだけ信用する＝コマンド出力バイトによる偽造（偽 exit/偽 cwd/偽ブロック）を防ぐ。
 
 if ($global:__orb_si_loaded) { return }
 $global:__orb_si_loaded = $true
@@ -31,6 +34,12 @@ $global:__orb_si = @{
     # ため、dot-source 時ではなく prompt() 内で存在を確認してから一度だけラップする。
     ReadLineWrapped = $false
 }
+
+# SEC-1(#71): nonce を捕捉したら即座に環境変数から消す。さもないとペイン内で走る任意の
+# プログラムが $env:ORB_NONCE を読め、nonce 付きマーカー（E/C/A/D/P）を丸ごと偽造できる
+# （偽 exit・偽 cwd・偽ブロック）。以後の発行はすべて捕捉済みの $global:__orb_si.Nonce から
+# 行う（環境変数は二度と読まない）。VS Code の shell integration と同じ方式。
+Remove-Item Env:\ORB_NONCE -ErrorAction SilentlyContinue
 
 # #33: PSConsoleHostReadLine（PSReadLine の入力フック）をラップし、実際にコマンドが
 # 送信された瞬間に E;<nonce>;<escaped-cmdline>（コマンドライン）と C（出力開始）を出す。
@@ -107,6 +116,8 @@ function global:prompt {
     $ranCommand = $curId -ne $global:__orb_si.LastHistoryId
 
     $out = ''
+    # #71: A/D/P に埋める nonce（捕捉済みローカル。環境変数は SEC-1 で消去済み）。
+    $n = $global:__orb_si.Nonce
 
     # D: コマンドが実際に走ったら、開いているブロックを終了コード付きで閉じる。
     if ($ranCommand -and $global:__orb_si.BlockOpen) {
@@ -118,7 +129,7 @@ function global:prompt {
                 elseif ($errNew -or ($h -and $h.ExecutionStatus -eq 'Stopped')) { 1 }
                 elseif ($LastExit) { $LastExit }
                 else { 1 }
-        $out += __orb_osc "D;$code"
+        $out += __orb_osc "D;$n;$code"
         $global:__orb_si.BlockOpen = $false
     }
 
@@ -126,10 +137,10 @@ function global:prompt {
     # 開いたままなら（空Enter等）新 A を出さず待機ブロックを継続＝幻ブロックを作らない。
     $openBlock = -not $global:__orb_si.BlockOpen
     if ($openBlock) {
-        $out += __orb_osc 'A'
-        # P: 作業ディレクトリ（新ブロックにだけ付ける）。
+        $out += __orb_osc "A;$n"
+        # P: 作業ディレクトリ（新ブロックにだけ付ける）。#71: nonce 付きで偽 cwd 注入を防ぐ。
         if ($pwd.Provider.Name -eq 'FileSystem') {
-            $out += __orb_osc "P;Cwd=$(__orb_escape $pwd.ProviderPath)"
+            $out += __orb_osc "P;$n;Cwd=$(__orb_escape $pwd.ProviderPath)"
         }
     }
 
@@ -170,5 +181,6 @@ function global:prompt {
 # コマンド文字列は __orb_escape 済み＋nonce 検証付きなので、過去問題だった
 # 「OSC 633;E のエコーバック二重表示」「出力に紛れた偽 E」をフロント側で弾ける。
 if ($global:__orb_si.HasPSReadLine -and $env:STARSHIP_SESSION_KEY) {
-    [Console]::Write((__orb_osc 'P;PromptType=starship'))
+    # #71: P も nonce 付き（parser 側で P は nonce 必須になった）。捕捉済みローカルから出す。
+    [Console]::Write((__orb_osc "P;$($global:__orb_si.Nonce);PromptType=starship"))
 }

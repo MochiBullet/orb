@@ -5,8 +5,11 @@
 # PROMPT_COMMAND を張っているケースを壊さずに割り込む必要があるため（見た目を壊さず OSC を
 # 注入する、という PS1 版と同じ設計目標）。
 #
-# マーカー: A=プロンプト開始 / B=コマンド入力開始 / C;<nonce>=出力開始 / D;<code>=実行終了
-#           E;<nonce>;<escaped-cmd>=コマンドライン / P;Cwd=<path>=作業ディレクトリ
+# マーカー: A;<nonce>=プロンプト開始 / B=コマンド入力開始 / C;<nonce>=出力開始
+#           D;<nonce>;<code>=実行終了 / E;<nonce>;<escaped-cmd>=コマンドライン
+#           P;<nonce>;Cwd=<path>=作業ディレクトリ
+# SEC(#71): B 以外は全マーカーに nonce を付ける。フロント(osc.ts)は自分の nonce を持つ
+#           マーカーだけ信用する＝出力バイトによる偽造（偽 exit/偽 cwd/偽ブロック）を防ぐ。
 #
 # ⚠️ 実機（Linux/macOS）未検証（#17 クロスプラットフォーム対応）。Windows は PS1 版のみを
 # 使うため、この bash 版は現状 CI（ubuntu-latest）でのビルド確認のみで、trap 連鎖・
@@ -21,6 +24,10 @@ __ORB_SI_LOADED=1
 # 無ければ空＝E も C も出さない（PS1 版と同じ「nonce 不在では出力に紛れた偽 E/C を
 # フロントが受け付けない」設計）。
 __orb_nonce="${ORB_NONCE:-}"
+# SEC-1(#71): nonce を捕捉したら即 unset。さもないとペイン内で走る任意プログラムが $ORB_NONCE
+# を読め、nonce 付きマーカー（E/C/A/D/P）を偽造できる（偽 exit/偽 cwd/偽ブロック）。以後の発行は
+# 捕捉済み $__orb_nonce からのみ行う（環境変数は二度と読まない）。
+unset ORB_NONCE
 
 # 現在ブロックが開いているか（A を出して D 未了）。空 Enter 等でコマンド未実行のときは
 # このまま開き続け、A/B を重複させない＝幻ブロックで耐久ログ #31 を汚さない。
@@ -63,14 +70,16 @@ __orb_escape() {
 }
 
 __orb_update_cwd() {
-  __orb_osc "P;Cwd=$(__orb_escape "$PWD")"
+  # #71: P も nonce 付き（parser 側で P は nonce 必須）＝偽 cwd 注入を防ぐ。
+  __orb_osc "P;$__orb_nonce;Cwd=$(__orb_escape "$PWD")"
 }
 
 # A: 開いているブロックが無ければ新ブロックを開く（初回 or D 直後）。開いたままなら
 # （空Enter等）何も出さず待機ブロックを継続＝幻ブロックを作らない（PS1 版と同じ判断）。
 __orb_prompt_start() {
   if [ "$__orb_block_open" != "1" ]; then
-    __orb_osc 'A'
+    # #71: A も nonce 付き＝出力に紛れた偽 A による正規ブロックの中断クローズ偽造を防ぐ。
+    __orb_osc "A;$__orb_nonce"
     __orb_update_cwd
   fi
 }
@@ -123,7 +132,8 @@ __orb_preexec_guarded() {
 # $? は PROMPT_COMMAND チェーンの最初の1行で必ず捕捉する（連鎖先の評価で上書きされる前に）。
 __orb_precmd_body() {
   if [ "$__orb_command_ran" = "1" ]; then
-    __orb_osc "D;$__orb_status"
+    # #71: D も nonce 付き＝出力に紛れた偽 D による偽の成功✓（偽 exit code）を防ぐ。
+    __orb_osc "D;$__orb_nonce;$__orb_status"
     __orb_block_open=0
     __orb_command_ran=0
   fi
@@ -172,5 +182,6 @@ __orb_update_prompt
 
 # PromptType 通知（一度だけ）。
 if [ -n "${STARSHIP_SESSION_KEY:-}" ]; then
-  __orb_osc 'P;PromptType=starship'
+  # #71: P も nonce 付き（parser 側で P は nonce 必須になった）。
+  __orb_osc "P;$__orb_nonce;PromptType=starship"
 fi

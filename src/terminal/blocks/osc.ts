@@ -100,6 +100,36 @@ export function parseCommandLine(rest: string, expectedNonce: string): string | 
 }
 
 /**
+ * #71: `A`（プロンプト開始）マーカーの nonce 認証。rest 全体が orb 自身の nonce
+ * （spawn 時に子シェルへ渡した値）と一致するときだけ true。expectedNonce が空（未配線）
+ * なら常に false＝安全側（C/E と同じく「自分の nonce を持たないマーカーは信用しない」）。
+ *
+ * 認証しないと、コマンド出力に紛れた `\x1b]633;A\x07` が正規ブロックを中断クローズ
+ * （onPromptStart の D 欠落処理）させ、偽ブロックを差し込めてしまう（#71 の脅威モデル）。
+ */
+export function isAuthedPromptStart(rest: string, expectedNonce: string): boolean {
+  if (!expectedNonce) return false;
+  return rest === expectedNonce;
+}
+
+/**
+ * #71: `D`（終了コード）/`P`（プロパティ）マーカーの nonce 認証つき分解。どちらも
+ * `<nonce>;<payload>` 形で来る。rest を最初の `;` で割り、先頭が orb 自身の nonce に
+ * 一致したときだけ payload（D なら終了コード文字列、P なら "Cwd=…" 等）を返す。
+ * nonce 不在（未配線）・不一致・区切り無しはすべて null＝処理しない（安全側）。
+ *
+ * これを怠ると、出力に紛れた `633;D;0` が実失敗を緑✓へ偽造（JSONL に exit_code:0 を永続化）、
+ * `633;P;Cwd=<任意>` が cwd を偽装（checkpoint/handoff が任意ディレクトリで動く）できる（#71）。
+ */
+export function parseNoncedPayload(rest: string, expectedNonce: string): string | null {
+  if (!expectedNonce) return null;
+  const sep = rest.indexOf(";");
+  if (sep === -1) return null;
+  if (rest.slice(0, sep) !== expectedNonce) return null;
+  return rest.slice(sep + 1);
+}
+
+/**
  * #56: 1 ブロック分の装飾と、resize 時に同じ装飾を作り直すためのパラメータ一式。
  * xterm の IDecoration は width を後から変えられない（setter 無し）ため、cols が変わったら
  * dispose→同じ marker で再登録する。その再登録に必要な decorate 呼び出し時の値を保持する。
@@ -213,7 +243,9 @@ export class CommandBlocks {
     if (this.altScreen) return true;
     switch (marker) {
       case "A":
-        this.onPromptStart();
+        // #71: A も nonce 認証。出力に紛れた `633;A` が正規ブロックを中断クローズ
+        // （onPromptStart の D 欠落処理）させ、偽ブロックを差し込む偽造を防ぐ。
+        if (isAuthedPromptStart(rest, this.nonce)) this.onPromptStart();
         break;
       case "C":
         // #33: 出力開始。E と同じく nonce で認証する（出力に紛れた偽 C が output_body の
@@ -223,15 +255,23 @@ export class CommandBlocks {
           setPaneStatus(this.paneId, "running"); // #50: コマンド実行開始＝🟢
         }
         break;
-      case "D":
-        this.onFinished(rest);
+      case "D": {
+        // #71: D も nonce 認証。出力に紛れた `633;D;0` が実失敗コマンドを緑✓へ偽造し、
+        // JSONL に exit_code:0 を永続化＋成功通知＋AI へ「成功」供給するのを防ぐ。
+        const code = parseNoncedPayload(rest, this.nonce);
+        if (code != null) this.onFinished(code);
         break;
+      }
       case "E":
         this.onCommandLine(rest);
         break;
-      case "P":
-        this.onProperty(rest);
+      case "P": {
+        // #71: P も nonce 認証。偽 `633;P;Cwd=<任意>` による cwd 偽装（setPaneCwd→AI ペイロード／
+        // checkpoint_capture／save_handoff_file が任意ディレクトリで動く）を防ぐ。
+        const prop = parseNoncedPayload(rest, this.nonce);
+        if (prop != null) this.onProperty(prop);
         break;
+      }
     }
     return true;
   }
