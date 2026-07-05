@@ -227,7 +227,8 @@ pub fn get_git_branch(cwd: Option<String>) -> Option<String> {
 /// 出力中の `path:line` リンク（VIBE_IDEAS #37 semantic history）をクリックしたとき、
 /// ペインの cwd 基準で解決してエディタの該当行を開く。
 /// 既定は Zed（`zed <path>:<line>`、全OS共通）。zed が PATH に無い/失敗時は OS 既定の
-/// フォールバックへ（Windows は #72 の RCE 対策で「開く」ではなく reveal-only）。
+/// フォールバックへ（Windows は #72 の RCE 対策で実行され得る拡張子だけ「開く」ではなく
+/// reveal-only。閲覧専用と分かっている安全な拡張子は通常通り開く＝ `is_reveal_only_ext`）。
 /// regex の誤マッチで存在しないパスが来ることもあるので、その場合は黙って無視する。
 #[tauri::command]
 pub fn open_in_editor(cwd: Option<String>, path: String, line: Option<u32>) -> Result<()> {
@@ -277,18 +278,26 @@ fn resolve_target_path(cwd: Option<&str>, path: &str) -> Option<String> {
 ///
 /// #72 (P0/RCE): Windows の `explorer.exe <path>` は登録シェル動詞＝ダブルクリック相当で、
 /// `.bat/.cmd/.com/.exe/.scr/.js/.vbs/.hta/.lnk/.wsf/.msi` 等を**実行**してしまう
-/// （git clone 取得ファイルは Mark-of-the-Web 無し→SmartScreen も素通り）。ゆえに「開く/実行」
-/// 動詞を絶対に使わず、`explorer.exe /select,<path>` の **reveal-only**＝フォルダ内で当該
-/// ファイルを選択表示するだけ（実行しない）にする。
+/// （git clone 取得ファイルは Mark-of-the-Web 無し→SmartScreen も素通り）。ゆえに実行され得る
+/// 拡張子（と未知の拡張子）は「開く/実行」動詞を使わず `explorer.exe /select,<path>` の
+/// **reveal-only**＝フォルダ内で当該ファイルを選択表示するだけ（実行しない）にする。
+/// #72 followup: これを全拡張子に適用すると `.log`/`.png`/`.pdf` 等の非コードファイルまで
+/// reveal-only になり「開かず選択表示するだけ」に劣化する回帰があったため、既知の閲覧専用
+/// 安全拡張子（`is_reveal_only_ext` で false になるもの）だけは通常通り既定アプリで開く。
 #[cfg(windows)]
 fn open_with_os_default(abs_str: &str) -> Result<()> {
     use std::os::windows::process::CommandExt;
-    // raw_arg で `/select,"<path>"`（path のみクォート）の生コマンドラインを逐語生成する。
-    // `.arg()` だと Rust が `/select,<path>` 全体をクォートしてしまい、空白入りパス
-    // （`C:\Users\…`, `Program Files` 等）で explorer が reveal に失敗する（実測）。
-    crate::procutil::new_command("explorer")
-        .raw_arg(reveal_arg(abs_str))
-        .spawn()?;
+    if is_reveal_only_ext(abs_str) {
+        // raw_arg で `/select,"<path>"`（path のみクォート）の生コマンドラインを逐語生成する。
+        // `.arg()` だと Rust が `/select,<path>` 全体をクォートしてしまい、空白入りパス
+        // （`C:\Users\…`, `Program Files` 等）で explorer が reveal に失敗する（実測）。
+        crate::procutil::new_command("explorer")
+            .raw_arg(reveal_arg(abs_str))
+            .spawn()?;
+    } else {
+        // 閲覧専用と分かっている安全な拡張子は実行される心配が無いので普通に既定アプリで開く。
+        crate::procutil::new_command("explorer").arg(abs_str).spawn()?;
+    }
     Ok(())
 }
 
@@ -301,6 +310,22 @@ fn open_with_os_default(abs_str: &str) -> Result<()> {
 #[cfg(windows)]
 fn reveal_arg(abs_str: &str) -> String {
     format!("/select,\"{abs_str}\"")
+}
+
+/// #72 followup: 拡張子だけで reveal-only にすべきかを判定する純関数（FS/spawn を含まない＝
+/// 単体テスト可能）。実行され得る拡張子（.bat/.cmd/.exe/.scr/.js/.vbs/.hta/.lnk/.wsf/.msi/.com/
+/// .ps1 等）と、判断材料の無い未知拡張子・拡張子無しは安全側に倒して reveal-only(true)。
+/// ログ/画像/文書等、実行されないと分かっている閲覧専用拡張子だけ false（＝開いてよい）。
+#[cfg(windows)]
+fn is_reveal_only_ext(path: &str) -> bool {
+    const SAFE_VIEWER_EXTS: &[&str] = &[
+        "log", "txt", "md", "png", "jpg", "jpeg", "gif", "webp", "bmp", "pdf", "csv", "json",
+        "html", "htm", "svg", "toml", "yaml", "yml", "xml",
+    ];
+    match std::path::Path::new(path).extension().and_then(|e| e.to_str()) {
+        Some(ext) => !SAFE_VIEWER_EXTS.contains(&ext.to_lowercase().as_str()),
+        None => true, // 拡張子無し＝未知扱い
+    }
 }
 
 /// macOS: `open <path>` は既定アプリで開く。ソースファイルは通常テキストエディタに関連付く
@@ -563,5 +588,43 @@ mod tests {
             "/select,\"C:\\repo\\scripts\\build.bat\""
         );
         assert!(reveal_arg("C:\\x\\y.exe").starts_with("/select,\""));
+    }
+
+    /// #72 followup 回帰: 実行され得る拡張子・未知拡張子は reveal-only(true)のまま
+    /// （RCE 対策の再発防止）。ログ/画像/文書等の閲覧専用拡張子は false＝通常通り開いてよい
+    /// （reveal-only 一律適用による「非コードファイルが開けない」回帰の防止）。
+    #[cfg(windows)]
+    #[test]
+    fn is_reveal_only_ext_classifies_executables_vs_safe_viewers() {
+        for dangerous in [
+            "C:\\x\\a.bat",
+            "C:\\x\\a.cmd",
+            "C:\\x\\a.exe",
+            "C:\\x\\a.scr",
+            "C:\\x\\a.js",
+            "C:\\x\\a.vbs",
+            "C:\\x\\a.hta",
+            "C:\\x\\a.lnk",
+            "C:\\x\\a.wsf",
+            "C:\\x\\a.msi",
+            "C:\\x\\a.com",
+            "C:\\x\\a.ps1",
+        ] {
+            assert!(is_reveal_only_ext(dangerous), "{dangerous} should be reveal-only");
+        }
+        for safe in [
+            "C:\\x\\a.log",
+            "C:\\x\\a.txt",
+            "C:\\x\\a.md",
+            "C:\\x\\a.png",
+            "C:\\x\\a.PDF", // 大文字拡張子も判定できる
+            "C:\\x\\a.csv",
+            "C:\\x\\a.html",
+        ] {
+            assert!(!is_reveal_only_ext(safe), "{safe} should open normally");
+        }
+        // 未知拡張子・拡張子無しは安全側（reveal-only）に倒す。
+        assert!(is_reveal_only_ext("C:\\x\\a.unknownext"));
+        assert!(is_reveal_only_ext("C:\\x\\noext"));
     }
 }

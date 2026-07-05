@@ -36,6 +36,17 @@ export function displayCommand(e: BlockEvent): string {
   return line ?? "(コマンド不明)";
 }
 
+/**
+ * run-length 圧縮／「→ その後成功」判定の同一性キー（表示用の displayCommand とは別軸）。
+ * command 確定済み（#33 マーカーあり）同士は実コマンド文字列で比較してよい。マーカー無し
+ * （text の先頭行を流用したフォールバック）同士は、たまたま先頭行が同じでも別コマンドの
+ * 可能性がある（別々のブロックが同じ画面上の1行を共有しうる）ため「同一」とはみなさない。
+ * block_id を混ぜて必ず不一致にする＝マーカー無しブロック同士は絶対に merge/一致判定されない。
+ */
+function commandKey(e: BlockEvent): string {
+  return e.command ? `cmd:${e.command}` : `nomark:${e.block_id}`;
+}
+
 /** 末尾 n 行（空行は除く・右端の空白は落とす）。エラーの最終行付近だけ引き継ぐ用。 */
 function lastLines(s: string, n: number): string[] {
   return s
@@ -60,27 +71,33 @@ export function buildSessionSummary(
   if (events.length === 0) return "この日の記録はありません";
   const sorted = [...events].sort((a, b) => a.started_at - b.started_at);
 
+  // 失敗一覧は「失敗と解決」セクションの実体そのもの（exit_code !== 0、中断も含む）。
+  // ヘッダの件数もここから導出する＝二重計算による drift（ヘッダの数字と実際に列挙される
+  // 件数がズレる）を構造的に防ぐ。
+  const failures = sorted.filter((e) => e.exit_code !== 0);
   const abortedCount = sorted.filter((e) => e.aborted).length;
-  const okCount = sorted.filter((e) => !e.aborted && e.exit_code === 0).length;
-  const failCount = sorted.length - okCount - abortedCount;
+  const okCount = sorted.length - failures.length;
 
   const lines: string[] = [];
   lines.push(`# 作業ログ ${opts.day} — ${baseName(opts.cwd)}`);
   lines.push("");
+  const abortedNote = abortedCount > 0 ? ` (うち中断 ${abortedCount})` : "";
   lines.push(
-    `コマンド ${sorted.length} 件（成功 ${okCount} / 失敗 ${failCount} / 中断 ${abortedCount}）・` +
+    `コマンド ${sorted.length} 件（成功 ${okCount} / 失敗 ${failures.length}${abortedNote}）・` +
       `作業時間帯 ${fmtTime(sorted[0].started_at)}–${fmtTime(sorted[sorted.length - 1].ended_at)}`,
   );
   lines.push("");
   lines.push("## 実行コマンド");
   lines.push("");
 
-  // 連続する同一コマンドを run-length で圧縮。
+  // 連続する同一コマンドを run-length で圧縮（同一性は commandKey で判定＝displayCommand の
+  // 見た目が同じだけのマーカー無しブロック同士を誤って1本に merge しない）。
   const runs: { cmd: string; events: BlockEvent[] }[] = [];
   for (const e of sorted) {
     const cmd = displayCommand(e);
+    const key = commandKey(e);
     const last = runs[runs.length - 1];
-    if (last && last.cmd === cmd) last.events.push(e);
+    if (last && commandKey(last.events[0]) === key) last.events.push(e);
     else runs.push({ cmd, events: [e] });
   }
   for (const r of runs) {
@@ -96,24 +113,22 @@ export function buildSessionSummary(
   lines.push("");
   lines.push("## 失敗と解決");
   lines.push("");
-  const failures = sorted.filter((e) => e.exit_code !== 0);
   if (failures.length === 0) {
     lines.push("なし");
   } else {
     for (const f of failures) {
       const cmd = displayCommand(f);
+      const key = commandKey(f);
       lines.push(`### \`${cmd}\` (exit ${f.exit_code}${f.aborted ? "・中断" : ""})`);
       const tail = lastLines(f.output_body ?? f.text, 3);
       lines.push("```");
       lines.push(...(tail.length ? tail : ["(出力なし)"]));
       lines.push("```");
-      // 最終解決の推定: 同一コマンドがこの失敗より後に成功していれば付記する。
+      // 最終解決の推定: 同一コマンド（commandKey 一致）がこの失敗より後に成功していれば
+      // 付記する。マーカー無し同士は commandKey が block_id 込みで必ず不一致になるため、
+      // 「先頭行がたまたま同じだけの別コマンド」を誤って「解決した」と嘘をつかない。
       const fixed = sorted.find(
-        (e) =>
-          !e.aborted &&
-          e.exit_code === 0 &&
-          e.started_at >= f.ended_at &&
-          displayCommand(e) === cmd,
+        (e) => !e.aborted && e.exit_code === 0 && e.started_at >= f.ended_at && commandKey(e) === key,
       );
       if (fixed) lines.push(`→ その後成功 (${fmtTime(fixed.started_at)})`);
       lines.push("");

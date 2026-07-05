@@ -49,6 +49,24 @@ describe("トーストストア (#79)", () => {
     expect(pushToast("warn", "again")).toBe(2); // 窓外なので再度積める
   });
 
+  it("鳴り続けても窓は初回発生時刻起点で固定（re-arm しない）＝ TTL経過で必ず再表示される", () => {
+    expect(pushToast("error", "boom")).toBe(1);
+    vi.advanceTimersByTime(2000);
+    expect(pushToast("error", "boom")).toBeNull(); // まだ窓内（初回から2000ms）
+    vi.advanceTimersByTime(2001); // 初回から合計4001ms > DEDUPE_MS(4000)
+    // re-arm するバグがあると、直前の抑止(t=2000)から数えて2001ms<4000msでまだ抑止され続け、
+    // 最初の1個は10s(error)未満でまだ自動消滅もしていないので「一切再表示されない」になる。
+    expect(pushToast("error", "boom")).toBe(2);
+  });
+
+  it("dismissToast 後に同じ (kind+message) が抑止窓内に再発しても表示される（記録をクリア）", () => {
+    const id = pushToast("error", "boom")!;
+    dismissToast(id);
+    // 窓内（同時刻）でも、直前の表示が消えている以上は抑止せず新規に積む。
+    expect(pushToast("error", "boom")).not.toBeNull();
+    expect(get(toasts).length).toBe(1);
+  });
+
   it("dismissToast: id 指定で消える・不在 id は無害", () => {
     const id = pushToast("info", "x")!;
     pushToast("info", "y");

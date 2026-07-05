@@ -39,11 +39,20 @@ export function applyBgVars(c: BgConfig) {
  * 既定背景センチネルの実パスを Rust に展開させてキャッシュし、現在の config を再適用する。
  * 起動時に main.ts が一度呼ぶ（applyBgVars が以後同期に解決できるよう defaultBgPath を先に埋める）。
  * 失敗しても端末は動く（既定パス未解決なら過渡的に無背景になるだけ）。
+ *
+ * fire-and-forget（main.ts が await しない）なので、解決に時間がかかる（低速ディスク等）間に
+ * Settings を開いてライブプレビュー（config ストアを経由せず applyBgVars(draft) を直接呼ぶ）が
+ * 進んでいると、ここでの確定 config 再適用がプレビューを踏み潰してしまう。bgMedia が既に
+ * 何か（プレビュー中の画像/動画）を指しているなら「まだ何も描画されていない」ケースではない
+ * ので再適用をスキップする。何も描画されていない（起動直後・既定センチネル未解決のまま）
+ * ときだけ確定 config を適用する＝既定動画の初回表示は保ちつつプレビューは奪わない。
  */
 export async function initDefaultBg(): Promise<void> {
   try {
     defaultBgPath = await invoke<string>("get_default_bg");
-    applyBgVars(get(config));
+    if (get(bgMedia) === null) {
+      applyBgVars(get(config));
+    }
   } catch (e) {
     console.warn("[orb] default bg resolve failed", e);
   }

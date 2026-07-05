@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   leaf,
   splitPane,
@@ -102,5 +102,33 @@ describe("tree", () => {
     leafInfoMap(root, m);
     expect(m.get(1)).toEqual({ initialCmd: "claude", role: "ai" });
     expect(m.get(2)).toEqual({ initialCmd: undefined, role: undefined });
+  });
+
+  it("computeRects() warns on a corrupt tree with duplicate paneId, but keeps rendering (last-write-wins)", () => {
+    // splitPane/leaf は id を単調増加で採番するので通常は重複しないが、破損したツリーが
+    // 渡された場合に黙って片方のペインが消えたように見えるだけなのを防ぐため警告する。
+    const corrupt: PaneNode = { kind: "split", id: 100, dir: "h", ratio: 0.5, a: leaf(1), b: leaf(1) };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const m = new Map<number, Rect>();
+    computeRects(corrupt, FULL, m);
+    expect(warn).toHaveBeenCalled();
+    expect(m.size).toBe(1); // last-write-wins は維持＝挙動自体は変えない
+    warn.mockRestore();
+  });
+
+  it("leafInfoMap() warns on a corrupt tree with duplicate paneId", () => {
+    const corrupt: PaneNode = {
+      kind: "split",
+      id: 101,
+      dir: "v",
+      ratio: 0.5,
+      a: leaf(2, "claude", "ai"),
+      b: leaf(2),
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const m = new Map<number, { initialCmd?: string; role?: PaneRole }>();
+    leafInfoMap(corrupt, m);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

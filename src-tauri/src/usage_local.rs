@@ -134,7 +134,12 @@ pub(crate) fn read_tail(path: &Path, len: u64, max_bytes: u64) -> String {
     if start > 0 {
         match text.find('\n') {
             Some(idx) => text = text[idx + 1..].to_string(),
-            None => text.clear(), // max_bytes丸ごとが1行未満の異常系は諦める
+            // 改行が1個も無い＝ tail window 全体が1レコード（1行が max_bytes を超える巨大行）
+            // の断片。従来はここで丸ごと clear していたが、それだと本来パースを試みれば
+            // 拾えたかもしれない内容まで無条件で 0 件扱いにしてしまう。丸ごと捨てず、
+            // そのまま1行として下流のパースに委ねる（壊れていれば既存の「壊れた行は
+            // スキップ」経路で自然に無視されるだけで、悪化はしない）。
+            None => {}
         }
     }
     text
@@ -193,19 +198,22 @@ fn scan_all_projects(projects_root: &Path, target_cwd: &str, now_ms: i64) -> Loc
     out
 }
 
-fn claude_projects_dir() -> PathBuf {
-    crate::status::home_dir().join(".claude").join("projects")
+/// home 未解決（USERPROFILE/HOME 未設定）なら None＝プロセス cwd 起点の意図しない相対パス
+/// を読みに行かない（status.rs の home_dir_checked と同じ方針）。
+fn claude_projects_dir() -> Option<PathBuf> {
+    crate::status::home_dir_checked().map(|h| h.join(".claude").join("projects"))
 }
 
 /// #52: cwd 配下（＝その案件で作業した全セッション、起動時cwdに関わらず）が直近24hに
 /// 消費したローカル token 量を集計する。cwd 未指定・読み取り失敗は全て黙って全 0 を返す。
 pub fn fetch_local_usage(cwd: Option<String>) -> LocalUsage {
     let Some(cwd) = cwd.filter(|c| !c.is_empty()) else { return LocalUsage::default() };
+    let Some(projects_root) = claude_projects_dir() else { return LocalUsage::default() };
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
-    scan_all_projects(&claude_projects_dir(), &cwd, now_ms)
+    scan_all_projects(&projects_root, &cwd, now_ms)
 }
 
 #[cfg(test)]
@@ -343,6 +351,26 @@ mod tests {
         assert_eq!(got.last_24h_tokens, 60); // in_hour + in_24h_only（too_old は mtime でスキップ）
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Bug: tail window に改行が1個も無い（1行が max_bytes を超える巨大行の断片）場合、
+    /// 従来は text.clear() で無条件に空文字列にしていた。丸ごと捨てず、断片をそのまま
+    /// 返す（空にはしない）ことを確認する。
+    #[test]
+    fn read_tail_does_not_discard_content_when_the_tail_window_has_no_newline() {
+        let dir = std::env::temp_dir().join("orb-usage-local-test-read-tail-no-newline");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("huge.jsonl");
+        // 改行を一切含まない巨大な1行（末尾に改行なし）＝ tail window 全体が改行ゼロになる。
+        let content = "x".repeat(2000);
+        std::fs::write(&path, &content).unwrap();
+        let len = content.len() as u64;
+        let max_bytes = 500; // ファイル全体よりずっと小さい窓 → start > 0 かつ窓内に改行皆無
+        let tail = read_tail(&path, len, max_bytes);
+        assert!(!tail.is_empty());
+        assert_eq!(tail.len(), max_bytes as usize);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

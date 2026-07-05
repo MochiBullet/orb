@@ -41,7 +41,7 @@ describe("buildSessionSummary", () => {
     expect(buildSessionSummary([], OPTS)).toBe("この日の記録はありません");
   });
 
-  it("見出し・サマリ行（件数内訳と時間帯）を組む", () => {
+  it("見出し・サマリ行（件数内訳と時間帯）を組む。失敗件数は「失敗と解決」に列挙される件数と一致する", () => {
     const events = [
       ev({ command: "pnpm vitest run", started: [9, 5] }),
       ev({ command: "cargo build", exit_code: 101, started: [10, 0] }),
@@ -49,8 +49,12 @@ describe("buildSessionSummary", () => {
     ];
     const md = buildSessionSummary(events, OPTS);
     expect(md).toContain("# 作業ログ 2026-07-03 — orb");
-    expect(md).toContain("コマンド 3 件（成功 1 / 失敗 1 / 中断 1）");
+    // 失敗 2 = cargo build(101) + cargo test(中断,-1)。「失敗と解決」に並ぶ ### 見出しも2個で一致する
+    // （旧: 中断を除いた 1 のみを表示し、実際に列挙される件数(2件)とズレていた）。
+    expect(md).toContain("コマンド 3 件（成功 1 / 失敗 2 (うち中断 1)）");
     expect(md).toContain("作業時間帯 09:05–11:42");
+    const failureHeadings = md.split("\n").filter((l) => l.startsWith("### `"));
+    expect(failureHeadings).toHaveLength(2);
   });
 
   it("新しい順で渡しても時系列（古い順）に並べ直す", () => {
@@ -121,6 +125,24 @@ describe("buildSessionSummary", () => {
     const md = buildSessionSummary(events, OPTS);
     expect(md).toContain("### `npm run build` (exit -1・中断)");
     expect(md).toContain("^C");
+    expect(md).not.toContain("→ その後成功");
+  });
+
+  it("マーカー無し(command:null)の別ブロックは先頭行が同じでも同一コマンド扱いしない（誤merge/誤『その後成功』を防ぐ）", () => {
+    const events = [
+      ev({ command: null, exit_code: 1, text: "$ some-tool\nfailed: xyz", started: [9, 0] }),
+      ev({
+        command: null,
+        exit_code: 0,
+        text: "$ some-tool\nunrelated success, just shares the leading line",
+        started: [9, 10],
+      }),
+    ];
+    const md = buildSessionSummary(events, OPTS);
+    // 実行コマンド一覧: 先頭行が同じでも別ブロックとして2行のまま（×2 に圧縮されない）。
+    const cmdLines = md.split("\n").filter((l) => l.startsWith("- ") && l.includes("`$ some-tool`"));
+    expect(cmdLines).toHaveLength(2);
+    // 失敗と解決: 先頭行が同じだけの無関係な後続ブロックを「解決した」と嘘をつかない。
     expect(md).not.toContain("→ その後成功");
   });
 

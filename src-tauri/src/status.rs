@@ -25,8 +25,26 @@ pub(crate) fn home_dir() -> PathBuf {
     std::env::var_os(var).map(PathBuf::from).unwrap_or_default()
 }
 
-fn claude_dir() -> PathBuf {
-    home_dir().join(".claude")
+/// home が空（USERPROFILE/HOME 未設定で `home_dir()` が空 PathBuf）なら None にするガード
+/// （injectable な内側の関数にしてテスト可能にする。config.rs の `config_dir_with_home` と
+/// 同じ考え方）。空のまま `.join(".claude"...)` すると読み取り対象が「プロセス cwd 起点の
+/// 相対パス」に化けてしまい、意図しないディレクトリを読みに行くリスクがある。ここは
+/// config.rs と違って書き込み先ではなく既存ファイルの読み取りのみなので、フォールバック先
+/// を用意せず素直に「読めない」（None）扱いに倒す。
+fn home_dir_checked_from(home: PathBuf) -> Option<PathBuf> {
+    if home.as_os_str().is_empty() {
+        None
+    } else {
+        Some(home)
+    }
+}
+
+pub(crate) fn home_dir_checked() -> Option<PathBuf> {
+    home_dir_checked_from(home_dir())
+}
+
+fn claude_dir() -> Option<PathBuf> {
+    home_dir_checked().map(|h| h.join(".claude"))
 }
 
 /// 表示用の短縮名（cloudflare-* -> cf-*, context7 -> ctx7）。
@@ -43,7 +61,8 @@ fn short_mcp(name: &str) -> String {
 /// user スコープの MCP サーバ名を ~/.claude.json の mcpServers から読む（実 config 由来）。
 /// 44KB 程度のファイルだが 30s 間隔の取得なので毎回読んで問題ない。
 fn user_mcp() -> Vec<String> {
-    let path = home_dir().join(".claude.json");
+    let Some(home) = home_dir_checked() else { return Vec::new() };
+    let path = home.join(".claude.json");
     if let Ok(text) = std::fs::read_to_string(&path) {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
             if let Some(servers) = json["mcpServers"].as_object() {
@@ -60,10 +79,12 @@ pub fn fetch_status(cwd: Option<String>) -> ClaudeStatus {
     let mut model = String::new();
     let mut effort = String::new();
 
-    if let Ok(text) = std::fs::read_to_string(claude_dir().join("settings.json")) {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-            model = json["model"].as_str().unwrap_or("").to_string();
-            effort = json["effortLevel"].as_str().unwrap_or("").to_string();
+    if let Some(dir) = claude_dir() {
+        if let Ok(text) = std::fs::read_to_string(dir.join("settings.json")) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                model = json["model"].as_str().unwrap_or("").to_string();
+                effort = json["effortLevel"].as_str().unwrap_or("").to_string();
+            }
         }
     }
 
@@ -221,6 +242,18 @@ fn parse_mcp_health(raw: &str) -> Vec<McpHealth> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #フォロー: USERPROFILE/HOME 未設定（home_dir() が空 PathBuf）を模した注入テスト。
+    /// config.rs の `config_dir_with_home_falls_back_to_absolute_path_when_home_is_empty` と
+    /// 同じ形で、env を書き換えずロジックだけを検証する。
+    #[test]
+    fn home_dir_checked_from_is_none_for_empty_home() {
+        assert_eq!(home_dir_checked_from(PathBuf::new()), None);
+        assert_eq!(
+            home_dir_checked_from(PathBuf::from("C:\\Users\\hiyok")),
+            Some(PathBuf::from("C:\\Users\\hiyok"))
+        );
+    }
 
     #[test]
     fn parses_plain_url_and_ansi_lines() {

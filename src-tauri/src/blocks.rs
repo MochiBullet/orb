@@ -91,6 +91,13 @@ fn day_file(dir: &Path, day: &str) -> PathBuf {
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 /// 1 レコードを JSONL へ追記する（dir を引数に取り、テストが temp を差し込めるようにする）。
+///
+/// 既知の割り切り: 書き込みバイト数に上限は無い（MAX_DAY_FILE_BYTES は読み取り側の tail cap
+/// のみで、追記自体は無制限）。暴走ループが起きれば 1 日分の JSONL が際限なく肥大しうるが、
+/// 1 ブロックの text は最大 8000 文字（capText, blocks-log.ts）＝現実的な操作回数では
+/// この上限に遠く及ばない規模であり、書き込み側にもローテーション/切り詰めを足すと
+/// 「追記順=時系列」という読み取り側の前提が崩れやすくなる。歯止めは追加せず、この
+/// 割り切りとして明文化するに留める。
 fn write_event_to(dir: &Path, day: &str, event: &BlockEvent) -> Result<()> {
     std::fs::create_dir_all(dir)?;
     // serde_json::to_string は 1 行 JSON（内部の改行は \n へエスケープ）＝JSONL 不変条件を保つ。
@@ -417,6 +424,11 @@ fn save_handoff_to(cwd: &str, day: &str, content: &str) -> Result<String> {
     }
     if !is_valid_day(day) {
         return Err(AppError::Config(format!("handoff: 不正な day: {day}")));
+    }
+    // フロントは信頼しているが、存在しない cwd に書こうとして分かりにくい I/O エラーに
+    // なるのを避けるための軽い事前チェック。
+    if !Path::new(cwd).is_dir() {
+        return Err(AppError::Config(format!("handoff: cwd が存在しません: {cwd}")));
     }
     let path = Path::new(cwd).join(format!("HANDOFF-{day}.md"));
     std::fs::write(&path, content)?;
@@ -797,6 +809,15 @@ mod tests {
         assert!(save_handoff_to("", "2026-07-03", "x").is_err());
         assert!(save_handoff_to("   ", "2026-07-03", "x").is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 存在しない cwd への書き込みは、分かりにくい I/O エラーではなく明示的な Err にする。
+    #[test]
+    fn handoff_rejects_nonexistent_cwd_dir() {
+        let dir = temp("handoff-nodir");
+        let _ = std::fs::remove_dir_all(&dir); // 意図的に作らない＝存在しないディレクトリ
+        let cwd = dir.to_string_lossy().into_owned();
+        assert!(save_handoff_to(&cwd, "2026-07-03", "x").is_err());
     }
 
     #[test]

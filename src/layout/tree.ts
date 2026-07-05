@@ -1,3 +1,5 @@
+import { logWarn } from "../core/log";
+
 export type PaneRole = "shell" | "ai";
 
 /** ワークスペース内の矩形（%単位）。 */
@@ -81,9 +83,20 @@ export function leafIds(node: PaneNode | null): number[] {
   return [...leafIds(node.a), ...leafIds(node.b)];
 }
 
+/** paneId が既に out に入っているか（重複＝ツリー破損）を軽く警告する。id は本来ツリー内で
+ *  一意（splitPane/leaf が単調増加で採番）なので、ここに来る＝ツリーが壊れている。ペインが
+ *  1枚黙って描画されず消えたように見えるだけで気づけないよりは、開発時に気づけた方がよい
+ *  （last-write-wins の挙動自体はそのまま＝本番の見た目・機能は変えない最小の追加）。 */
+function warnIfDuplicatePaneId(out: Map<number, unknown>, paneId: number, where: string): void {
+  if (out.has(paneId)) {
+    logWarn(`layout/tree: duplicate paneId ${paneId} in ${where} (last-write-wins, tree may be corrupt)`);
+  }
+}
+
 /** 各 leaf の矩形(%)を算出。 */
 export function computeRects(node: PaneNode, rect: Rect, out: Map<number, Rect>): void {
   if (node.kind === "leaf") {
+    warnIfDuplicatePaneId(out, node.paneId, "computeRects");
     out.set(node.paneId, rect);
     return;
   }
@@ -121,6 +134,7 @@ export function leafInfoMap(
   out: Map<number, { initialCmd?: string; role?: PaneRole }>,
 ): void {
   if (node.kind === "leaf") {
+    warnIfDuplicatePaneId(out, node.paneId, "leafInfoMap");
     out.set(node.paneId, { initialCmd: node.initialCmd, role: node.role });
     return;
   }
