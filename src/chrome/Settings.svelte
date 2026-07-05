@@ -4,6 +4,7 @@
   import { applyBgVars } from "../core/theme";
   import { BG_ZOOM_MAX, DEFAULT_BG } from "../core/bg";
   import { hexToRgbTriplet } from "../core/color";
+  import { pushToast } from "../store/toasts";
   import { open } from "@tauri-apps/plugin-dialog";
 
   let { onClose }: { onClose: () => void } = $props();
@@ -74,6 +75,11 @@
       await saveConfig(draft);
       config.set({ ...draft }); // theme.ts が購読して確定適用
       onClose();
+    } catch (e) {
+      // #79: 保存失敗（config 書込不可等）を握り潰さない。onClose せずパネルを開いたまま、
+      // finally で再有効化＝ユーザーが再試行できる。
+      const msg = e instanceof Error ? e.message : String(e);
+      pushToast("error", "設定の保存に失敗しました: " + msg.slice(0, 120));
     } finally {
       saving = false;
     }

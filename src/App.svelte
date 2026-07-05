@@ -4,9 +4,19 @@
   import TitleBar from "./chrome/TitleBar.svelte";
   import TabBar from "./chrome/TabBar.svelte";
   import Sidebar from "./chrome/Sidebar.svelte";
+  import Toasts from "./chrome/Toasts.svelte";
   import Workspace from "./layout/Workspace.svelte";
   import { sidebarSide, saveScrollbacks } from "./store/appStore";
   import { bgMedia } from "./core/theme";
+  import { pushToast } from "./store/toasts";
+
+  // #79（元凶バグの根治）: 背景メディアの読込失敗（移動/破損/未対応 codec）。convertFileSrc は
+  // 存在チェックしない純関数なので、壊れた src は黙って黒画面になる（暗幕だけが残る）。
+  // bgMedia を消して壊れた要素＋暗幕を畳み、一度だけ警告して設定へ誘導する。
+  function onBgError() {
+    bgMedia.set(null);
+    pushToast("warn", "背景メディアを読み込めませんでした（設定で選び直してください）");
+  }
 
   onMount(() => {
     // アプリ終了/リロード時に各ペインの画面内容を保存（再起動で過去ログとして復元）。
@@ -32,14 +42,17 @@
     {#if $bgMedia}
       {#if $bgMedia.video}
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video class="bg-media" src={$bgMedia.src} autoplay muted loop playsinline></video>
+        <video class="bg-media" src={$bgMedia.src} autoplay muted loop playsinline onerror={onBgError}
+        ></video>
       {:else}
-        <img class="bg-media" src={$bgMedia.src} alt="" />
+        <img class="bg-media" src={$bgMedia.src} alt="" onerror={onBgError} />
       {/if}
     {/if}
     <div class="bg-dim"></div>
   </div>
   <div class="stack">
+    <!-- #79: 全 chrome/ペインより前面のトースト層（.stack 内なので背景暗幕より上）。 -->
+    <Toasts />
     <TitleBar />
     <TabBar />
     <div class="body" class:reverse={$sidebarSide === "left"}>

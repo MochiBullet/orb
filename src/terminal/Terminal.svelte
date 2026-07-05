@@ -44,6 +44,7 @@
   } from "../store/appStore";
   import { classifyIdle, shouldTrackAgentStatus } from "../core/agent-status";
   import { disposePaneQueue } from "../store/promptQueue";
+  import { pushToast } from "../store/toasts";
   import { shouldNotifyForPane } from "./blocks/notify";
   import { leafIds } from "../layout/tree";
   import { config } from "../core/config";
@@ -194,7 +195,11 @@
         // AI ペインなら claude の @添付形、通常シェルは素のパス。Enter は送らない。
         if (path) term?.paste(formatImagePath(path, paneId === get(aiPane)) + " ");
       })
-      .catch((err) => logError(`pane ${paneId}: image paste failed: ${String(err)}`));
+      .catch((err) => {
+        // #79: 画像貼り付けはユーザー起点の操作＝失敗が無反応だと「効かない」と誤解される。
+        logError(`pane ${paneId}: image paste failed: ${String(err)}`);
+        pushToast("error", "画像を貼り付けられませんでした");
+      });
   }
 
   function focusThis() {

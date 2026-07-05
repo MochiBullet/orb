@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { logError } from "./log";
+import { pushToast } from "../store/toasts";
 
 /**
  * #31 ブロックイベント。Rust の `BlockEvent`（blocks.rs）と 1:1・snake_case で送受する。
@@ -131,12 +132,21 @@ export function buildBlockEvent(inp: BlockInput): BlockEvent {
   };
 }
 
+// #79: ブロックログ書込不可（config dir 不可）は Block History/検索/session-summary を
+// 黙って永久空にする silent path。端末動作はブロックしないが、一度だけは可視化する
+// （毎コマンド出すとスパムなのでセッション内 1 回に絞る）。
+let blockWriteWarned = false;
+
 /** 1 ブロックを耐久ログへ追記（#31）。失敗は握り潰す＝端末動作をブロックしない（#40 方式）。 */
 export function logBlockEvent(inp: BlockInput): void {
   const event = buildBlockEvent(inp);
-  void invoke("append_block_event", { day: localDay(), event }).catch((e) =>
-    logError(`block log append failed (pane ${inp.paneId}): ${String(e)}`),
-  );
+  void invoke("append_block_event", { day: localDay(), event }).catch((e) => {
+    logError(`block log append failed (pane ${inp.paneId}): ${String(e)}`);
+    if (!blockWriteWarned) {
+      blockWriteWarned = true;
+      pushToast("warn", "ブロック履歴を保存できません（履歴・検索が残りません）");
+    }
+  });
 }
 
 /** 指定日のブロックログを読み戻す（履歴オーバーレイの再描画用）。失敗時は空配列。 */

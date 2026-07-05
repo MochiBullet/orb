@@ -5,10 +5,14 @@ import "./styles/app.css";
 import App from "./App.svelte";
 import { loadConfig } from "./core/config";
 import { initDefaultBg } from "./core/theme";
+import { initGlobalErrorHandlers } from "./core/errors";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 
 // top-level await はビルド target(es2020)で不可なので即時 async 関数に包む。
 async function boot() {
+  // #79: 未捕捉 error / unhandledrejection をトースト可視化（最優先で登録＝以後の失敗を拾う）。
+  initGlobalErrorHandlers();
+
   // HMR / WebView リロード時、前マウントが残した PTY を破棄（孤児 reader/pwsh を防ぐ）。
   await invoke("close_all_ptys").catch(() => {});
 
