@@ -360,6 +360,12 @@ export class CommandBlocks {
     return !this.finished && (this.outputStart != null || this.pendingCommand != null);
   }
 
+  /** #77 FN-4b: 今 alt-screen（vim/lazygit 等フルスクリーン TUI）中か。broadcast 複製が
+   *  このペインへ生バイトを流して画面を壊すのを避けるゲートに使う（自分の入力には使わない）。 */
+  isAltScreen(): boolean {
+    return this.altScreen;
+  }
+
   /** #34: 装飾ツールバー（→AI/🔧fix）が使う出力本文を確定時点で cap して取り出す。
    *  クリック時に this.outputStart を読むと「その時の（＝別ブロックの）」境界を読んで
    *  しまうため、ブロック確定のこの瞬間に値としてクロージャへ渡す。 */

@@ -148,9 +148,16 @@ export function clearPane(paneId: number) {
 }
 
 /** ペインごとの入力シンク（paneId → 入力バイトを端末の入力経路へ）。Terminal は
- *  spawn 前でも登録し、PTY 未起動の間はバッファへ積む＝起動直後の打鍵を落とさない。 */
-const paneInputRegistry = new Map<number, (bytes: Uint8Array) => void>();
-export function registerPaneInput(paneId: number, fn: (bytes: Uint8Array) => void) {
+ *  spawn 前でも登録し、PTY 未起動の間はバッファへ積む＝起動直後の打鍵を落とさない。
+ *  第2引数 isBroadcastRelay: true は「他ペインからのブロードキャスト複製として届いた」印。
+ *  受け側の enqueueInput はこれを見て broadcast を再判定しない（#77 FN-2、全ペインが
+ *  互いに複製し合う無限ループ防止）。省略時 undefined は「発信元自身の入力」として扱われ、
+ *  従来どおり broadcast 判定を通る（sendInputToFocusedPane の既存呼び出しの挙動を変えない）。 */
+const paneInputRegistry = new Map<number, (bytes: Uint8Array, isBroadcastRelay?: boolean) => void>();
+export function registerPaneInput(
+  paneId: number,
+  fn: (bytes: Uint8Array, isBroadcastRelay?: boolean) => void,
+) {
   paneInputRegistry.set(paneId, fn);
 }
 export function unregisterPaneInput(paneId: number) {
@@ -167,6 +174,46 @@ export function sendInputToFocusedPane(bytes: Uint8Array, strict = false): boole
   if (!fn) return false;
   fn(bytes);
   return true;
+}
+
+/** #77 FN-2: 指定ペイン（フォーカス有無を問わず任意）の入力経路（#39 バッファ込み）へ
+ *  バイト列を届ける。ブロードキャスト複製の配送に使う＝isBroadcastRelay=true を伝えるので
+ *  受け側は broadcast を再判定しない（sendInputToFocusedPane と違い broadcast 発火はしない）。
+ *  戻り値は届け先が登録済みだったか（未登録＝そのペインの Terminal がまだ mount されていない・
+ *  呼び出し側はこれを見てログだけ出す＝黙ってロストさせない）。 */
+export function sendInputToPane(paneId: number, bytes: Uint8Array): boolean {
+  const fn = paneInputRegistry.get(paneId);
+  if (!fn) return false;
+  fn(bytes, true);
+  return true;
+}
+
+/** #77 FN-4b: ペインごとの alt-screen（vim/lazygit 等フルスクリーン TUI）判定シンク。
+ *  ブロードキャスト複製を届ける前に「相手ペインが今 alt-screen か」を見るためだけに使う。
+ *  フォーカス中ペイン自身の入力には一切影響しない（このガードは複製の配送側だけに掛かる）。 */
+const paneAltScreenRegistry = new Map<number, () => boolean>();
+export function registerPaneAltScreen(paneId: number, fn: () => boolean) {
+  paneAltScreenRegistry.set(paneId, fn);
+}
+export function unregisterPaneAltScreen(paneId: number) {
+  paneAltScreenRegistry.delete(paneId);
+}
+/** 指定ペインが今 alt-screen 中か。未登録（Terminal 未 mount 等）は false 扱い
+ *  ＝分からない時は配送を止めない（#39 バッファ保護を alt-screen 判定の欠落で壊さない）。 */
+export function isPaneInAltScreen(paneId: number): boolean {
+  return paneAltScreenRegistry.get(paneId)?.() ?? false;
+}
+
+/** #77 FN-2/FN-4b: ブロードキャストの配送先を絞り込む純関数。発信元自身（selfId）は
+ *  常に対象に残す（alt-screen 中でも自分の入力を捨てる理由はない）。他ペインは
+ *  isAltScreen(id) が true なら除外する（フルスクリーン TUI バッファへの生バイト複製で
+ *  画面が壊れるのを避ける）。Terminal.svelte から isPaneInAltScreen を渡して使う。 */
+export function broadcastTargets(
+  leafIds: number[],
+  selfId: number,
+  isAltScreen: (id: number) => boolean,
+): number[] {
+  return leafIds.filter((id) => id === selfId || !isAltScreen(id));
 }
 
 

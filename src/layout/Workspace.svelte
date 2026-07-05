@@ -429,11 +429,15 @@
     const sib = siblingFirstLeaf(root, paneId);
     const next = closePane(root, paneId);
     layout.set(next); // Terminal が unmount され onDestroy で PTY を kill
-    if (sib != null) {
-      focusedPane.set(sib);
-    } else {
-      const remaining = leafIds(next);
-      if (remaining.length) focusedPane.set(remaining[0]);
+    // #77 FN-3: 閉じたペインがフォーカス中だった時だけフォーカスを再割当する。背景（非フォーカス）
+    // ペインの✕を押しただけで、今タイプ中の別ペインのフォーカスを奪ってはいけない。
+    if (paneId === get(focusedPane)) {
+      if (sib != null) {
+        focusedPane.set(sib);
+      } else {
+        const remaining = leafIds(next);
+        if (remaining.length) focusedPane.set(remaining[0]);
+      }
     }
   }
 

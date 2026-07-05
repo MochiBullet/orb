@@ -7,6 +7,7 @@ import {
   nextPaneId,
   tabWelcome,
   primeScrollbackRestore,
+  broadcast,
 } from "../store/appStore";
 import { leaf, leafIds, type PaneNode } from "./tree";
 import { findInfoTab, type TabKind } from "./tabs-logic";
@@ -44,6 +45,11 @@ function loadTab(t: Tab) {
   layout.set(t.layout);
   focusedPane.set(t.focused);
   aiPane.set(t.ai);
+  // #77 FN-4a: broadcast はタブに紐付かないグローバル state。ON のままタブを跨ぐと、
+  // 切替先タブの見えていないペイン（vim/lazygit 等）へ気づかぬまま複製され続け、唯一の
+  // 手掛かりが赤枠だけという事故りやすい挙動になる。タブが変わるたび（=loadTab のたび）
+  // 必ず OFF へ戻す＝broadcast は「今見えているタブの中だけ」の一時状態に限定する。
+  broadcast.set(false);
 }
 
 // ===== セッション永続化は #48 で廃止 =====

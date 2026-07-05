@@ -1,6 +1,20 @@
 import { describe, it, expect } from "vitest";
 import { get } from "svelte/store";
-import { cwd, focusedPane, setPaneCwd, clearPaneCwd, paneModelEffort, setPaneModelEffort } from "./appStore";
+import {
+  cwd,
+  focusedPane,
+  setPaneCwd,
+  clearPaneCwd,
+  paneModelEffort,
+  setPaneModelEffort,
+  broadcastTargets,
+  registerPaneInput,
+  unregisterPaneInput,
+  sendInputToPane,
+  registerPaneAltScreen,
+  unregisterPaneAltScreen,
+  isPaneInAltScreen,
+} from "./appStore";
 
 describe("cwd レジストリ (#45: タブ切替でサイドバーの cwd が旧ペインのまま残らない)", () => {
   it("非フォーカスペインへの setPaneCwd はグローバル cwd を変えず、フォーカス切替で反映される", () => {
@@ -72,5 +86,60 @@ describe("paneModelEffort（案件ランチャーの一括起動でペインご�
 
   it("一度も設定していないペインは undefined（未知＝上書き無し）", () => {
     expect(get(paneModelEffort).get(9999)).toBeUndefined();
+  });
+});
+
+describe("broadcastTargets (#77 FN-2/FN-4b: ブロードキャスト配送先の絞り込み)", () => {
+  it("alt-screen 中でない相手は全員が対象", () => {
+    expect(broadcastTargets([1, 2, 3], 1, () => false)).toEqual([1, 2, 3]);
+  });
+
+  it("alt-screen 中の他ペインは配送対象から除外される（vim/lazygit バッファ破壊防止）", () => {
+    const alt = new Set([2]);
+    expect(broadcastTargets([1, 2, 3], 1, (id) => alt.has(id))).toEqual([1, 3]);
+  });
+
+  it("発信元自身は alt-screen 中でも除外されない（自分の入力は落とさない）", () => {
+    const alt = new Set([1]);
+    expect(broadcastTargets([1, 2, 3], 1, (id) => alt.has(id))).toEqual([1, 2, 3]);
+  });
+
+  it("全員 alt-screen 中でも発信元だけは残る", () => {
+    expect(broadcastTargets([1, 2, 3], 2, () => true)).toEqual([2]);
+  });
+});
+
+describe("sendInputToPane / paneInputRegistry (#77 FN-2: broadcast は per-pane 入力経路を通す)", () => {
+  it("登録済みペインへ isBroadcastRelay=true 付きで届く（受け側が再 broadcast しない印）", () => {
+    const received: Array<{ bytes: Uint8Array; relay?: boolean }> = [];
+    registerPaneInput(301, (bytes, relay) => received.push({ bytes, relay }));
+    try {
+      const ok = sendInputToPane(301, new Uint8Array([1, 2, 3]));
+      expect(ok).toBe(true);
+      expect(received).toHaveLength(1);
+      expect(received[0].relay).toBe(true);
+      expect(Array.from(received[0].bytes)).toEqual([1, 2, 3]);
+    } finally {
+      unregisterPaneInput(301);
+    }
+  });
+
+  it("未登録ペイン（Terminal 未 mount）へは false を返す（呼び出し側がログを出せる＝黙ってロストしない）", () => {
+    expect(sendInputToPane(99999, new Uint8Array([1]))).toBe(false);
+  });
+});
+
+describe("isPaneInAltScreen (#77 FN-4b)", () => {
+  it("registerPaneAltScreen で登録した判定関数の戻り値を返す", () => {
+    registerPaneAltScreen(302, () => true);
+    try {
+      expect(isPaneInAltScreen(302)).toBe(true);
+    } finally {
+      unregisterPaneAltScreen(302);
+    }
+  });
+
+  it("未登録ペインは false 扱い（分からない時は配送を止めない）", () => {
+    expect(isPaneInAltScreen(88888)).toBe(false);
   });
 });

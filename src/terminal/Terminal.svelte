@@ -31,6 +31,11 @@
     unregisterTermWrite,
     registerPaneInput,
     unregisterPaneInput,
+    registerPaneAltScreen,
+    unregisterPaneAltScreen,
+    sendInputToPane,
+    broadcastTargets,
+    isPaneInAltScreen,
     saveOneScrollback,
     paneStatus,
     setPaneStatus,
@@ -82,25 +87,36 @@
   let inputBuffer: Array<{ bytes: Uint8Array; binary: boolean }> = [];
   let ptyReady = false;
 
-  // 入力バイトを PTY へ即書き込む。binary 以外かつ broadcast 中は全ペインへ複製（通常タイプと同経路）。
+  // PTY へ生で即書き込むだけの下位プリミティブ（バッファリング・broadcast 判定は持たない）。
+  // #39 バッファのフラッシュ（startPty）でも直接使う。
   function writeInputNow(bytes: Uint8Array, binary: boolean) {
-    if (!binary && get(broadcast)) {
-      // ブロードキャスト中はフォーカスペインの入力を全ペインへ複製。
-      for (const id of leafIds(get(layout))) {
-        void invoke("write_pty", { paneId: id, data: Array.from(bytes) }).catch((e) =>
-          logError(`pane ${id}: broadcast write failed: ${String(e)}`),
-        );
-      }
-    } else {
-      pty?.write(bytes)?.catch((e) =>
-        logError(`pane ${paneId}: ${binary ? "binary" : "input"} write failed: ${String(e)}`),
-      );
-    }
+    pty?.write(bytes)?.catch((e) =>
+      logError(`pane ${paneId}: ${binary ? "binary" : "input"} write failed: ${String(e)}`),
+    );
   }
   // spawn 前は溜め、spawn 後は即書き込む。xterm・外部の入力経路がここに集約される。
-  function enqueueInput(bytes: Uint8Array, binary = false) {
+  // binary 以外かつ broadcast 中は全ペインへ複製（通常タイプと同経路）。
+  // isBroadcastRelay: true は「他ペインからのブロードキャスト複製として自分に届いた」呼び出し
+  // （paneInputRegistry 経由）＝ここでは broadcast を再判定しない。しないと全ペインが互いに
+  // 複製し合って無限ループ・多重書き込みになる（#77 FN-2）。
+  function enqueueInput(bytes: Uint8Array, binary = false, isBroadcastRelay = false) {
     if (!ptyReady) {
       inputBuffer.push({ bytes, binary });
+      return;
+    }
+    if (!isBroadcastRelay && !binary && get(broadcast)) {
+      // #77 FN-2: 以前は invoke("write_pty") を直書きしており、#39 の per-pane 入力バッファを
+      // 迂回していた。分割直後(~1.5s)で PTY が未 spawn のペインは PaneNotFound → catch ログの
+      // みでバイトが永久ロストしていた。各ペイン自身の入力経路（sendInputToPane→
+      // enqueueInput）へ渡し、未 spawn ならそのペインの #39 バッファに積んでもらう。
+      const targets = broadcastTargets(leafIds(get(layout)), paneId, isPaneInAltScreen); // #77 FN-4b: alt-screen ペインは除外
+      for (const id of targets) {
+        if (id === paneId) {
+          writeInputNow(bytes, binary); // 自分自身はレジストリを介さず直接（再入・無限ループ防止）
+        } else if (!sendInputToPane(id, bytes)) {
+          logError(`pane ${id}: broadcast target not registered, dropped`);
+        }
+      }
       return;
     }
     writeInputNow(bytes, binary);
@@ -577,7 +593,9 @@
       enqueueInput(bytes, true);
     });
     // 端末未フォーカス時の外部入力ソースからの打鍵をこのペインの入力経路へ流せるよう登録（#39）。
-    registerPaneInput(paneId, (bytes) => enqueueInput(bytes));
+    // isBroadcastRelay をそのまま enqueueInput へ橋渡し＝broadcast 複製（sendInputToPane）で
+    // 呼ばれた時は再判定させない（#77 FN-2）。
+    registerPaneInput(paneId, (bytes, isBroadcastRelay) => enqueueInput(bytes, false, isBroadcastRelay));
     // オンデマンドの前回セッション復元（パレット）で、退避した画面内容をこの端末へ書き戻す用。
     registerTermWrite(paneId, (text) => term?.write(text));
 
@@ -642,6 +660,8 @@
     }
 
     blocks = new CommandBlocks(term, paneId, oscNonce);
+    // #77 FN-4b: broadcast の配送側がこのペインの alt-screen 状態を覗けるよう登録。
+    registerPaneAltScreen(paneId, () => blocks?.isAltScreen() ?? false);
 
     // 合字 $effect の初回登録を解禁（term.open 済みでないと joiner を張れない）。
     termReady = true;
@@ -749,6 +769,7 @@
     unregisterTermClear(paneId);
     unregisterTermWrite(paneId);
     unregisterPaneInput(paneId);
+    unregisterPaneAltScreen(paneId); // #77 FN-4b
     inputBuffer = [];
     container?.removeEventListener("keydown", onCopyPaste, true);
     container?.removeEventListener("wheel", onWheel, { capture: true });

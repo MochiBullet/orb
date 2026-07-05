@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { get } from "svelte/store";
-import { tabs, activeTabId, ensureFirstTab } from "./tabs";
+import { tabs, activeTabId, ensureFirstTab, newTab, switchTab } from "./tabs";
 import { tabKind } from "./tabs-logic";
-import { focusedPane, aiPane } from "../store/appStore";
+import { focusedPane, aiPane, broadcast } from "../store/appStore";
 import { config } from "../core/config";
 
 /** node 環境（vitest 既定）には localStorage が無いのでスタブする。
@@ -90,5 +90,32 @@ describe("ensureFirstTab (#48: タブ構造は復元せず常に fresh 構成)",
     const before = get(tabs);
     ensureFirstTab();
     expect(get(tabs)).toBe(before);
+  });
+});
+
+describe("#77 FN-4a: broadcast はタブ跨ぎで持続しない", () => {
+  beforeEach(() => {
+    stubLocalStorage();
+    tabs.set([]);
+    config.update((c) => ({ ...c, show_info_on_startup: false }));
+  });
+
+  it("switchTab で別タブへ移ると broadcast は自動で OFF になる", () => {
+    ensureFirstTab();
+    const [aiTab, shellTab] = get(tabs);
+    expect(get(activeTabId)).toBe(aiTab.id);
+
+    broadcast.set(true); // AI タブで ON にしたまま…
+    switchTab(shellTab.id); // …shell タブへ切替
+
+    // 赤枠だけが手掛かりの「気づかぬ複製」を防ぐため、タブが変わったら必ず OFF。
+    expect(get(broadcast)).toBe(false);
+  });
+
+  it("newTab で新規タブを開いた時も broadcast は OFF へリセットされる", () => {
+    ensureFirstTab();
+    broadcast.set(true);
+    newTab();
+    expect(get(broadcast)).toBe(false);
   });
 });
