@@ -92,7 +92,7 @@ export function formatPastFailureContext(current: BlockAiContext, match: PastMat
       `その後 ${fmtWhen(r.ended_at)} に成功しています。何がどう変わって直ったか、今回のログと比較して教えて:`,
       "--- 過去の成功 ---",
       `$ ${r.command ?? "(コマンド不明)"}`,
-      r.output_body || r.text || "(出力なし)",
+      pastOutputDisplay(r),
     );
   } else {
     lines.push("", "この後の成功記録は見当たりません（まだ解決されていない可能性）。原因を考えて:");

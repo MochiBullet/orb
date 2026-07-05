@@ -153,6 +153,26 @@ describe("formatPastFailureContext（過去ログの複利: このエラー前�
     expect(s).toContain("(出力なし)");
     expect(s.split("\n").filter((l) => l === "❯ git push").length).toBe(0);
   });
+
+  it("resolvedBy（過去の成功）側も同じ判定を使う（failure側だけ直して成功側を直し忘れる回帰の防止）", () => {
+    const match: PastMatchLike = {
+      failure: {
+        event: { ended_at: 1700000000000, exit_code: 1, command: "npm run build", output_body: "error x", text: "" },
+      },
+      resolvedBy: {
+        event: {
+          ended_at: 1700000100000,
+          exit_code: 0,
+          command: "npm run build",
+          output_body: "",
+          text: "❯ npm run build\n",
+        },
+      },
+    };
+    const s = formatPastFailureContext(structured, match);
+    expect(s).toContain("(出力なし)");
+    expect(s.split("\n").filter((l) => l === "❯ npm run build").length).toBe(0);
+  });
 });
 
 describe("frameBracketedPaste (#34)", () => {
