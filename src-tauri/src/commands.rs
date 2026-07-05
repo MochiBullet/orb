@@ -226,21 +226,19 @@ pub fn get_git_branch(cwd: Option<String>) -> Option<String> {
 
 /// 出力中の `path:line` リンク（VIBE_IDEAS #37 semantic history）をクリックしたとき、
 /// ペインの cwd 基準で解決してエディタの該当行を開く。
-/// 既定は Zed（`zed <path>:<line>`、全OS共通）。zed が PATH に無い/失敗時は OS 既定アプリ
-/// で開く（行ジャンプ無し。Windows=`explorer.exe`／macOS=`open`／Linux=`xdg-open`）。
+/// 既定は Zed（`zed <path>:<line>`、全OS共通）。zed が PATH に無い/失敗時は OS 既定の
+/// フォールバックへ（Windows は #72 の RCE 対策で「開く」ではなく reveal-only）。
 /// regex の誤マッチで存在しないパスが来ることもあるので、その場合は黙って無視する。
 #[tauri::command]
 pub fn open_in_editor(cwd: Option<String>, path: String, line: Option<u32>) -> Result<()> {
-    let p = std::path::Path::new(&path);
-    let abs = if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        std::path::Path::new(&cwd.unwrap_or_default()).join(p)
+    // #72: パス解決＋先頭 `-`（flag injection）判定。None＝開かない（存在しないパスと同じ扱い）。
+    let abs_str = match resolve_target_path(cwd.as_deref(), &path) {
+        Some(s) => s,
+        None => return Ok(()),
     };
-    if !abs.exists() {
+    if !std::path::Path::new(&abs_str).exists() {
         return Ok(());
     }
-    let abs_str = abs.to_string_lossy().to_string();
     let target = match line {
         Some(l) => format!("{abs_str}:{l}"),
         None => abs_str.clone(),
@@ -252,25 +250,70 @@ pub fn open_in_editor(cwd: Option<String>, path: String, line: Option<u32>) -> R
     open_with_os_default(&abs_str)
 }
 
-/// OS 既定アプリでファイルを開く（行ジャンプ無し・Zed 不在時のフォールバック）。
-/// `abs_str` はターミナル出力中の `path:line` パターン（正規表現マッチ）由来で、
-/// Windows で許される任意の文字（`&` `|` `%` `^` 等）を含みうる信頼できない入力。
-/// `cmd /C start` はコマンドライン文字列を cmd.exe 自身の文法で再解釈するため、
-/// そうした文字を含むファイル名だと1つのパスとして渡らず誤動作しうる。
-/// 代わりに `explorer.exe` を直接 spawn する：Rust の `Command` は argv 要素として
-/// そのまま子プロセスへ渡すだけでシェルを経由しないため、文字列の再解釈が起きない。
+/// `open_in_editor` のパス解決＋安全判定の純粋部分（FS/spawn を含まない＝単体テスト可能）。
+/// - 絶対パスはそのまま、相対パスは cwd 基準（cwd 空なら素の相対）で解決して文字列化する。
+/// - #72: 解決後のパスが `-` 始まりなら `None`＝開かない。cwd 空＋相対パス `-x.txt`
+///   （`FILE_LINE_RE` がマッチしうる）だけがこの形になり得て、そのまま子プロセス（zed 等）
+///   の argv へ渡すと先頭 `-` が CLI フラグと誤解される（flag injection）。絶対パスは
+///   drive letter / `\` / `/` 始まりなので `-` にはならず、正常系は影響を受けない。
+fn resolve_target_path(cwd: Option<&str>, path: &str) -> Option<String> {
+    let p = std::path::Path::new(path);
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::path::Path::new(cwd.unwrap_or_default()).join(p)
+    };
+    let abs_str = abs.to_string_lossy().into_owned();
+    if abs_str.starts_with('-') {
+        return None;
+    }
+    Some(abs_str)
+}
+
+/// Zed 不在時の OS 既定フォールバック。`abs_str` はターミナル出力中の `path:line`
+/// （正規表現マッチ）由来の**信頼できない**入力（悪意あるリポの出力が
+/// `scripts/build.bat:1: warning …` を印字しうる）である点に注意。パスは絶対・`.exists()`
+/// 済みで、`Command` はシェルを経由しないため文字列の再解釈は起きない。
+///
+/// #72 (P0/RCE): Windows の `explorer.exe <path>` は登録シェル動詞＝ダブルクリック相当で、
+/// `.bat/.cmd/.com/.exe/.scr/.js/.vbs/.hta/.lnk/.wsf/.msi` 等を**実行**してしまう
+/// （git clone 取得ファイルは Mark-of-the-Web 無し→SmartScreen も素通り）。ゆえに「開く/実行」
+/// 動詞を絶対に使わず、`explorer.exe /select,<path>` の **reveal-only**＝フォルダ内で当該
+/// ファイルを選択表示するだけ（実行しない）にする。
 #[cfg(windows)]
 fn open_with_os_default(abs_str: &str) -> Result<()> {
-    crate::procutil::new_command("explorer").arg(abs_str).spawn()?;
+    use std::os::windows::process::CommandExt;
+    // raw_arg で `/select,"<path>"`（path のみクォート）の生コマンドラインを逐語生成する。
+    // `.arg()` だと Rust が `/select,<path>` 全体をクォートしてしまい、空白入りパス
+    // （`C:\Users\…`, `Program Files` 等）で explorer が reveal に失敗する（実測）。
+    crate::procutil::new_command("explorer")
+        .raw_arg(reveal_arg(abs_str))
+        .spawn()?;
     Ok(())
 }
 
+/// #72: Windows フォールバックの reveal-only コマンドライン片を組み立てる。
+/// `explorer.exe /select,<path>` はフォルダ内で当該ファイルを選択表示するだけで
+/// **開かない/実行しない**（起動シェル動詞を使わない＝実行ファイルでも実行されない）。
+/// explorer は `/select,` の後ろに「path だけをクォートした」形を要求するので
+/// `/select,"<path>"` を生成し raw_arg で逐語で渡す。Windows のパスに `"` は使えないため
+/// 二重引用符で囲んでも中身で閉じられず（＝クォート注入不可）、`Command` はシェルも介さない。
+#[cfg(windows)]
+fn reveal_arg(abs_str: &str) -> String {
+    format!("/select,\"{abs_str}\"")
+}
+
+/// macOS: `open <path>` は既定アプリで開く。ソースファイルは通常テキストエディタに関連付く
+/// ため、Windows の ShellExecute のように**スクリプトを実行**する挙動にはならない
+/// （#72 の execute-on-open は Windows 固有。ゆえに Windows のみ reveal-only にしてある）。
 #[cfg(target_os = "macos")]
 fn open_with_os_default(abs_str: &str) -> Result<()> {
     crate::procutil::new_command("open").arg(abs_str).spawn()?;
     Ok(())
 }
 
+/// Linux: `xdg-open <path>` も既定アプリで開くだけで、Windows の ShellExecute のように
+/// スクリプトを実行する挙動にはならない（#72 の execute-on-open は Windows 固有）。
 #[cfg(all(unix, not(target_os = "macos")))]
 fn open_with_os_default(abs_str: &str) -> Result<()> {
     crate::procutil::new_command("xdg-open").arg(abs_str).spawn()?;
@@ -481,5 +524,44 @@ mod tests {
             elapsed < stall / 2,
             "pane2 op took {elapsed:?}, expected to be unaffected by pane1's stalled lock ({stall:?})"
         );
+    }
+
+    /// #72: resolve_target_path — 絶対パスは素通し、相対は cwd と結合、先頭 `-`（flag
+    /// injection 経路）は None＝開かない。open_in_editor が子プロセスへ渡す文字列の安全判定。
+    #[test]
+    fn resolve_target_path_joins_and_blocks_leading_dash() {
+        // 絶対パスはそのまま（cwd は無視）。
+        #[cfg(windows)]
+        assert_eq!(
+            resolve_target_path(Some("C:\\ignored"), "C:\\src\\main.rs").as_deref(),
+            Some("C:\\src\\main.rs")
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            resolve_target_path(Some("/ignored"), "/src/main.rs").as_deref(),
+            Some("/src/main.rs")
+        );
+        // 相対パスは cwd 基準で結合される（正常系）。
+        let joined = resolve_target_path(Some("root"), "sub.rs").unwrap();
+        assert!(joined.starts_with("root") && joined.contains("sub.rs"));
+        // #72: cwd 空 + 先頭 `-` の相対パス → None（zed 等へ CLI フラグとして渡さない）。
+        assert_eq!(resolve_target_path(None, "-x.txt"), None);
+        assert_eq!(resolve_target_path(Some(""), "-rf.sh"), None);
+        // cwd があれば先頭 `-` のパスでも結合後は `-` 始まりにならない＝開いてよい。
+        assert!(!resolve_target_path(Some("proj"), "-x.txt").unwrap().starts_with('-'));
+    }
+
+    /// #72 回帰: Windows フォールバックは「開く/実行」ではなく reveal-only（`/select,`）で
+    /// あり続けること。ここが素の open 引数に戻ると RCE が再発するのでロックする。
+    #[cfg(windows)]
+    #[test]
+    fn reveal_arg_is_select_only() {
+        // 実行ファイルでも `/select,` 前置＝開かず選択表示のみ。path のみクォート＝空白入り
+        // パスでも explorer が reveal できる形。
+        assert_eq!(
+            reveal_arg("C:\\repo\\scripts\\build.bat"),
+            "/select,\"C:\\repo\\scripts\\build.bat\""
+        );
+        assert!(reveal_arg("C:\\x\\y.exe").starts_with("/select,\""));
     }
 }
