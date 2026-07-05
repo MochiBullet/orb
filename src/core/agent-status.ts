@@ -8,29 +8,29 @@
  *   出力ストリームの静止＋末尾パターンで「入力待ち/要承認」を推定する → classifyIdle。
  */
 
-import type { PaneRole } from "../layout/tree";
-
 export type PaneStatus = "running" | "waiting" | "attention" | "done" | "failed";
 
 /**
- * #76: このペインの出力を「エージェント状態(waiting/attention)」として追跡すべきか。
+ * #76/Theme-E: このペインの出力を「エージェント状態(waiting/attention)」として追跡すべきか。
  *
- * orb の存在意義＝「裏でも claude を回す」を守る要。判定は単一グローバルの前景 aiPane では
- * なく、ペイン自身の ai 性で行う。従来 trackAgentOutput は前景 aiPane のペインしか追跡せず、
- * 背景タブの claude はターン完了しても "waiting" へ遷移しなかった＝そのペインのキュー自動
- * 投入(#51)・待機/注意バッジ(#50)が永久に発火しなかった（本 issue の症状）。
+ * orb の存在意義＝「裏でも claude を回す」を守りつつ、過剰追跡を防ぐ。以前は静的な
+ * role==="ai" で全 AI ペインを追跡していたが、これは広すぎた：claude が終了した後の role="ai"
+ * ペインや、出力の途切れる長時間の非 claude コマンドを背景タブで走らせている role="ai" ペインが
+ * "waiting" に化け、キュー(#51)の指示を誤ったものへ自動投入しうる。そこで「今まさに生きた
+ * agent か」で絞る：
  *
- * - role==="ai": ランチャー生成の AI ペイン。どのタブでも（前景/背景を問わず）自分の
- *   idle→waiting を持つべき対象。role は leaf 生成時に固定される静的プロパティ。
+ * - launchedActive: ランチャー起動の claude が稼働中（appStore の isLaunchedAgentActive）。
+ *   OSC マーカーの来ない起動 claude を前景/背景を問わず追跡する（本 issue の肝＝背景の起動
+ *   claude を追う）。claude 終了で解除されるので、素のシェルに戻った role="ai" は追わない。
  * - paneId===foregroundAiPane: パレット「このペインを AI ペインに設定」で前景指定された
- *   ペイン（role が "shell" でも前景 AI ペインなら追跡する）。前景の手動指定を退行させない。
+ *   ペイン（前景の手動指定・action-target を退行させない）。
  */
 export function shouldTrackAgentStatus(
-  role: PaneRole | undefined,
+  launchedActive: boolean,
   paneId: number,
   foregroundAiPane: number | null,
 ): boolean {
-  return role === "ai" || paneId === foregroundAiPane;
+  return launchedActive || paneId === foregroundAiPane;
 }
 
 /** バッジ表示（TabBar/ペイン右上/INBOX で共通）。 */

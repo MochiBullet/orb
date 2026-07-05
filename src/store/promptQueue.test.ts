@@ -320,4 +320,20 @@ describe("自動送信エンジン (#51: waiting→armed→送信 / ガード網
     disposePaneQueue(p);
     setPaneStatus(p, null);
   });
+
+  it("#Theme-F: 送信中にペイン破棄→送信失敗でも蘇生しない（死んだペインの幽霊キューを作らない）", async () => {
+    const p = ++paneSeq;
+    let rejectSend!: (e: unknown) => void;
+    __setSendForTest(() => new Promise((_, rej) => { rejectSend = rej; }));
+    enqueuePrompt(p, "x");
+    setPaneStatus(p, "waiting");
+    await vi.advanceTimersByTimeAsync(GRACE_MS); // fire()→送信開始（dequeue 済み・送信は保留）
+    expect(get(queues).has(p)).toBe(false); // 送信中はキュー空
+    disposePaneQueue(p); // 送信中にペイン破棄（Terminal.svelte onDestroy 相当）
+    rejectSend(new Error("pty write failed")); // その後に送信が失敗
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(get(queues).has(p)).toBe(false); // 蘇生しない＝幽霊キューを作らない
+    setPaneStatus(p, null);
+  });
 });

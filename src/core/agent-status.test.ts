@@ -68,22 +68,20 @@ describe("classifyIdle (#50: 静止時の末尾分類)", () => {
   });
 });
 
-describe("shouldTrackAgentStatus (#76: 背景タブの AI ペインも状態追跡する)", () => {
-  it("role='ai' なら前景 aiPane でなくても（背景タブでも）追跡する", () => {
-    // 前景 aiPane は別ペイン(2)。それでも role='ai' の自分(5)は追跡対象＝
-    // 背景で回している claude のキュー自動投入/待機バッジが正しく発火する（本 issue の肝）。
-    expect(shouldTrackAgentStatus("ai", 5, 2)).toBe(true);
-    expect(shouldTrackAgentStatus("ai", 5, null)).toBe(true);
+describe("shouldTrackAgentStatus (#76/Theme-E: 起動 agent か前景 aiPane のみ追跡＝過剰追跡防止)", () => {
+  it("launchedActive なら前景 aiPane でなくても（背景タブでも）追跡する（本 issue の肝）", () => {
+    // 前景 aiPane は別ペイン(2)。それでも起動 claude 稼働中の自分(5)は追跡対象＝背景の
+    // 起動 claude のキュー自動投入/待機バッジが正しく発火する。
+    expect(shouldTrackAgentStatus(true, 5, 2)).toBe(true);
+    expect(shouldTrackAgentStatus(true, 5, null)).toBe(true);
   });
 
-  it("role='shell'/未指定でも前景 aiPane なら追跡する（手動『AIペインに設定』を退行させない）", () => {
-    expect(shouldTrackAgentStatus("shell", 3, 3)).toBe(true);
-    expect(shouldTrackAgentStatus(undefined, 3, 3)).toBe(true);
+  it("前景 aiPane なら launched でなくても追跡する（手動『AIペインに設定』・前景指定を退行させない）", () => {
+    expect(shouldTrackAgentStatus(false, 3, 3)).toBe(true);
   });
 
-  it("role='shell'/未指定かつ前景 aiPane でもない通常シェルは追跡しない", () => {
-    expect(shouldTrackAgentStatus("shell", 4, 2)).toBe(false);
-    expect(shouldTrackAgentStatus(undefined, 4, null)).toBe(false);
-    expect(shouldTrackAgentStatus("shell", 4, null)).toBe(false);
+  it("launched でなく前景 aiPane でもない（claude 終了後の role=ai / 背景の非 agent コマンド）は追跡しない", () => {
+    expect(shouldTrackAgentStatus(false, 4, 2)).toBe(false);
+    expect(shouldTrackAgentStatus(false, 4, null)).toBe(false);
   });
 });

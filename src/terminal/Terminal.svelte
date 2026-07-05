@@ -41,8 +41,11 @@
     setPaneStatus,
     clearPaneCwd,
     clearPaneModelEffort,
+    isLaunchedAgentActive,
+    clearLaunchedAgent,
   } from "../store/appStore";
   import { classifyIdle, shouldTrackAgentStatus } from "../core/agent-status";
+  import { matchFileLine } from "../core/file-line";
   import { disposePaneQueue } from "../store/promptQueue";
   import { pushToast } from "../store/toasts";
   import { shouldNotifyForPane } from "./blocks/notify";
@@ -243,8 +246,7 @@
   }
 
   // semantic history（VIBE_IDEAS #37）: 出力中の `src/foo.ts:42` 形をクリックで開く。
-  // 拡張子は英字始まり限定（`1.2.3:4` 等の誤マッチを避ける）。可視行のみ正規表現＝perf 影響ゼロ。
-  const FILE_LINE_RE = /(?:[\w.\-]+[/\\])*[\w.\-]+\.[A-Za-z][\w]{0,7}:\d+(?::\d+)?/g;
+  // パターン検出と URL 権威部（host.tld:port）の除外は core/file-line の matchFileLine（純関数）。
   // クリックされた `path:line(:col)` をペインの cwd 基準で解決してエディタへ。
   function openFileLine(token: string) {
     const m = /^(.*?):(\d+)(?::\d+)?$/.exec(token);
@@ -449,19 +451,22 @@
   let aiTail = "";
   const aiTailDecoder = new TextDecoder();
   function trackAgentOutput(bytes: Uint8Array) {
-    // #76: 背景タブの AI ペインも自分の idle→"waiting" を追跡できるよう、単一グローバルの
-    // 前景 aiPane ではなくペイン自身の ai 性でゲートする（orb の存在意義＝裏で claude を回す）。
-    // 従来は前景タブの AI ペインしか追跡されず、裏で回している claude はターン完了しても
-    // "waiting" にならず、そのペインのキュー自動投入(#51)・待機/注意バッジ(#50)が永久に止まっていた。
-    // 状態の書込み先(setPaneStatus)は一貫して自分の paneId＝背景ペインの状態を正しく持つ。
-    if (!shouldTrackAgentStatus(role, paneId, get(aiPane))) return;
+    // #76/Theme-A/E: 追跡対象は「今まさに生きた agent」＝ランチャー起動 claude(isLaunchedAgentActive)
+    // か、前景の action-target(aiPane) に限る。以前の静的 role==="ai" は広すぎ、claude 終了後の
+    // role="ai" ペインや背景で長い非 claude コマンドを走らせている role="ai" ペインまで "waiting" に
+    // 化けてキュー(#51)を誤爆させた。書込み先(setPaneStatus)は一貫して自分の paneId。
+    if (!shouldTrackAgentStatus(isLaunchedAgentActive(paneId), paneId, get(aiPane))) return;
     aiTail = (aiTail + aiTailDecoder.decode(bytes, { stream: true })).slice(-800);
     // 静止後に出力が再開したら waiting/attention → running へ戻す（C は再発火しないため）。
     const cur = get(paneStatus).get(paneId);
     if (cur === "waiting" || cur === "attention") setPaneStatus(paneId, "running");
     if (aiIdleTimer) clearTimeout(aiIdleTimer);
     aiIdleTimer = window.setTimeout(() => {
-      if (disposed || !blocks?.isCommandRunning()) return;
+      if (disposed) return;
+      // #Theme-A: 起動 claude は C マーカーが来ず isCommandRunning() が永遠に false ＝それだけを
+      // ゲートにすると起動 claude のアイドル判定が永久に通らない。起動 agent フラグが立っていれば
+      // C 不在でもアイドル判定を許可する（フラグは claude 終了＝A で解除＝素プロンプトは誤判定しない）。
+      if (!blocks?.isCommandRunning() && !isLaunchedAgentActive(paneId)) return;
       if (!shouldNotifyForPane(paneId)) return;
       setPaneStatus(paneId, classifyIdle(aiTail));
     }, AI_IDLE_MS);
@@ -621,11 +626,8 @@
         }
         const text = line.translateToString(true);
         const links: ILink[] = [];
-        FILE_LINE_RE.lastIndex = 0;
-        let m: RegExpExecArray | null;
-        while ((m = FILE_LINE_RE.exec(text)) !== null) {
-          const token = m[0];
-          const x = m.index + 1;
+        for (const { token, index } of matchFileLine(text)) {
+          const x = index + 1;
           links.push({
             text: token,
             range: { start: { x, y }, end: { x: x + token.length - 1, y } },
@@ -777,6 +779,7 @@
     if (aiIdleTimer) clearTimeout(aiIdleTimer);
     setPaneStatus(paneId, null); // #50: 破棄ペインのバッジを残さない
     disposePaneQueue(paneId); // #51: 破棄ペインのプロンプトキュー/送信予約を残さない
+    clearLaunchedAgent(paneId); // #Theme-A: 起動 agent フラグを残さない（ID 再利用時の誤判定防止）
     clearPaneCwd(paneId); // #45: 破棄ペインの cwd を残さない
     clearPaneModelEffort(paneId); // #78 UX-5: 破棄ペインの model/effort 上書きを残さない
     unregisterTermClear(paneId);

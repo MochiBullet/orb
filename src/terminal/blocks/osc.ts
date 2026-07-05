@@ -1,5 +1,5 @@
 import type { Terminal, IMarker, IDecoration, IDisposable } from "@xterm/xterm";
-import { aiPane, setPaneCwd, dnd, setPaneStatus } from "../../store/appStore";
+import { aiPane, setPaneCwd, dnd, setPaneStatus, clearLaunchedAgent } from "../../store/appStore";
 import { get } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
 import { shouldNotifyForPane, notifyThrottled } from "./notify";
@@ -88,6 +88,32 @@ export function buildOsc777Notification(data: string): { title: string; body: st
 
 /** command として受け付ける上限。巨大ワンライナー貼り付けで JSONL/DOM を肥大させない。 */
 export const COMMAND_MAX = 4096;
+
+/**
+ * #Theme-D1: ブロックの所要時間の起点(ms)を選ぶ純関数。
+ *
+ * 出力開始(OSC C マーカー)の時刻があればそれを、無ければプロンプト開始(A マーカー)の時刻へ
+ * フォールバックする。A→C の間（プロンプトを表示したまま人が放置していた時間）を所要時間に
+ * 混ぜないため：A 起点のままだと「10分アイドル→一瞬で終わるコマンド」が ~600 秒と誤計測され、
+ * 偽の「600秒 完了」通知・偽の ✅ バッジ・JSONL の巨大 duration_ms を生む。C 不在（コマンド無しの
+ * 素プロンプト等）は A 起点のまま＝従来挙動。0 は「未開始」を意味するので選択対象にしない。
+ */
+export function selectCmdStart(promptStart: number, outputStart: number): number {
+  return outputStart > 0 ? outputStart : promptStart;
+}
+
+/**
+ * #Theme-D3: 配列を直近 max 件に制限する純関数。溢れた古い要素（dispose 対象）を evict へ、
+ * 残す要素を keep へ返す。長寿命ペイン（resize せず数千コマンド）で blockDecos/promptMarkers が
+ * 単調増加し、各 BlockDeco が command(≤4096)+outputBody(≤8000) の文字列と decoration DOM を
+ * 抱えたまま数百 MB/日 に膨らむのを、追加のたびの cap で抑える（従来 blockDecos は onResize 時
+ * しか刈られず、promptMarkers は dispose まで一切刈られなかった）。
+ */
+export function planCap<T>(list: T[], max: number): { keep: T[]; evict: T[] } {
+  if (list.length <= max) return { keep: list, evict: [] };
+  const cut = list.length - max;
+  return { keep: list.slice(cut), evict: list.slice(0, cut) };
+}
 
 /** alt-screen 突入/離脱を表す DECSET/DECRST（CSI `?Pm h`/`?Pm l`）の対象コード。 */
 const ALT_SCREEN_MODES = new Set([47, 1047, 1049]);
@@ -200,7 +226,13 @@ export class CommandBlocks {
   private encoder = new TextEncoder();
   cwd = "";
   promptType = "";
+  /** #Theme-D1: プロンプト開始(A)の時刻。所要時間の起点は selectCmdStart で C 時刻を優先する。 */
   private cmdStart = 0;
+  /** #Theme-D1: 出力開始(C)の時刻。0=未受信（この場合 cmdStart=A 時刻へフォールバック）。 */
+  private outputStartTime = 0;
+  /** #Theme-D3: レジストリの上限。超過分は追加時に古い方から dispose して単調増加を止める。 */
+  private static MAX_BLOCK_DECOS = 500;
+  private static MAX_PROMPT_MARKERS = 500;
   /** #31: 現在のブロックの ID（プロンプト開始で採番、耐久ログの block_id に使う）。 */
   private currentBlockId = "";
   /** #33: 現在のブロックのコマンドライン（E マーカー・nonce 検証済）。E 不在なら null。 */
@@ -286,6 +318,7 @@ export class CommandBlocks {
         // 境界を動かすのを防ぐ）。開いているブロックにだけ意味がある（迷子の C は無視）。
         if (!this.finished && this.nonce && rest === this.nonce) {
           this.outputStart = this.term.registerMarker(0) ?? null;
+          this.outputStartTime = Date.now(); // #Theme-D1: 実所要時間の起点（A→C のアイドルを除外）
           setPaneStatus(this.paneId, "running"); // #50: コマンド実行開始＝🟢
         }
         break;
@@ -317,6 +350,10 @@ export class CommandBlocks {
   }
 
   private onPromptStart() {
+    // #Theme-A: A（プロンプト開始）＝シェルが制御を取り戻した＝ランチャー起動の claude が終了した。
+    //  素のシェルプロンプトを起動 agent の「入力待ち」と誤判定しないよう、起動フラグをここで解除
+    //  する（起動 claude 中はそもそも A が来ない＝この A は claude 終了後の最初のプロンプト）。
+    clearLaunchedAgent(this.paneId);
     if (this.startMarker && !this.finished) {
       // D 欠落のまま次プロンプトが来た＝前ブロックを中断クローズ。現在位置を終端マーカーとして
       // 捕捉し、装飾もログも中断(-1・aborted)で確定する。end=null だと本文が1行に潰れて失われる。
@@ -326,16 +363,28 @@ export class CommandBlocks {
       this.updateStatusOnClose(-1);
     }
     this.startMarker = this.term.registerMarker(0) ?? null;
-    if (this.startMarker) this.promptMarkers.push(this.startMarker);
+    if (this.startMarker) {
+      this.promptMarkers.push(this.startMarker);
+      // #Theme-D3: 直近 N 件だけ残し、溢れた古い IMarker を dispose（長寿命ペインのリーク防止）。
+      const { keep, evict } = planCap(this.promptMarkers, CommandBlocks.MAX_PROMPT_MARKERS);
+      if (evict.length) {
+        for (const m of evict) m.dispose();
+        this.promptMarkers = keep;
+      }
+    }
     this.finished = false;
     this.cmdStart = Date.now();
     this.currentBlockId = genId();
     // #33: 新しいブロックの開始＝前ブロックのコマンド/出力境界を破棄。
     this.pendingCommand = null;
     this.outputStart = null;
+    this.outputStartTime = 0; // #Theme-D1: C 時刻をブロックごとにリセット（前ブロックの持ち越し防止）
   }
 
   private onFinished(rest: string) {
+    // #Theme-D2: 冪等化。次の A 前に authenticated な D が2回来ても、再装飾・再ログ（block_id 重複）・
+    //  再通知しない。finished は初期 true・A で false・D で true＝「既に閉じたブロック」を弾く。
+    if (this.finished) return;
     if (!this.startMarker) return;
     const code = parseExitCode(rest);
     const endMarker = this.term.registerMarker(0);
@@ -350,7 +399,9 @@ export class CommandBlocks {
    *  #20 と同じ長時間しきい値を共有する（通知とバッジがズレない）。null は running 解除。 */
   private updateStatusOnClose(code: number) {
     const watching = !shouldNotifyForPane(this.paneId);
-    const longRun = this.cmdStart > 0 && Date.now() - this.cmdStart >= CommandBlocks.NOTIFY_MS;
+    // #Theme-D1: 所要時間は C(出力開始) 起点を優先＝プロンプト放置時間を longRun 判定に混ぜない。
+    const start = selectCmdStart(this.cmdStart, this.outputStartTime);
+    const longRun = start > 0 && Date.now() - start >= CommandBlocks.NOTIFY_MS;
     setPaneStatus(this.paneId, statusForClose(code, watching, longRun));
   }
 
@@ -390,7 +441,8 @@ export class CommandBlocks {
         promptType: this.promptType,
         exitCode: code,
         aborted,
-        startedAt: this.cmdStart,
+        // #Theme-D1: JSONL の duration_ms(=ended-started) も C 起点で正しくする（放置時間を含めない）。
+        startedAt: selectCmdStart(this.cmdStart, this.outputStartTime),
         endedAt: Date.now(),
         text: this.blockText(start, end),
         // #33: E/C マーカー由来の確定分離。マーカー不在なら null（嘘の分割を書かない）。
@@ -407,8 +459,10 @@ export class CommandBlocks {
 
   /** 非フォーカスのペインで長時間コマンドが終わったら OS 通知（バイブコーディングの待ち時間用）。 */
   private notifyIfBackground(code: number) {
-    const elapsed = Date.now() - this.cmdStart;
-    if (this.cmdStart === 0 || elapsed < CommandBlocks.NOTIFY_MS) return;
+    // #Theme-D1: C(出力開始) 起点を優先。A→C のアイドルを所要時間へ混ぜない（偽の「600秒 完了」防止）。
+    const start = selectCmdStart(this.cmdStart, this.outputStartTime);
+    const elapsed = Date.now() - start;
+    if (start === 0 || elapsed < CommandBlocks.NOTIFY_MS) return;
     if (!shouldNotifyForPane(this.paneId)) return; // 前面（最前面ウィンドウ＆今見ているペイン）は通知しない
     if (get(dnd) && code === 0) return; // フォーカスモード(#20): 成功通知は出さない（失敗は昇格）
     const secs = Math.round(elapsed / 1000);
@@ -561,6 +615,18 @@ export class CommandBlocks {
     entry.dec = this.registerBlockDecoration(entry);
     if (!entry.dec) return;
     this.blockDecos.push(entry);
+    // #Theme-D3: 追加のたびに直近 N 件へ制限し、溢れた古いブロックの装飾/マーカーを dispose する
+    //  （従来 onResize 時しか刈られず、resize しない長寿命ペインで数百 MB/日 に膨らんでいた）。
+    //  marker は promptMarkers と共有だが xterm の dispose は冪等＝二重 dispose しても安全。
+    const { keep, evict } = planCap(this.blockDecos, CommandBlocks.MAX_BLOCK_DECOS);
+    if (evict.length) {
+      for (const e of evict) {
+        e.dec?.dispose();
+        e.endMarker?.dispose();
+        e.marker.dispose();
+      }
+      this.blockDecos = keep;
+    }
   }
 
   /** entry のパラメータで decoration を現在の term.cols 幅で登録し、装飾 DOM を構築する

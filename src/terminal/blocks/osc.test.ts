@@ -13,6 +13,8 @@ import {
   TERMINAL_NOTIFY_TITLE,
   buildOsc9Notification,
   buildOsc777Notification,
+  selectCmdStart,
+  planCap,
 } from "./osc";
 
 describe("parseExitCode (#41: no false success/failure)", () => {
@@ -338,6 +340,47 @@ describe("planResize (#56: resize 時のブロック装飾レジストリ整理)
 
   it("空レジストリ → 全部空", () => {
     expect(planResize([], 80)).toEqual({ keep: [], drop: [], stale: [] });
+  });
+});
+
+describe("selectCmdStart (#Theme-D1: 所要時間の起点は C(出力開始) を優先・A へフォールバック)", () => {
+  it("C 時刻(outputStart>0)があればそれを使う（A→C のアイドルを除外）", () => {
+    // A=1000（プロンプト表示）→ 10分放置 → C=601000（コマンド出力開始）。起点は C。
+    expect(selectCmdStart(1000, 601000)).toBe(601000);
+  });
+
+  it("C 未受信(0)なら A 時刻へフォールバック（コマンド無しの素プロンプト等）", () => {
+    expect(selectCmdStart(1000, 0)).toBe(1000);
+  });
+
+  it("両方 0（未開始）なら 0（logBlock/notify の未開始ガードが効く）", () => {
+    expect(selectCmdStart(0, 0)).toBe(0);
+  });
+});
+
+describe("planCap (#Theme-D3: レジストリを直近 max 件に制限し溢れた古い要素を evict)", () => {
+  it("max 以下は evict 空・keep は同一参照（no-op）", () => {
+    const list = [1, 2, 3];
+    const { keep, evict } = planCap(list, 5);
+    expect(keep).toBe(list);
+    expect(evict).toEqual([]);
+  });
+
+  it("ちょうど max は no-op（境界値）", () => {
+    const { evict } = planCap([1, 2, 3], 3);
+    expect(evict).toEqual([]);
+  });
+
+  it("超過分は古い方（先頭）から evict、keep は直近 max 件", () => {
+    const { keep, evict } = planCap([1, 2, 3, 4, 5], 3);
+    expect(evict).toEqual([1, 2]); // 古い方から dispose 対象
+    expect(keep).toEqual([3, 4, 5]); // 直近 max 件を残す
+  });
+
+  it("1件ずつ追加相当（max+1）は先頭1件だけ evict", () => {
+    const { keep, evict } = planCap([10, 20, 30, 40], 3);
+    expect(evict).toEqual([10]);
+    expect(keep).toEqual([20, 30, 40]);
   });
 });
 

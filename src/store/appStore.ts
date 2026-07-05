@@ -102,6 +102,29 @@ export function clearPaneModelEffort(paneId: number) {
   });
 }
 
+/** #76/Theme-A: ランチャー起動中の claude ペイン集合（起動 agent フラグ）。
+ *  ランチャーは `pwsh -NoExit -Command "…; claude"` で claude を起動するため、claude 稼働中は
+ *  PSReadLine の prompt()（A/D/P/Cwd マーカーの発生源）が再発火せず、OSC 133/633 マーカーが
+ *  一切届かない（claude が stdin を握りっぱなし）。結果 blocks.isCommandRunning() は永遠に
+ *  false のままで、#50 のアイドル判定ゲートも #51 のキュー自動投入も永久に発火しない
+ *  ＝「裏で claude を回して通知」という orb の看板機能がランチャー経路で丸ごと死ぬ。
+ *  そこで「起動した claude が今も稼働中」を明示フラグで持ち、C マーカー不在でもアイドル
+ *  判定を許可する。claude 終了（＝シェルがプロンプトを取り戻し最初の A が来た）で解除する。 */
+const launchedAgents = new Set<number>();
+/** ランチャーが AI ペイン起動時に立てる（起動 agent 稼働中）。 */
+export function markLaunchedAgent(paneId: number) {
+  launchedAgents.add(paneId);
+}
+/** osc.ts の A マーカー（claude 終了＝シェル復帰）／ペイン破棄で解除する。素のシェル
+ *  プロンプトを「入力待ち」と誤判定しないための解除が肝。 */
+export function clearLaunchedAgent(paneId: number) {
+  launchedAgents.delete(paneId);
+}
+/** このペインが今ランチャー起動の claude を稼働中か（アイドル判定・状態追跡ゲート用）。 */
+export function isLaunchedAgentActive(paneId: number): boolean {
+  return launchedAgents.has(paneId);
+}
+
 // フォーカス移動そのものが「見た」の合図（#50 受け入れ条件のバッジ自動クリア）。
 focusedPane.subscribe(acknowledgePane);
 

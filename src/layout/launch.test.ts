@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildClaudeCmd } from "./launch";
+import { buildClaudeCmd, cd } from "./launch";
 
 describe("buildClaudeCmd（案件ランチャーの一括起動承認: model/effort を起動時フラグへ焼き込む）", () => {
   it("opts 無指定は従来どおりのコマンド文字列（回帰防止）", () => {
@@ -25,5 +25,27 @@ describe("buildClaudeCmd（案件ランチャーの一括起動承認: model/eff
     expect(buildClaudeCmd("yolo", { model: "haiku", effort: "low" })).toBe(
       "claude --continue --dangerously-skip-permissions --model haiku --effort low",
     );
+  });
+
+  it("#Theme-F: 既知語彙にない model/effort は焼き込まない（起動コマンド行への注入を塞ぐ）", () => {
+    expect(buildClaudeCmd("continue", { model: "opus; rm -rf /" })).toBe("claude --continue");
+    expect(buildClaudeCmd("continue", { effort: "high && curl evil" })).toBe("claude --continue");
+    expect(buildClaudeCmd("yolo", { model: "unknown", effort: "bogus" })).toBe(
+      "claude --continue --dangerously-skip-permissions",
+    );
+    // 既知値は従来どおり通る（回帰防止）。
+    expect(buildClaudeCmd("continue", { model: "fable", effort: "max" })).toBe(
+      "claude --continue --model fable --effort max",
+    );
+  });
+});
+
+describe("cd（#Theme-C: cd 失敗で後段を実行させない・シングルクオートエスケープ保全）", () => {
+  it("-ErrorAction Stop を付ける（失敗を終端エラーにして `; claude` を走らせない）", () => {
+    expect(cd("C:\\proj")).toBe("Set-Location -LiteralPath 'C:\\proj' -ErrorAction Stop");
+  });
+
+  it("dir 内のシングルクオートは '' へエスケープしたまま（PS 文字列を壊さない）", () => {
+    expect(cd("C:\\a's dir")).toBe("Set-Location -LiteralPath 'C:\\a''s dir' -ErrorAction Stop");
   });
 });

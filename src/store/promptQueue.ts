@@ -159,6 +159,10 @@ export const GRACE_MS = 3000;
 const timers = new Map<number, ReturnType<typeof setTimeout>>();
 // 送信直後・手動キャンセル後の「status が動くまで再予約しない」抑止セット。
 const holdPanes = new Set<number>();
+// #Theme-F: 破棄済みペイン（disposePaneQueue 済み）。fire() の非同期送信中にペインが破棄されると、
+// 送信失敗の catch が qEnqueueFront で「死んだペインの新規キュー」を作ってしまう（誰も掃除しない
+// リーク＝一時停止アイテムが幽霊として残る）。catch はここを見て、破棄済みなら蘇生を諦める。
+const disposedPanes = new Set<number>();
 
 // 送信実装（テストで差し替え可能）。bracketed paste + \r ＝自動投入（#51 の例外仕様）。
 let sendImpl: (paneId: number, text: string) => Promise<void> = async (paneId, text) => {
@@ -225,6 +229,8 @@ function fire(paneId: number) {
   void sendImpl(paneId, item.text).catch((e) => {
     // 送信自体が失敗＝アイテムを先頭へ戻して一時停止（黙って握り潰さない・二重送信もしない）。
     logError(`prompt-queue: pane ${paneId} send failed: ${String(e)}`);
+    // #Theme-F: 送信中にペインが破棄されていたら蘇生しない（死んだペインの幽霊キューを作らない）。
+    if (disposedPanes.has(paneId)) return;
     queues.update((m) => qSetPaused(qEnqueueFront(m, item), paneId, true));
   });
 }
@@ -312,5 +318,6 @@ export function resumePane(paneId: number): void {
 export function disposePaneQueue(paneId: number): void {
   disarm(paneId);
   holdPanes.delete(paneId);
+  disposedPanes.add(paneId); // #Theme-F: 送信中だった fire() の catch に「もう蘇生するな」を伝える
   queues.update((m) => qClearPane(m, paneId));
 }

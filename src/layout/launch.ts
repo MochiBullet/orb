@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import { nextPaneId, setPaneModelEffort } from "../store/appStore";
+import { nextPaneId, setPaneModelEffort, setPaneCwd, markLaunchedAgent } from "../store/appStore";
 import { openProjectTab } from "./tabs";
 import { leaf, type PaneNode } from "./tree";
+import { MODEL_OPTIONS, EFFORT_OPTIONS } from "../core/model-effort";
 
 export interface Project {
   slug: string;
@@ -15,10 +16,21 @@ export function listProjects(): Promise<Project[]> {
   return invoke("list_projects");
 }
 
-/** pwsh で安全に cd するスニペット（シングルクオートはエスケープ）。 */
-function cd(dir: string): string {
-  return `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'`;
+/** pwsh で安全に cd するスニペット（シングルクオートは '' へエスケープ）。
+ *  #Theme-C: `-ErrorAction Stop` を付ける＝dir が消えた/移動した/アンマウントされた等で
+ *  Set-Location が失敗したら「終端エラー」を投げ、`;` で続く後段（claude 等）を実行させない。
+ *  これが無いと cd 失敗時でも `; claude --continue --dangerously-skip-permissions`（yolo）が
+ *  orb のホーム cwd で自動実行される＝間違ったディレクトリで危険モードが走る事故になる。
+ *  -NoExit なので失敗しても対話シェルは残る（ユーザーは手で cd し直せる）。 */
+export function cd(dir: string): string {
+  return `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}' -ErrorAction Stop`;
 }
+
+/** #Theme-F: 起動時に焼き込む model/effort の許可語彙（MODEL_OPTIONS/EFFORT_OPTIONS 由来）。
+ *  現状は <select> の固定選択肢のみだが、将来 自由入力が混ざっても起動コマンド行へ
+ *  任意文字列（`; rm -rf …` 等）が注入されないよう、既知の値だけを通す最終ゲートにする。 */
+const MODEL_VALUES = new Set(MODEL_OPTIONS.map((o) => o.value));
+const EFFORT_VALUES = new Set(EFFORT_OPTIONS.map((o) => o.value));
 
 /** AI ペインの Claude Code 起動プリセット（#38）。 */
 export type LaunchPreset = "continue" | "fresh" | "yolo";
@@ -54,8 +66,10 @@ export function buildClaudeCmd(preset: LaunchPreset, opts?: ModelEffort): string
     default:
       cmd = "claude --continue";
   }
-  if (opts?.model && opts.model !== "default") cmd += ` --model ${opts.model}`;
-  if (opts?.effort && opts.effort !== "auto") cmd += ` --effort ${opts.effort}`;
+  // #Theme-F: 既知語彙（MODEL_VALUES/EFFORT_VALUES）に含まれる値だけ焼き込む。"default"/"auto"
+  //  ＝claude 既定に任せる（フラグを付けない）。未知値は黙って無視＝注入経路を塞ぐ。
+  if (opts?.model && opts.model !== "default" && MODEL_VALUES.has(opts.model)) cmd += ` --model ${opts.model}`;
+  if (opts?.effort && opts.effort !== "auto" && EFFORT_VALUES.has(opts.effort)) cmd += ` --effort ${opts.effort}`;
   return cmd;
 }
 
@@ -90,6 +104,15 @@ export function launchProject(p: Project, preset: LaunchPreset = "continue", opt
   };
 
   openProjectTab(tree, ai, p.name);
+  // #Theme-A(1): AI ペインの追跡 cwd を OSC マーカーを待たずに案件 dir へ即確定する。ランチャー
+  //  起動の claude は P;Cwd マーカーを出さない（claude 終了まで prompt() が再発火しない）ため、
+  //  これが無いと aiPaneCwd() が spawn 時のホームのまま＝#54 のチェックポイント捕捉が間違った
+  //  リポで走る/no-op になり、復元セーフティネットが死ぬ。openProjectTab 後は ai が前景なので
+  //  setPaneCwd はグローバル cwd 表示にも即反映される（後で本物の P;Cwd が来れば普通に上書き）。
+  setPaneCwd(ai, p.dir);
+  // #Theme-A(2): 「起動 claude 稼働中」フラグ。C マーカー不在でもアイドル判定・状態追跡を
+  //  許可させ、待機/注意バッジ(#50)とキュー自動投入(#51)を生かす。claude 終了＝最初の A で解除。
+  markLaunchedAgent(ai);
   if (opts?.model && opts.model !== "default") setPaneModelEffort(ai, { model: opts.model });
   if (opts?.effort && opts.effort !== "auto") setPaneModelEffort(ai, { effort: opts.effort });
   return ai;
