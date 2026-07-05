@@ -36,7 +36,7 @@
     setPaneStatus,
     clearPaneCwd,
   } from "../store/appStore";
-  import { classifyIdle } from "../core/agent-status";
+  import { classifyIdle, shouldTrackAgentStatus } from "../core/agent-status";
   import { disposePaneQueue } from "../store/promptQueue";
   import { shouldNotifyForPane } from "./blocks/notify";
   import { leafIds } from "../layout/tree";
@@ -425,7 +425,12 @@
   let aiTail = "";
   const aiTailDecoder = new TextDecoder();
   function trackAgentOutput(bytes: Uint8Array) {
-    if (paneId !== get(aiPane)) return;
+    // #76: 背景タブの AI ペインも自分の idle→"waiting" を追跡できるよう、単一グローバルの
+    // 前景 aiPane ではなくペイン自身の ai 性でゲートする（orb の存在意義＝裏で claude を回す）。
+    // 従来は前景タブの AI ペインしか追跡されず、裏で回している claude はターン完了しても
+    // "waiting" にならず、そのペインのキュー自動投入(#51)・待機/注意バッジ(#50)が永久に止まっていた。
+    // 状態の書込み先(setPaneStatus)は一貫して自分の paneId＝背景ペインの状態を正しく持つ。
+    if (!shouldTrackAgentStatus(role, paneId, get(aiPane))) return;
     aiTail = (aiTail + aiTailDecoder.decode(bytes, { stream: true })).slice(-800);
     // 静止後に出力が再開したら waiting/attention → running へ戻す（C は再発火しないため）。
     const cur = get(paneStatus).get(paneId);

@@ -4,6 +4,7 @@ import {
   statusForClose,
   stripAnsi,
   classifyIdle,
+  shouldTrackAgentStatus,
 } from "./agent-status";
 
 describe("statusForClose (#50: D 確定時のバッジ判定・#32/#20 とゲート共有)", () => {
@@ -64,5 +65,25 @@ describe("classifyIdle (#50: 静止時の末尾分類)", () => {
     expect(classifyIdle("")).toBe("waiting");
     // "esc to interrupt"（実行中スピナー行）は要承認パターンに入れない
     expect(classifyIdle("Musing… (esc to interrupt)")).toBe("waiting");
+  });
+});
+
+describe("shouldTrackAgentStatus (#76: 背景タブの AI ペインも状態追跡する)", () => {
+  it("role='ai' なら前景 aiPane でなくても（背景タブでも）追跡する", () => {
+    // 前景 aiPane は別ペイン(2)。それでも role='ai' の自分(5)は追跡対象＝
+    // 背景で回している claude のキュー自動投入/待機バッジが正しく発火する（本 issue の肝）。
+    expect(shouldTrackAgentStatus("ai", 5, 2)).toBe(true);
+    expect(shouldTrackAgentStatus("ai", 5, null)).toBe(true);
+  });
+
+  it("role='shell'/未指定でも前景 aiPane なら追跡する（手動『AIペインに設定』を退行させない）", () => {
+    expect(shouldTrackAgentStatus("shell", 3, 3)).toBe(true);
+    expect(shouldTrackAgentStatus(undefined, 3, 3)).toBe(true);
+  });
+
+  it("role='shell'/未指定かつ前景 aiPane でもない通常シェルは追跡しない", () => {
+    expect(shouldTrackAgentStatus("shell", 4, 2)).toBe(false);
+    expect(shouldTrackAgentStatus(undefined, 4, null)).toBe(false);
+    expect(shouldTrackAgentStatus("shell", 4, null)).toBe(false);
   });
 });

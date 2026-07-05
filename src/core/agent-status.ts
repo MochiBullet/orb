@@ -8,7 +8,30 @@
  *   出力ストリームの静止＋末尾パターンで「入力待ち/要承認」を推定する → classifyIdle。
  */
 
+import type { PaneRole } from "../layout/tree";
+
 export type PaneStatus = "running" | "waiting" | "attention" | "done" | "failed";
+
+/**
+ * #76: このペインの出力を「エージェント状態(waiting/attention)」として追跡すべきか。
+ *
+ * orb の存在意義＝「裏でも claude を回す」を守る要。判定は単一グローバルの前景 aiPane では
+ * なく、ペイン自身の ai 性で行う。従来 trackAgentOutput は前景 aiPane のペインしか追跡せず、
+ * 背景タブの claude はターン完了しても "waiting" へ遷移しなかった＝そのペインのキュー自動
+ * 投入(#51)・待機/注意バッジ(#50)が永久に発火しなかった（本 issue の症状）。
+ *
+ * - role==="ai": ランチャー生成の AI ペイン。どのタブでも（前景/背景を問わず）自分の
+ *   idle→waiting を持つべき対象。role は leaf 生成時に固定される静的プロパティ。
+ * - paneId===foregroundAiPane: パレット「このペインを AI ペインに設定」で前景指定された
+ *   ペイン（role が "shell" でも前景 AI ペインなら追跡する）。前景の手動指定を退行させない。
+ */
+export function shouldTrackAgentStatus(
+  role: PaneRole | undefined,
+  paneId: number,
+  foregroundAiPane: number | null,
+): boolean {
+  return role === "ai" || paneId === foregroundAiPane;
+}
 
 /** バッジ表示（TabBar/ペイン右上/INBOX で共通）。 */
 export const STATUS_ICON: Record<PaneStatus, string> = {
