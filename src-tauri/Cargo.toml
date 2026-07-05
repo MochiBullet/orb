@@ -1,6 +1,6 @@
 [package]
 name = "orb"
-version = "1.5.1"
+version = "1.5.2"
 description = "A Rust/Tauri vibe-coding terminal"
 authors = ["MochiBullet"]
 edition = "2021"
