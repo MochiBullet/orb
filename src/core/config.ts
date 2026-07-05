@@ -7,6 +7,8 @@ export interface OrbConfig {
   font_family: string;
   scrollback: number;
   accent: string;
+  /** AI ペインの識別色（枠線・見出し等）。既定は --violet と同じ #a78bfa。 */
+  ai_accent: string;
   ligatures: boolean;
   bg_image: string;
   bg_dim: number;
@@ -26,6 +28,7 @@ const DEFAULT: OrbConfig = {
   font_family: '"Cascadia Code", "FiraCode Nerd Font", "Consolas", monospace',
   scrollback: 1000,
   accent: "#2dd4bf",
+  ai_accent: "#a78bfa",
   ligatures: true,
   bg_image: DEFAULT_BG,
   bg_dim: 0.5,

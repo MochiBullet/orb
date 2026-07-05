@@ -35,6 +35,10 @@ fn default_scrollback() -> u32 {
 fn default_accent() -> String {
     "#2dd4bf".into()
 }
+/// AI ペインの識別色の既定。--violet と同じ値（Settings で独立に変更可能にする前の固定値）。
+fn default_ai_accent() -> String {
+    "#a78bfa".into()
+}
 fn default_ligatures() -> bool {
     true
 }
@@ -76,6 +80,9 @@ pub struct Config {
     pub scrollback: u32,
     #[serde(default = "default_accent")]
     pub accent: String,
+    /// AI ペインの識別色（枠線・見出し等）。--violet の既定値を独立に変更可能にする。
+    #[serde(default = "default_ai_accent")]
+    pub ai_accent: String,
     /// プログラミング合字（=> != -> 等）を character joiner で繋げて表示。
     #[serde(default = "default_ligatures")]
     pub ligatures: bool,
@@ -110,6 +117,7 @@ impl Default for Config {
             font_family: default_font_family(),
             scrollback: default_scrollback(),
             accent: default_accent(),
+            ai_accent: default_ai_accent(),
             ligatures: default_ligatures(),
             bg_image: default_bg_image(),
             bg_dim: default_bg_dim(),
@@ -291,5 +299,6 @@ mod tests {
         assert_eq!(c.bg_pos_x, 65.0);
         assert_eq!(c.bg_pos_y, 100.0);
         assert_eq!(c.bg_zoom, 1.0);
+        assert_eq!(c.ai_accent, "#a78bfa");
     }
 }

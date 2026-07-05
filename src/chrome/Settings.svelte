@@ -22,9 +22,10 @@
     { value: "custom", label: "カスタム" },
   ];
 
-  // ライブプレビュー: ドラフトのアクセント色を即 --teal に反映。
+  // ライブプレビュー: ドラフトのアクセント色/AIペイン色を即 --teal/--violet に反映。
   $effect(() => {
     document.documentElement.style.setProperty("--teal", draft.accent || "#2dd4bf");
+    document.documentElement.style.setProperty("--violet", draft.ai_accent || "#a78bfa");
   });
 
   // #21: 背景画像・暗幕のライブプレビュー。config ストアを経由せず CSS 変数を直接書く
@@ -76,9 +77,10 @@
   }
 
   function cancel() {
-    // プレビューを保存前の値へ戻す（アクセント色＋背景）。
+    // プレビューを保存前の値へ戻す（アクセント色＋AIペイン色＋背景）。
     const saved = get(config);
     document.documentElement.style.setProperty("--teal", saved.accent || "#2dd4bf");
+    document.documentElement.style.setProperty("--violet", saved.ai_accent || "#a78bfa");
     applyBgVars(saved);
     onClose();
   }
@@ -113,6 +115,21 @@
           ></button>
         {/each}
         <input type="color" bind:value={draft.accent} aria-label="custom accent" />
+      </span>
+    </label>
+    <label>
+      <span>AIペイン色</span>
+      <span class="accent-row">
+        {#each PRESETS as p}
+          <button
+            class="swatch"
+            class:sel={draft.ai_accent.toLowerCase() === p}
+            style="background:{p}"
+            onclick={() => (draft.ai_accent = p)}
+            aria-label={p}
+          ></button>
+        {/each}
+        <input type="color" bind:value={draft.ai_accent} aria-label="custom AI pane color" />
       </span>
     </label>
     <label class="toggle">

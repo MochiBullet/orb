@@ -48,9 +48,10 @@ export async function initDefaultBg(): Promise<void> {
   }
 }
 
-/** config のアクセント色・背景を CSS 変数へ流し込む（config が変わるたび自動適用）。 */
+/** config のアクセント色・AIペイン色・背景を CSS 変数へ流し込む（config が変わるたび自動適用）。 */
 function apply(c: OrbConfig) {
   document.documentElement.style.setProperty("--teal", c.accent || "#2dd4bf");
+  document.documentElement.style.setProperty("--violet", c.ai_accent || "#a78bfa");
   applyBgVars(c);
 }
 
