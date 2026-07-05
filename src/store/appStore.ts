@@ -90,6 +90,18 @@ export function setPaneModelEffort(
   });
 }
 
+/** ペイン破棄時のレジストリ掃除（Terminal.svelte の onDestroy から）。#78 UX-5: 消さないと
+ *  閉じたペインの上書きが残り続け、paneStatus/queue/cwd と違って掃除経路が無かった
+ *  （長時間の分割/クローズ運用でエントリが単調に溜まるリーク）。 */
+export function clearPaneModelEffort(paneId: number) {
+  paneModelEffort.update((m) => {
+    if (!m.has(paneId)) return m;
+    const next = new Map(m);
+    next.delete(paneId);
+    return next;
+  });
+}
+
 // フォーカス移動そのものが「見た」の合図（#50 受け入れ条件のバッジ自動クリア）。
 focusedPane.subscribe(acknowledgePane);
 

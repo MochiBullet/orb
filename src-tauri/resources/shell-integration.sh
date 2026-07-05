@@ -161,9 +161,29 @@ elif [[ "$__orb_existing_debug_trap" != '__orb_preexec_guarded' && "$__orb_exist
   trap '__orb_preexec_chain' DEBUG
 fi
 
+# #78 UX-3: PROMPT_COMMAND を「実行済みエントリを ; で連結した文字列」へ正規化する。
+# bash 5.1+ は PROMPT_COMMAND を配列にでき、複数の precmd フック（starship + 他ツール等）
+# を並べて持てるが、単純な `${PROMPT_COMMAND:-}` は配列の要素[0]しか拾わない。この後
+# PROMPT_COMMAND を単一のエントリ関数名で丸ごと上書きしていたため、要素[1]以降が黙って
+# 消えていた（ユーザーの他 precmd フックが壊れる）。`${PROMPT_COMMAND[@]}` は配列/スカラー
+# どちらの場合も全要素を返す（スカラー変数は bash では「要素1個の配列」として扱われる仕様）
+# ため、これで両形式を区別せず正しく全件拾える。全エントリを ; 連鎖の eval に含めることで、
+# $? の捕捉（エントリ関数の最初の1行）は変えず正しさを保つ（配列の要素順に PROMPT_COMMAND
+# を差し替えると、先頭以外の要素は直前要素の $? を見てしまい exit code 判定が壊れるため、
+# 素朴な配列 push ではなくこの文字列連結方式にしている）。
+__orb_join_prompt_command() {
+  local -a entries=("${PROMPT_COMMAND[@]}")
+  local out="" e
+  for e in "${entries[@]}"; do
+    [ -z "$e" ] && continue
+    if [ -z "$out" ]; then out="$e"; else out="$out; $e"; fi
+  done
+  builtin printf '%s' "$out"
+}
+
 # 既存の PROMPT_COMMAND（starship init 等）を検出し、壊さず連鎖させる。$? の捕捉は
 # 必ずこのエントリ関数の最初の1行で行う（連鎖先の評価で上書きされる前に確定させる）。
-__orb_original_prompt_command="${PROMPT_COMMAND:-}"
+__orb_original_prompt_command="$(__orb_join_prompt_command)"
 if [ -n "$__orb_original_prompt_command" ] && [ "$__orb_original_prompt_command" != "__orb_precmd_entry" ]; then
   __orb_precmd_entry() {
     __orb_status="$?"

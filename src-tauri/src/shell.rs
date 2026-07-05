@@ -1,9 +1,25 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use portable_pty::CommandBuilder;
 
 use crate::error::Result;
+
+/// テキストを `path` へアトミックに書く（config.rs の write_atomic と同じ temp+rename
+/// パターン）。一時ファイル名にプロセス ID を混ぜるのは、こちらは複数の orb プロセスが
+/// 同時に同じ共有 temp パス（%TEMP%\orb\shell-integration.ps1 等）へ書きに来るため
+/// （config.rs の方は単一プロセス内の設定保存専用で固定 ".tmp" で足りる）。プロセスごとに
+/// 一時ファイルが分かれるので、他プロセスの書き込み中にファイルを奪い合わない。同一
+/// ファイルシステム上の rename は原子的＝dot-source 側が半端な内容を読むことがない
+/// （#78 UX-4: 旧実装は非アトミックな `fs::write` 直書きで、2 インスタンス同時起動時に
+/// truncate-while-read が起き得た）。
+fn write_atomic(path: &Path, contents: &str) -> Result<()> {
+    let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+    let tmp = path.with_file_name(format!("{file_name}.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, contents)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
 
 /// orb の既定シェル起動コマンドを組み立てる（OS ごとにディスパッチ）。
 /// Windows は pwsh、Unix（Linux/macOS）は bash（#17 クロスプラットフォーム対応、v1 は
@@ -77,7 +93,7 @@ fn write_integration_script_ps1() -> Result<PathBuf> {
         let dir = std::env::temp_dir().join("orb");
         let path = dir.join("shell-integration.ps1");
         let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(&path, SHELL_INTEGRATION_PS1);
+        let _ = write_atomic(&path, SHELL_INTEGRATION_PS1);
         path
     });
     Ok(path.clone())
@@ -154,7 +170,7 @@ fn write_integration_script_sh() -> Result<PathBuf> {
         let dir = std::env::temp_dir().join("orb");
         let path = dir.join("shell-integration.sh");
         let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(&path, SHELL_INTEGRATION_SH);
+        let _ = write_atomic(&path, SHELL_INTEGRATION_SH);
         path
     });
     Ok(path.clone())
@@ -232,4 +248,47 @@ fn build_bash(initial_cmd: Option<&str>, nonce: Option<&str>) -> Result<CommandB
     }
 
     Ok(cmd)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #78 UX-4: 書き込み後に内容が正しく反映され、temp ファイルが残らないこと。
+    #[test]
+    fn write_atomic_writes_contents_and_leaves_no_temp_file() {
+        let dir = std::env::temp_dir().join("orb-shell-write-atomic-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shell-integration.ps1");
+
+        write_atomic(&path, "hello").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
+        // 一時ファイル（pid 付き）が残っていないこと。
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 同じ内容で複数回呼んでも上書きでき、内容が壊れない（同時起動の複数インスタンスが
+    /// 同じ内容を書き直すケースを模擬）。
+    #[test]
+    fn write_atomic_can_be_called_repeatedly_without_corruption() {
+        let dir = std::env::temp_dir().join("orb-shell-write-atomic-repeat-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shell-integration.sh");
+
+        for _ in 0..5 {
+            write_atomic(&path, "script body").unwrap();
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "script body");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

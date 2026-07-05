@@ -11,13 +11,18 @@
 if ($global:__orb_si_loaded) { return }
 $global:__orb_si_loaded = $true
 
-# PSReadLine の ListView 警告（狭い/低いペインで連発）を含む警告出力を抑制する。
-$global:WarningPreference = 'SilentlyContinue'
+# #78 UX-2: 以前はここで $global:WarningPreference = 'SilentlyContinue' を設定し、
+# ユーザーのセッション全体（本人の Write-Warning・モジュールの非推奨通知等）を丸ごと
+# 握り潰していた。orb が黙らせたいのは自分自身の Set-PSReadLineOption 呼び出し周りの
+# ListView 警告だけなので、グローバル設定はやめて各呼び出しに -WarningAction
+# SilentlyContinue を個別に付ける（下記2箇所）。
 
-# profile が PSReadLine をロード済みなら、起動直後に InlineView へ固定して
-# profile の ListView 設定を上書きする（prompt 内の毎回強制と二段構え）。
+# profile が PSReadLine をロード済みなら、起動直後に InlineView へ固定する
+# （orb は分割多用ターミナルのため既定を InlineView にする＝下の理由と同じ）。
+# ここは起動時の一度きり＝ユーザーが後で明示的に ListView 等へ変更したらそれを尊重する
+# （#78 UX-2: 以前は prompt() 内で毎回 InlineView に戻しており、ユーザーの選択を上書きし続けていた）。
 if (Get-Module PSReadLine) {
-    try { Set-PSReadLineOption -PredictionViewStyle InlineView -ErrorAction SilentlyContinue } catch {}
+    try { Set-PSReadLineOption -PredictionViewStyle InlineView -WarningAction SilentlyContinue -ErrorAction SilentlyContinue } catch {}
 }
 
 $global:__orb_si = @{
@@ -33,6 +38,10 @@ $global:__orb_si = @{
     # #33: PSConsoleHostReadLine をラップ済みか。PSReadLine は対話開始時に遅延ロードされる
     # ため、dot-source 時ではなく prompt() 内で存在を確認してから一度だけラップする。
     ReadLineWrapped = $false
+    # #78 UX-2: 上の dot-source 時点で PSReadLine が既にロード済みなら InlineView 適用は
+    # 済んでいる＝prompt() 側の一度きり適用は不要（true にして二重適用を避ける）。
+    # 遅延ロードで未適用ならここは false のままで、prompt() が最初の1回だけ拾う。
+    InlineViewApplied = ($null -ne (Get-Module -Name PSReadLine))
 }
 
 # SEC-1(#71): nonce を捕捉したら即座に環境変数から消す。さもないとペイン内で走る任意の
@@ -73,7 +82,7 @@ function global:__orb_wrap_readline {
 # 分割直後の警告を防げない。予測自体は1行インラインで残る。元の好みは orb の外では不変
 # （この pwsh プロセス内だけの変更）。
 if ($global:__orb_si.HasPSReadLine) {
-    try { Set-PSReadLineOption -PredictionViewStyle InlineView -ErrorAction SilentlyContinue } catch {}
+    try { Set-PSReadLineOption -PredictionViewStyle InlineView -WarningAction SilentlyContinue -ErrorAction SilentlyContinue } catch {}
 }
 
 $global:__orb_ESC = [char]0x1b
@@ -160,10 +169,15 @@ function global:prompt {
     # 次回比較用に履歴 ID を記録。
     $global:__orb_si.LastHistoryId = $curId
 
-    # PSReadLine は対話開始時に遅延ロードされ、起動時の設定が空振りすることがある。
-    # prompt ごとに InlineView を強制し、ListView の「画面が小さい」警告を完全に根絶する。
-    if (Get-Module PSReadLine) {
-        try { Set-PSReadLineOption -PredictionViewStyle InlineView -ErrorAction SilentlyContinue } catch {}
+    # #78 UX-2: PSReadLine は対話開始時に遅延ロードされ、起動時（dot-source 時点）の設定が
+    # 空振りすることがあるため、モジュールが実際に使えるようになった最初の prompt でだけ
+    # InlineView を適用する（InlineViewApplied フラグで一度きりに限定）。以前はここを
+    # 毎 prompt 無条件に強制しており、ユーザーが後から `Set-PSReadLineOption
+    # -PredictionViewStyle ListView` 等で明示的に変更してもすぐ戻され続けていた
+    # （ユーザー設定の上書き＝バグ）。一度だけにすることで以後の選択は尊重される。
+    if (-not $global:__orb_si.InlineViewApplied -and (Get-Module PSReadLine)) {
+        try { Set-PSReadLineOption -PredictionViewStyle InlineView -WarningAction SilentlyContinue -ErrorAction SilentlyContinue } catch {}
+        $global:__orb_si.InlineViewApplied = $true
     }
 
     # #33: 同じ遅延ロード事情で、ReadLine のラップも prompt 内で一度だけ行う。

@@ -40,13 +40,14 @@
     paneStatus,
     setPaneStatus,
     clearPaneCwd,
+    clearPaneModelEffort,
   } from "../store/appStore";
   import { classifyIdle, shouldTrackAgentStatus } from "../core/agent-status";
   import { disposePaneQueue } from "../store/promptQueue";
   import { shouldNotifyForPane } from "./blocks/notify";
   import { leafIds } from "../layout/tree";
   import { config } from "../core/config";
-  import { clampFontSize, clampScrollback, FONT_SIZE_MIN, FONT_SIZE_MAX } from "../core/limits";
+  import { clampFontSize, clampScrollback, FONT_SIZE_MIN, FONT_SIZE_MAX, pushCapped } from "../core/limits";
   import { logInfo, logWarn, logError } from "../core/log";
   import { invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -101,7 +102,9 @@
   // 複製し合って無限ループ・多重書き込みになる（#77 FN-2）。
   function enqueueInput(bytes: Uint8Array, binary = false, isBroadcastRelay = false) {
     if (!ptyReady) {
-      inputBuffer.push({ bytes, binary });
+      // #78 UX-8: spawn 失敗ペインは ptyReady が永遠に false のまま＝キー入力のたびに
+      // ここが際限なく育つ（メモリリーク）。上限で古い方から捨てる（最新の入力を優先）。
+      inputBuffer = pushCapped(inputBuffer, { bytes, binary });
       return;
     }
     if (!isBroadcastRelay && !binary && get(broadcast)) {
@@ -566,6 +569,10 @@
 
     serializeAddon = new SerializeAddon();
     term.loadAddon(serializeAddon);
+    // #78 UX-6: 登録を実際に呼ばないと App.svelte の終了時 saveScrollbacks() が空レジストリを
+    // 回すだけの no-op になり、退出時の一括保存が機能しない（import されているだけで
+    // 呼ばれていなかった）。
+    registerTermSerialize(paneId, () => serializeAddon?.serialize() ?? "");
 
     // クリック可能URL: 出力中の http/https をクリックで既定ブラウザで開く。
     term.loadAddon(new WebLinksAddon((_e, uri) => void openUrl(uri)));
@@ -766,7 +773,9 @@
     setPaneStatus(paneId, null); // #50: 破棄ペインのバッジを残さない
     disposePaneQueue(paneId); // #51: 破棄ペインのプロンプトキュー/送信予約を残さない
     clearPaneCwd(paneId); // #45: 破棄ペインの cwd を残さない
+    clearPaneModelEffort(paneId); // #78 UX-5: 破棄ペインの model/effort 上書きを残さない
     unregisterTermClear(paneId);
+    unregisterTermSerialize(paneId); // #78 UX-6
     unregisterTermWrite(paneId);
     unregisterPaneInput(paneId);
     unregisterPaneAltScreen(paneId); // #77 FN-4b

@@ -28,3 +28,15 @@ export function clampScrollback(n: number): number {
   if (!Number.isFinite(n)) return SCROLLBACK_DEFAULT;
   return Math.min(SCROLLBACK_MAX, Math.max(SCROLLBACK_MIN, n));
 }
+
+/** #78 UX-8: PTY spawn 失敗後（ptyReady が false のまま）はキー入力のたびに Terminal.svelte
+ *  の inputBuffer へ積み続けるため、上限が無いと死んだペインで際限なく育つ（メモリリーク）。 */
+export const INPUT_BUFFER_MAX = 500;
+
+/** 配列へ要素を追加しつつ上限で先頭（古い方）を捨てる純関数。「最新の入力ほど有用」という
+ *  前提で末尾を優先して残す（単体テスト可能にするため Terminal.svelte から抽出）。 */
+export function pushCapped<T>(buf: T[], item: T, max: number = INPUT_BUFFER_MAX): T[] {
+  const next = buf.length >= max ? buf.slice(buf.length - max + 1) : buf.slice();
+  next.push(item);
+  return next;
+}

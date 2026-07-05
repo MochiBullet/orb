@@ -464,9 +464,14 @@
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    // #78 UX-7: alt-tab 等でポインタイベントが中断される（pointerup が来ない）と、
+    // これまでは pointermove リスナーが外れずスプリッタがカーソルに永久追従していた。
+    // pointercancel でも同じ後始末（onUp）を走らせて確実に解除する。
+    window.addEventListener("pointercancel", onUp);
   }
 </script>
 

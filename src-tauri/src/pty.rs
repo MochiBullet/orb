@@ -1,5 +1,5 @@
 use std::io::{Read, Write};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -46,9 +46,22 @@ fn kill_tree(pid: u32) {
 pub struct PtyHandle {
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     writer: Mutex<Option<Box<dyn Write + Send>>>,
-    child: Mutex<Box<dyn Child + Send + Sync>>,
+    // #78 UX-1: reader スレッドからも触れるよう Arc で共有する（EOF 検知時に try_wait() で
+    // 終了コードを非ブロッキングに拾うため）。
+    child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
     child_pid: Mutex<Option<u32>>,
     reader: Mutex<Option<JoinHandle<()>>>,
+}
+
+/// #78 UX-1: 子プロセス終了(EOF)検知時にフロントへ流す合成行を組み立てる。exit code が
+/// 非ブロッキングに取れなければ code 無しの表示にフォールバックする。新規イベント配線を
+/// 増やさず、既存の出力 Channel にそのまま乗せられるようバイト列で返す（純粋関数＝単体テスト可）。
+fn exit_notice(code: Option<u32>) -> Vec<u8> {
+    match code {
+        Some(c) => format!("\r\n\x1b[90m[process exited (code {c})]\x1b[0m\r\n"),
+        None => "\r\n\x1b[90m[process exited]\x1b[0m\r\n".to_string(),
+    }
+    .into_bytes()
 }
 
 impl PtyHandle {
@@ -85,11 +98,32 @@ impl PtyHandle {
             .take_writer()
             .map_err(|e| AppError::Pty(e.to_string()))?;
 
+        let child: Arc<Mutex<Box<dyn Child + Send + Sync>>> = Arc::new(Mutex::new(child));
+        let child_for_reader = Arc::clone(&child);
+
         let reader_handle = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf) {
-                    Ok(0) => break, // EOF（ConPTY クローズ or 子プロセス終了）
+                    Ok(0) => {
+                        // #78 UX-1: EOF（ConPTY クローズ or 子プロセス終了）を検知したのに
+                        // 何もフロントへ送らずに抜けると、死んだシェルが凍結ペインと見分けが
+                        // つかず、以降のキー入力も write_pty の Err→ログのみで無反応になる。
+                        // 新規イベント配線は増やさず、同じ output channel へ合成の1行を流して
+                        // から抜ける。kill() 経由の意図的な close でもこの EOF 経路を通るが、
+                        // その頃には呼び出し元（Terminal.svelte）は channel を見ていないので
+                        // 実害はない（send 失敗は無視）。
+                        // try_wait() は非ブロッキング（#78 の要件通り）。取れなければ code 無し。
+                        let code = child_for_reader
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .try_wait()
+                            .ok()
+                            .flatten()
+                            .map(|s| s.exit_code());
+                        let _ = on_output.send(InvokeResponseBody::Raw(exit_notice(code)));
+                        break;
+                    }
                     Ok(n) => {
                         if on_output
                             .send(InvokeResponseBody::Raw(buf[..n].to_vec()))
@@ -106,7 +140,7 @@ impl PtyHandle {
         Ok(PtyHandle {
             master: Mutex::new(Some(pair.master)),
             writer: Mutex::new(Some(writer)),
-            child: Mutex::new(child),
+            child,
             child_pid: Mutex::new(child_pid),
             reader: Mutex::new(Some(reader_handle)),
         })
@@ -183,5 +217,27 @@ impl Drop for PtyHandle {
     fn drop(&mut self) {
         // close_pty を経由しない経路（アプリ終了等）でも確実に後始末する。kill は冪等。
         self.kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #78 UX-1: exit code が取れた場合は表示に含める。
+    #[test]
+    fn exit_notice_includes_code_when_available() {
+        let msg = String::from_utf8(exit_notice(Some(3))).unwrap();
+        assert!(msg.contains("[process exited (code 3)]"), "{msg:?}");
+        assert!(msg.starts_with("\r\n"));
+        assert!(msg.ends_with("\r\n"));
+    }
+
+    /// exit code が非ブロッキングに取れなかった場合は code 無しの表示にフォールバックする。
+    #[test]
+    fn exit_notice_omits_code_when_unavailable() {
+        let msg = String::from_utf8(exit_notice(None)).unwrap();
+        assert!(msg.contains("[process exited]"));
+        assert!(!msg.contains("code"));
     }
 }
