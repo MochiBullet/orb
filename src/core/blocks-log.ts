@@ -246,3 +246,26 @@ export async function searchBlockEvents(raw: string, limit = 200): Promise<Searc
     return { hits: [], scanned_days: 0, limit_hit: false };
   }
 }
+
+/**
+ * 過去ログの複利（「このエラー前も見た？」）専用の検索。DSL 文字列を経由せず、同じ cwd・
+ * 同じコマンドのヒットを直接取りに行く（コマンド中の `:` 等が DSL のキー記法と衝突しない
+ * ようにするため、parseSearchQuery は通さない）。command は空白で AND 分割し command
+ * フィールドに絞って検索する＝完全一致ではなく「同じコマンドらしさ」の緩い一致。
+ */
+export async function searchSameCommand(
+  cwd: string,
+  command: string,
+  limit = 50,
+): Promise<SearchResult> {
+  const terms = command.split(/\s+/).filter(Boolean);
+  if (!terms.length) return { hits: [], scanned_days: 0, limit_hit: false };
+  try {
+    return await invoke<SearchResult>("search_block_events", {
+      filters: { terms, exit: null, cwd, field: "command", from: null, to: null, limit },
+    });
+  } catch (e) {
+    logError(`past-failure search failed: ${String(e)}`);
+    return { hits: [], scanned_days: 0, limit_hit: false };
+  }
+}

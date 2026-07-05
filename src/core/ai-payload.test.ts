@@ -3,8 +3,10 @@ import {
   formatBlockForAi,
   formatFixRequest,
   formatFailureDigest,
+  formatPastFailureContext,
   frameBracketedPaste,
   type BlockAiContext,
+  type PastMatchLike,
 } from "./ai-payload";
 
 const structured: BlockAiContext = {
@@ -56,6 +58,51 @@ describe("formatFixRequest / formatFailureDigest (#34)", () => {
     expect(s).toContain("失敗 1/2");
     expect(s).toContain("失敗 2/2");
     expect(s).toContain("$ pnpm build");
+  });
+});
+
+describe("formatPastFailureContext（過去ログの複利: このエラー前も見た？）", () => {
+  it("過去の一致が無ければ、初めての失敗である旨＋fix依頼にフォールバック", () => {
+    const s = formatPastFailureContext(structured, null);
+    expect(s).toContain("見つかりませんでした");
+    expect(s).toContain("exit 101 で失敗");
+  });
+
+  it("過去の失敗のみ（未解決）は解決記録が無い旨を明示", () => {
+    const match: PastMatchLike = {
+      failure: {
+        event: { ended_at: 1700000000000, exit_code: 1, command: "cargo test", output_body: "old error", text: "" },
+      },
+      resolvedBy: null,
+    };
+    const s = formatPastFailureContext(structured, match);
+    expect(s).toContain("過去にも同じコマンドが同じディレクトリで失敗");
+    expect(s).toContain("old error");
+    expect(s).toContain("まだ解決されていない可能性");
+    expect(s).not.toContain("--- 過去の成功 ---");
+  });
+
+  it("過去の失敗＋その後の解決は両方を構造化して含む", () => {
+    const match: PastMatchLike = {
+      failure: {
+        event: { ended_at: 1700000000000, exit_code: 1, command: "cargo test", output_body: "old error", text: "" },
+      },
+      resolvedBy: {
+        event: { ended_at: 1700000100000, exit_code: 0, command: "cargo test", output_body: "ok now", text: "" },
+      },
+    };
+    const s = formatPastFailureContext(structured, match);
+    expect(s).toContain("--- 過去の失敗 ---");
+    expect(s).toContain("old error");
+    expect(s).toContain("--- 過去の成功 ---");
+    expect(s).toContain("ok now");
+    expect(s).toContain("その後");
+  });
+
+  it("現在のブロック自身の構造化コンテキストも末尾に含む", () => {
+    const s = formatPastFailureContext(structured, null);
+    expect(s).toContain("cwd=C:\\proj");
+    expect(s).toContain("$ cargo test");
   });
 });
 

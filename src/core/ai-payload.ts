@@ -41,6 +41,57 @@ export function formatFixRequest(b: BlockAiContext): string {
   );
 }
 
+/** formatPastFailureContext が受け取る過去イベントの最小形（blocks-log.ts の BlockEvent の
+ *  部分集合＝この2ファイルの依存を作らないため構造的型付けで受ける）。 */
+export interface PastEventLike {
+  ended_at: number;
+  exit_code: number;
+  command: string | null;
+  output_body: string | null;
+  text: string;
+}
+
+/** past-failures.ts の判定結果の最小形（PastFailureMatch と構造的に一致）。 */
+export interface PastMatchLike {
+  failure: { event: PastEventLike };
+  resolvedBy: { event: PastEventLike } | null;
+}
+
+/** 過去ログの複利（Fable5 ロードマップ #3）: 「このエラー、前にも見た？」の整形。
+ *  past-failures.ts の判定結果を、現在の失敗ブロックと合わせて AI が読める形にする。 */
+export function formatPastFailureContext(current: BlockAiContext, match: PastMatchLike | null): string {
+  if (!match) {
+    return (
+      "このコマンドの過去の失敗記録はブロック履歴に見つかりませんでした（今回が初めてのようです）。\n\n" +
+      formatFixRequest(current)
+    );
+  }
+  const f = match.failure.event;
+  const lines = [
+    `過去にも同じコマンドが同じディレクトリで失敗しています（${fmtWhen(f.ended_at)}、exit=${f.exit_code}）。`,
+    "--- 過去の失敗 ---",
+    `$ ${f.command ?? "(コマンド不明)"}`,
+    f.output_body ?? f.text,
+  ];
+  if (match.resolvedBy) {
+    const r = match.resolvedBy.event;
+    lines.push(
+      "",
+      `その後 ${fmtWhen(r.ended_at)} に成功しています。何がどう変わって直ったか、今回のログと比較して教えて:`,
+      "--- 過去の成功 ---",
+      `$ ${r.command ?? "(コマンド不明)"}`,
+      r.output_body ?? r.text,
+    );
+  } else {
+    lines.push("", "この後の成功記録は見当たりません（まだ解決されていない可能性）。原因を考えて:");
+  }
+  return `${lines.join("\n")}\n\n${formatBlockForAi(current)}`;
+}
+
+function fmtWhen(ms: number): string {
+  return new Date(ms).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 /** 複数の失敗ブロックの一括ダイジェスト（BlockHistory の一括→AI 用）。 */
 export function formatFailureDigest(blocks: BlockAiContext[]): string {
   const parts = blocks.map((b, i) => `--- 失敗 ${i + 1}/${blocks.length} ---\n${formatBlockForAi(b)}`);

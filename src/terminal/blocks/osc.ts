@@ -4,9 +4,10 @@ import { get } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
 import { shouldNotifyForPane, notifyThrottled } from "./notify";
 import { logError } from "../../core/log";
-import { logBlockEvent, genId, capText } from "../../core/blocks-log";
+import { logBlockEvent, genId, capText, searchSameCommand } from "../../core/blocks-log";
 import { statusForClose } from "../../core/agent-status";
-import { formatBlockForAi, formatFixRequest, frameBracketedPaste } from "../../core/ai-payload";
+import { formatBlockForAi, formatFixRequest, formatPastFailureContext, frameBracketedPaste } from "../../core/ai-payload";
+import { findMostRecentPastFailure } from "../../core/past-failures";
 
 /**
  * OSC 133/633 の D マーカー payload（rest）から終了コードを解釈する純関数。
@@ -89,6 +90,9 @@ interface BlockDeco {
   code: number;
   command: string | null;
   outputBody: string | null;
+  /** decorate() 時点の currentBlockId。過去ログ検索で「自分自身」を除外するために持つ
+   *  （this.currentBlockId は次ブロック開始で先へ進むため、都度クロージャへ固定する）。 */
+  blockId: string;
   /** 登録時の term.cols。現在の cols と違えば作り直しが要る（planResize の stale 判定）。 */
   width: number;
   dec: IDecoration | undefined;
@@ -382,6 +386,27 @@ export class CommandBlocks {
     );
   }
 
+  /** Fable5 ロードマップ #3（過去ログの複利）: 「このエラー、前にも見た？」。
+   *  #49 の横断検索で同cwd・同コマンドの過去ヒットを引き、直近の過去の失敗＋その後の解決
+   *  （あれば）を構造化して AI ペインへ渡す。command が無いブロックは検索しようがないため
+   *  ボタン自体を出さない（呼び出し元でガード済み）。 */
+  private async checkPastFailure(
+    start: IMarker,
+    end: IMarker | null,
+    code: number,
+    command: string,
+    outputBody: string | null,
+    blockId: string,
+  ) {
+    const text = capText(this.blockText(start, end)).text;
+    const result = await searchSameCommand(this.cwd, command);
+    const match = findMostRecentPastFailure(result.hits, blockId);
+    this.sendToAiPane(
+      formatPastFailureContext({ cwd: this.cwd, exitCode: code, command, outputBody, text }, match),
+      "past-failure-check",
+    );
+  }
+
   /** #33: 確定済みコマンドラインをこのペインのプロンプトへ再入力する（Enter は送らない＝実行は人が確認）。
    *  bracketed paste で包む＝改行入りでも PSReadLine が「貼り付け」として文字通り挿入し、実行されない。 */
   private rerun(command: string) {
@@ -399,7 +424,16 @@ export class CommandBlocks {
     outputBody: string | null,
   ) {
     // #56: 再生成に必要なパラメータごとレジストリへ。装飾の実登録は共通経路に委ねる。
-    const entry: BlockDeco = { marker, endMarker, code, command, outputBody, width: 0, dec: undefined };
+    const entry: BlockDeco = {
+      marker,
+      endMarker,
+      code,
+      command,
+      outputBody,
+      blockId: this.currentBlockId ?? "",
+      width: 0,
+      dec: undefined,
+    };
     entry.dec = this.registerBlockDecoration(entry);
     if (!entry.dec) return;
     this.blockDecos.push(entry);
@@ -409,7 +443,7 @@ export class CommandBlocks {
    *  （初回作成と #56 の resize 再生成の共通経路）。entry.width は登録幅で更新する。
    *  marker が dispose 済みなら xterm が undefined を返す（呼び元/次の掃除で捨てられる）。 */
   private registerBlockDecoration(entry: BlockDeco): IDecoration | undefined {
-    const { marker, endMarker, code, command, outputBody } = entry;
+    const { marker, endMarker, code, command, outputBody, blockId } = entry;
     const ok = code === 0;
     entry.width = this.term.cols;
     const dec = this.term.registerDecoration({
@@ -473,6 +507,19 @@ export class CommandBlocks {
           this.fixWithAi(marker, endMarker, code, command, outputBody);
         };
         tools.appendChild(fixBtn);
+        // 過去ログの複利（Fable5 ロードマップ #3）。command が確定していないと同一コマンドの
+        // 検索しようがないため、fix と違い command 必須（テキストへのフォールバックはしない）。
+        if (command) {
+          const pastBtn = document.createElement("button");
+          pastBtn.textContent = "🕐 前例";
+          pastBtn.title = "同じコマンドの過去の失敗・解決履歴を AI ペインに渡す";
+          pastBtn.onpointerdown = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void this.checkPastFailure(marker, endMarker, code, command, outputBody, blockId);
+          };
+          tools.appendChild(pastBtn);
+        }
       }
       el.appendChild(tools);
     });
