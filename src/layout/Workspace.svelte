@@ -93,9 +93,14 @@
           return forAi && isImagePath(p) ? formatImagePath(rel, true) : quotePath(rel);
         })
         .join(" ") + " ";
-    void invoke("write_pty", { paneId: target, data: Array.from(dropEncoder.encode(text)) }).catch(
-      (e) => logError(`pane ${target}: drag-drop write failed: ${String(e)}`),
-    );
+    // #73 SEC-6: 生書込ではなく他の挿入経路（rerun/send-to-AI/paste）と同じ bracketed paste で包む。
+    // 素の write_pty だとファイル名に " や改行（Unix では有効）が混ざった時 quotePath の素朴な
+    // 引用符を破ってコマンド注入され得る。bracketed paste なら改行入りでも「貼り付け」として
+    // 文字通り挿入されるだけで実行されない。
+    void invoke("write_pty", {
+      paneId: target,
+      data: Array.from(dropEncoder.encode(frameBracketedPaste(text))),
+    }).catch((e) => logError(`pane ${target}: drag-drop write failed: ${String(e)}`));
   }
 
   // アクティブタブは最新の $layout、非アクティブは保存済み layout を使う。

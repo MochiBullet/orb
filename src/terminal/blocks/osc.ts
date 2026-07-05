@@ -22,17 +22,28 @@ export function parseExitCode(rest: string): number {
   return Number.isNaN(n) ? -1 : n;
 }
 
+/** OSC 9/777 通知本文（title/body 共通）の上限文字数。E の COMMAND_MAX とは別物：
+ *  通知は表示前提でずっと短くて十分なうえ、巨大 payload が OS 通知や DOM をそのまま
+ *  肥大させるのを orb 側で止める（#73 SEC-7）。 */
+export const NOTIFY_MAX = 200;
+
+/** 上限（NOTIFY_MAX）超過時は末尾を "…" で切り詰める純関数（#73 SEC-7）。 */
+export function capNotifyText(s: string): string {
+  return s.length > NOTIFY_MAX ? s.slice(0, NOTIFY_MAX) + "…" : s;
+}
+
 /**
  * iTerm2 スタイルの OSC 9 通知（`OSC 9 ; <message> ST/BEL`）を解釈する純関数。
  *
  * data は識別子後の残り（"message"）。通知本文を返す。通知でないもの＝空文字や、
  * ConEmu/Windows Terminal 系の数値サブコマンド（`OSC 9 ; 4 ; …`=進捗バー、`9;1`=cwd 等）は
  * null（無視）に写す。これで PowerShell 等の進捗表示を通知と誤検知しない。
+ * 巨大 payload は NOTIFY_MAX で切り詰める（#73 SEC-7）。
  */
 export function parseOsc9(data: string): string | null {
   if (/^\d+;/.test(data)) return null; // ConEmu numeric subcommand (progress/cwd/…), not a notification
   const body = data.trim();
-  return body === "" ? null : body;
+  return body === "" ? null : capNotifyText(body);
 }
 
 /**
@@ -42,6 +53,10 @@ export function parseOsc9(data: string): string | null {
  * - 先頭が "notify" 以外のサブコマンドは null（無視）。
  * - title 欠落は "orb" にフォールバック。body は ";" を含んでも保持（3 個目以降を再結合）。
  * - title も body も空なら情報ゼロとして null（無視）。
+ * - title/body とも NOTIFY_MAX で切り詰める（#73 SEC-7）。
+ *
+ * 注意: ここで返す title は攻撃者（プログラムの出力）が完全に制御できる生値。
+ * 実際に OS 通知へ渡す際は buildOsc777Notification が固定ラベルへ差し替える（#73 SEC-4）。
  */
 export function parseOsc777(data: string): { title: string; body: string } | null {
   const parts = data.split(";");
@@ -49,7 +64,26 @@ export function parseOsc777(data: string): { title: string; body: string } | nul
   const rawTitle = (parts[1] ?? "").trim();
   const body = parts.slice(2).join(";").trim();
   if (rawTitle === "" && body === "") return null;
-  return { title: rawTitle || "orb", body };
+  return { title: capNotifyText(rawTitle || "orb"), body: capNotifyText(body) };
+}
+
+/** OSC 9/777 転送通知に強制する固定タイトル。OSC 777 の title はプログラムの出力＝攻撃者が
+ *  完全に制御できるため（"Microsoft Account" 等になりすまして偽の緊急感を出せる）、ここで
+ *  受け取った値は一切表示に使わず常にこのラベルにする。「端末出力からの転送であって orb 自身の
+ *  メッセージではない」を一目で分かるようにする（#73 SEC-4）。 */
+export const TERMINAL_NOTIFY_TITLE = "orb · 端末";
+
+/** OSC 9 の通知内容を組み立てる純関数。title は常に固定（#73 SEC-4）。 */
+export function buildOsc9Notification(data: string): { title: string; body: string } | null {
+  const body = parseOsc9(data);
+  return body == null ? null : { title: TERMINAL_NOTIFY_TITLE, body };
+}
+
+/** OSC 777 の通知内容を組み立てる純関数。攻撃者制御の title（parseOsc777 の戻り値）は
+ *  使わず、固定ラベルにすり替える（#73 SEC-4）。 */
+export function buildOsc777Notification(data: string): { title: string; body: string } | null {
+  const n = parseOsc777(data);
+  return n == null ? null : { title: TERMINAL_NOTIFY_TITLE, body: n.body };
 }
 
 /** command として受け付ける上限。巨大ワンライナー貼り付けで JSONL/DOM を肥大させない。 */
@@ -379,16 +413,18 @@ export class CommandBlocks {
     );
   }
 
-  /** #32: iTerm2 スタイル OSC 9 通知（`OSC 9 ; <message>`）を OS 通知へ転送。 */
+  /** #32/#73: iTerm2 スタイル OSC 9 通知（`OSC 9 ; <message>`）を OS 通知へ転送。
+   *  title は buildOsc9Notification が常に固定ラベルにする（SEC-4：なりすまし対策）。 */
   private onOsc9(data: string): boolean {
-    const body = parseOsc9(data);
-    if (body != null && shouldNotifyForPane(this.paneId)) notifyThrottled(this.paneId, "orb", body);
+    const n = buildOsc9Notification(data);
+    if (n && shouldNotifyForPane(this.paneId)) notifyThrottled(this.paneId, n.title, n.body);
     return true;
   }
 
-  /** #32: `OSC 777 ; notify ; <title> ; <body>` を OS 通知へ転送。 */
+  /** #32/#73: `OSC 777 ; notify ; <title> ; <body>` を OS 通知へ転送。
+   *  攻撃者制御の title はここでは使わない（buildOsc777Notification 参照・SEC-4）。 */
   private onOsc777(data: string): boolean {
-    const n = parseOsc777(data);
+    const n = buildOsc777Notification(data);
     if (n && shouldNotifyForPane(this.paneId)) notifyThrottled(this.paneId, n.title, n.body);
     return true;
   }
