@@ -41,6 +41,7 @@
   import { shouldNotifyForPane } from "./blocks/notify";
   import { leafIds } from "../layout/tree";
   import { config } from "../core/config";
+  import { clampFontSize, clampScrollback, FONT_SIZE_MIN, FONT_SIZE_MAX } from "../core/limits";
   import { logInfo, logWarn, logError } from "../core/log";
   import { invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -273,7 +274,8 @@
   // 設定でフォントサイズが変わったら即反映。非表示ペインは fit せず、再表示時に
   // IntersectionObserver の復帰ハンドラで fit し直す（非表示中の fit は描画を壊すため）。
   $effect(() => {
-    const fs = $config.font_size;
+    // #75 ROB-3: 手編集 config.toml 等で範囲外/NaN が来ても xterm へは通さない。
+    const fs = clampFontSize($config.font_size);
     if (term && term.options.fontSize !== fs) {
       term.options.fontSize = fs;
       if (isVisible()) {
@@ -319,8 +321,9 @@
   // ctrlKey 付き wheel として届く。
   function zoom(delta: number) {
     if (!term) return;
-    const cur = term.options.fontSize ?? cfg.font_size;
-    term.options.fontSize = Math.min(28, Math.max(8, cur + delta));
+    const cur = term.options.fontSize ?? clampFontSize(cfg.font_size);
+    // #75 ROB-3: zoom も構築時と同じ定数を参照（8..28 決め打ちを一本化）。
+    term.options.fontSize = Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, cur + delta));
     fit?.fit();
     pty?.resize(term.cols, term.rows)?.catch((e) =>
       logError(`pane ${paneId}: resize (zoom) failed: ${String(e)}`),
@@ -329,7 +332,7 @@
   }
   function resetZoom() {
     if (!term) return;
-    term.options.fontSize = cfg.font_size;
+    term.options.fontSize = clampFontSize(cfg.font_size);
     fit?.fit();
     pty?.resize(term.cols, term.rows)?.catch((e) =>
       logError(`pane ${paneId}: resize (reset zoom) failed: ${String(e)}`),
@@ -501,8 +504,10 @@
     logInfo(`pane ${paneId}: mount`);
     term = new Terminal({
       fontFamily: cfg.font_family,
-      fontSize: cfg.font_size,
-      scrollback: cfg.scrollback,
+      // #75 ROB-3: 手編集 config.toml の 0/9999/10億等が xterm 構築に直行してペインが
+      // 破損（0px→不可視、巨大 scrollback→RangeError/メモリ膨張）するのを境界でクランプして防ぐ。
+      fontSize: clampFontSize(cfg.font_size),
+      scrollback: clampScrollback(cfg.scrollback),
       cursorBlink: true,
       allowProposedApi: true,
       // #21: 背景画像時だけ透過を許可（この時は WebGL 非使用＝DOM レンダラで透過が効く）。

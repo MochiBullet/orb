@@ -21,10 +21,14 @@ async function boot() {
 
   // 端末生成前に設定を読み込んでおく（Terminal は get(config) を同期参照する）。
   await loadConfig();
-  // 既定背景センチネルを実パスへ解決（mount 前に済ませ、初回描画から正しい背景を出す）。
-  await initDefaultBg();
 
   mount(App, { target: document.getElementById("app")! });
+
+  // #75 ROB-4: 既定背景センチネルの実パス解決（~3MBの埋込動画を読んで比較/初回は書き込み）は
+  // 遅い/競合ディスクだと初回描画をブロックしタイムアウトも無い。bgMedia はリアクティブな
+  // ストアで App.svelte が購読しているため mount 前に待つ必要が無く、fire-and-forget にして
+  // 解決後に背景がポップインする形にする（UI は即座に表示）。
+  void initDefaultBg();
 }
 
 void boot();
