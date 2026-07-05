@@ -255,7 +255,7 @@
     inset: -30%;
     background:
       radial-gradient(ellipse at 30% 35%, rgba(45, 212, 191, 0.16), transparent 60%),
-      radial-gradient(ellipse at 70% 65%, rgba(167, 139, 250, 0.13), transparent 55%);
+      radial-gradient(ellipse at 70% 65%, rgba(var(--violet-rgb, 167, 139, 250), 0.13), transparent 55%);
     animation: aurora 16s ease-in-out infinite alternate;
     pointer-events: none;
   }

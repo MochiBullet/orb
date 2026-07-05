@@ -801,10 +801,10 @@
     box-shadow: inset 0 0 0 1px rgba(45, 212, 191, 0.45);
   }
   .term-wrap.ai {
-    box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.5);
+    box-shadow: inset 0 0 0 1px rgba(var(--violet-rgb, 167, 139, 250), 0.5);
   }
   .term-wrap.ai.focused {
-    box-shadow: inset 0 0 0 1.5px rgba(167, 139, 250, 0.75);
+    box-shadow: inset 0 0 0 1.5px rgba(var(--violet-rgb, 167, 139, 250), 0.75);
   }
   /* ブロードキャスト中は全ペインを赤枠で警告（入力が全ペインに飛ぶ）。 */
   .term-wrap.broadcast {

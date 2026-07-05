@@ -3,6 +3,7 @@
   import { config, saveConfig, type OrbConfig } from "../core/config";
   import { applyBgVars } from "../core/theme";
   import { BG_ZOOM_MAX, DEFAULT_BG } from "../core/bg";
+  import { hexToRgbTriplet } from "../core/color";
   import { open } from "@tauri-apps/plugin-dialog";
 
   let { onClose }: { onClose: () => void } = $props();
@@ -22,10 +23,12 @@
     { value: "custom", label: "カスタム" },
   ];
 
-  // ライブプレビュー: ドラフトのアクセント色/AIペイン色を即 --teal/--violet に反映。
+  // ライブプレビュー: ドラフトのアクセント色/AIペイン色を即 --teal/--violet(-rgb) に反映。
   $effect(() => {
+    const aiAccent = draft.ai_accent || "#a78bfa";
     document.documentElement.style.setProperty("--teal", draft.accent || "#2dd4bf");
-    document.documentElement.style.setProperty("--violet", draft.ai_accent || "#a78bfa");
+    document.documentElement.style.setProperty("--violet", aiAccent);
+    document.documentElement.style.setProperty("--violet-rgb", hexToRgbTriplet(aiAccent));
   });
 
   // #21: 背景画像・暗幕のライブプレビュー。config ストアを経由せず CSS 変数を直接書く
@@ -79,8 +82,10 @@
   function cancel() {
     // プレビューを保存前の値へ戻す（アクセント色＋AIペイン色＋背景）。
     const saved = get(config);
+    const aiAccent = saved.ai_accent || "#a78bfa";
     document.documentElement.style.setProperty("--teal", saved.accent || "#2dd4bf");
-    document.documentElement.style.setProperty("--violet", saved.ai_accent || "#a78bfa");
+    document.documentElement.style.setProperty("--violet", aiAccent);
+    document.documentElement.style.setProperty("--violet-rgb", hexToRgbTriplet(aiAccent));
     applyBgVars(saved);
     onClose();
   }

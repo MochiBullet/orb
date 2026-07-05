@@ -2,6 +2,7 @@ import { config, type OrbConfig } from "./config";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { get, writable } from "svelte/store";
 import { bgLayerVars, isVideoPath, resolveBgPath, type BgConfig } from "./bg";
+import { hexToRgbTriplet } from "./color";
 
 /** 背景メディア（App.svelte の <img>/<video> が読む）。src は asset プロトコル URL。 */
 export type BgMedia = { src: string; video: boolean } | null;
@@ -50,8 +51,14 @@ export async function initDefaultBg(): Promise<void> {
 
 /** config のアクセント色・AIペイン色・背景を CSS 変数へ流し込む（config が変わるたび自動適用）。 */
 function apply(c: OrbConfig) {
-  document.documentElement.style.setProperty("--teal", c.accent || "#2dd4bf");
-  document.documentElement.style.setProperty("--violet", c.ai_accent || "#a78bfa");
+  const accent = c.accent || "#2dd4bf";
+  const aiAccent = c.ai_accent || "#a78bfa";
+  const root = document.documentElement.style;
+  root.setProperty("--teal", accent);
+  root.setProperty("--violet", aiAccent);
+  // #69 followup: 実際の枠線は rgba(167,139,250,X) 決め打ちで --violet を見ていなかった。
+  // rgba(var(--violet-rgb), X) で参照できるよう R/G/B 成分も並行して持つ。
+  root.setProperty("--violet-rgb", hexToRgbTriplet(aiAccent));
   applyBgVars(c);
 }
 

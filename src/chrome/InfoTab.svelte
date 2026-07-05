@@ -206,7 +206,7 @@
     overflow-y: auto;
     background:
       radial-gradient(1200px 500px at 70% -10%, rgba(45, 212, 191, 0.07), transparent 60%),
-      radial-gradient(900px 400px at 10% 110%, rgba(167, 139, 250, 0.06), transparent 60%),
+      radial-gradient(900px 400px at 10% 110%, rgba(var(--violet-rgb, 167, 139, 250), 0.06), transparent 60%),
       #030807;
     color: var(--fg);
   }
@@ -381,7 +381,7 @@
     color: var(--grey);
     border-left: 2px solid var(--violet, #a78bfa);
     padding: 6px 12px;
-    background: rgba(167, 139, 250, 0.05);
+    background: rgba(var(--violet-rgb, 167, 139, 250), 0.05);
     border-radius: 0 6px 6px 0;
   }
   .mcp {

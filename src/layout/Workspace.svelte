@@ -654,12 +654,12 @@
     padding: 3px 9px;
     border-radius: 999px;
     background: #05100e;
-    border: 1px solid rgba(167, 139, 250, 0.5);
+    border: 1px solid rgba(var(--violet-rgb, 167, 139, 250), 0.5);
     color: var(--violet, #a78bfa);
     font-size: 0.68rem;
     letter-spacing: 0.04em;
     pointer-events: none;
-    box-shadow: 0 2px 12px -6px rgba(167, 139, 250, 0.5);
+    box-shadow: 0 2px 12px -6px rgba(var(--violet-rgb, 167, 139, 250), 0.5);
   }
 
   /* #51: 送信予約中のカウントダウントースト（下中央・キャンセルだけ操作可）。 */

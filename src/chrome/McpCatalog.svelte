@@ -182,9 +182,9 @@
     white-space: nowrap;
   }
   .tag.oauth {
-    color: #a78bfa;
-    border: 1px solid rgba(167, 139, 250, 0.4);
-    background: rgba(167, 139, 250, 0.1);
+    color: var(--violet, #a78bfa);
+    border: 1px solid rgba(var(--violet-rgb, 167, 139, 250), 0.4);
+    background: rgba(var(--violet-rgb, 167, 139, 250), 0.1);
   }
   .tag.note {
     color: var(--grey);
