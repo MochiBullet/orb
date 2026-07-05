@@ -278,7 +278,9 @@
       term.options.fontSize = fs;
       if (isVisible()) {
         fit?.fit();
-        pty?.resize(term.cols, term.rows);
+        pty?.resize(term.cols, term.rows)?.catch((e) =>
+          logError(`pane ${paneId}: resize (font size) failed: ${String(e)}`),
+        );
         blocks?.onResize(); // #56: cols が変わったらブロック装飾の幅を作り直す
       }
     }
@@ -320,14 +322,18 @@
     const cur = term.options.fontSize ?? cfg.font_size;
     term.options.fontSize = Math.min(28, Math.max(8, cur + delta));
     fit?.fit();
-    pty?.resize(term.cols, term.rows);
+    pty?.resize(term.cols, term.rows)?.catch((e) =>
+      logError(`pane ${paneId}: resize (zoom) failed: ${String(e)}`),
+    );
     blocks?.onResize(); // #56
   }
   function resetZoom() {
     if (!term) return;
     term.options.fontSize = cfg.font_size;
     fit?.fit();
-    pty?.resize(term.cols, term.rows);
+    pty?.resize(term.cols, term.rows)?.catch((e) =>
+      logError(`pane ${paneId}: resize (reset zoom) failed: ${String(e)}`),
+    );
     blocks?.onResize(); // #56
   }
   function onWheel(e: WheelEvent) {
@@ -678,7 +684,9 @@
       requestAnimationFrame(() => {
         if (disposed || !term || !fit || !isVisible()) return;
         fit.fit();
-        pty?.resize(term.cols, term.rows);
+        pty?.resize(term.cols, term.rows)?.catch((e) =>
+          logError(`pane ${paneId}: resize (tab reshow) failed: ${String(e)}`),
+        );
         term.refresh(0, term.rows - 1);
         blocks?.onResize(); // #56
       });
@@ -701,7 +709,9 @@
         // 走るので、そこで正しく fit し直す。
         if (!isVisible()) return;
         fit.fit();
-        pty?.resize(term.cols, term.rows);
+        pty?.resize(term.cols, term.rows)?.catch((e) =>
+          logError(`pane ${paneId}: resize (debounced) failed: ${String(e)}`),
+        );
         term.refresh(0, term.rows - 1);
         // #56: 分割/ウィンドウリサイズ/ペインズーム(Ctrl+Shift+Z)後、cols 固定で登録済みの
         // 旧ブロック装飾（ツールバー/badge）を現在幅で作り直す（幅一致なら no-op）。
@@ -717,6 +727,9 @@
     disposed = true;
     logInfo(`pane ${paneId}: destroy`);
     if (get(lastShellPane) === paneId) lastShellPane.set(null); // #34: 消えたペインを届け先に残さない
+    // AI ペイン自身が破棄された時も同様にクリア。放置すると Ctrl+L 等が死んだ paneId へ
+    // write_pty し続け、write_pty 失敗を黙って catch するだけで機能が無言で壊れて見える。
+    if (get(aiPane) === paneId) aiPane.set(null);
     if (resizeTimer) clearTimeout(resizeTimer);
     if (scrollbackTimer) clearTimeout(scrollbackTimer);
     if (aiIdleTimer) clearTimeout(aiIdleTimer);
@@ -748,7 +761,7 @@
 <div
   class="term-wrap"
   class:focused={$focusedPane === paneId}
-  class:ai={role === "ai"}
+  class:ai={paneId === $aiPane}
   class:broadcast={$broadcast}
 >
   <div class="term" bind:this={container} onpointerdown={focusThis} role="presentation"></div>

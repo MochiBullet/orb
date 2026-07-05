@@ -52,8 +52,12 @@ export function closePane(node: PaneNode, paneId: number): PaneNode | null {
   return { ...node, a, b };
 }
 
-/** split の ratio を更新（ドラッグ反映、ツリーが単一の真実源）。 */
+/** split の ratio を更新（ドラッグ反映、ツリーが単一の真実源）。ドラッグ中に workspace 要素の
+ *  矩形が一時的に 0x0 になる（最小化/復元をまたぐ等）と呼び出し側の比計算が NaN/Infinity に
+ *  なりうるため、非有限値はここで弾いて無視する（1回分のドラッグ更新を捨てるだけに留め、
+ *  ツリーへの永続的な NaN 汚染を防ぐ）。 */
 export function setRatio(node: PaneNode, splitId: number, ratio: number): PaneNode {
+  if (!Number.isFinite(ratio)) return node;
   if (node.kind === "leaf") return node;
   if (node.id === splitId) return { ...node, ratio };
   return { ...node, a: setRatio(node.a, splitId, ratio), b: setRatio(node.b, splitId, ratio) };

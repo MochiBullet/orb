@@ -48,6 +48,15 @@
   let wsEl: HTMLDivElement;
   const FULL: Rect = { x: 0, y: 0, w: 100, h: 100 };
 
+  // ペイン ID はタブを跨いでグローバル単調採番（nextPaneId）＝旧タブでズームしていた
+  // paneId は新タブのツリーには存在しない。リセットせずタブを切り替えると rects/splitters が
+  // 「存在しない ID だけの短絡計算」になり、切替先タブの実ペインが軒並み無配置になる。
+  // タブ切替のたびに必ずズーム状態を捨てる。
+  $effect(() => {
+    $activeTabId;
+    zoomedPane = null;
+  });
+
   // 新規タブで一瞬出る小さな welcome。
   let miniWelcome = $state(false);
   let miniTimer: number | undefined;

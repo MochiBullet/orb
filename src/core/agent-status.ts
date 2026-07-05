@@ -58,6 +58,7 @@ export function stripAnsi(s: string): string {
     .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "") // CSI
     .replace(/\x1b[()][@-~]/g, "") // charset 指定（ESC ( B 等）
     .replace(/\x1b[@-Z\\-_]/g, "") // 2文字エスケープ
+    .replace(/\x1b\[[0-9;?]*[ -/]*$/, "") // 末尾で終端バイト未着の CSI 断片（chunk 境界で分断されたケース）
     .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
 }
 

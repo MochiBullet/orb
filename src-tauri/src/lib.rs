@@ -43,11 +43,17 @@ pub fn run() {
     // 子プロセス（pwsh → claude → statusline）を spawn する前に環境を浄化する。
     sanitize_inherited_env();
 
+    // tauri に渡す実体と panic hook 用 static に登録する実体は、同じ ptys（Arc）を
+    // 指す clone。panic=abort（Cargo.toml）で panic 時に Drop も ExitRequested も
+    // 走らずシェルの子孫プロセスが孤児化するのを防ぐための後始末（詳細は state.rs）。
+    let app_state = AppState::default();
+    state::install_panic_hook(app_state.clone());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState::default())
+        .manage(app_state)
         .setup(|_app| {
             // 初回のみ設定ファイルを seed（読み取りコマンドから書き込み副作用を分離）。
             config::seed_defaults();
@@ -83,13 +89,10 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             // アプリ終了時に全 PTY をツリーごと kill して子 pwsh の孤児化を防ぐ
-            // （process::exit で Drop が走らない経路の保険）。
+            // （process::exit で Drop が走らない経路の保険）。panic hook と同じ
+            // AppState::kill_all_ptys を共有（ロジックを二重管理しない）。
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                let state = app_handle.state::<AppState>();
-                let mut ptys = state.ptys.lock().unwrap();
-                for (_, mut handle) in ptys.drain() {
-                    handle.kill();
-                }
+                app_handle.state::<AppState>().kill_all_ptys();
             }
         });
 }

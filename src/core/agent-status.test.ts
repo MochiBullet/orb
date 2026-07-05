@@ -41,6 +41,12 @@ describe("stripAnsi (#50)", () => {
     expect(stripAnsi("line1\nline2\tend")).toBe("line1\nline2\tend");
     expect(stripAnsi("\x1b]633;A\x1b\\prompt")).toBe("prompt");
   });
+
+  it("chunk境界で分断された不完全な CSI 断片も末尾なら除去する", () => {
+    expect(stripAnsi("hello\x1b[1;2")).toBe("hello"); // 終端バイト未着のまま切れた CSI
+    expect(stripAnsi("hello\x1b[")).toBe("hello"); // CSI 導入直後で切れた
+    expect(stripAnsi("hello\x1b")).toBe("hello"); // ESC 単体で切れた
+  });
 });
 
 describe("classifyIdle (#50: 静止時の末尾分類)", () => {

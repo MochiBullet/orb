@@ -55,6 +55,26 @@ export function parseOsc777(data: string): { title: string; body: string } | nul
 /** command として受け付ける上限。巨大ワンライナー貼り付けで JSONL/DOM を肥大させない。 */
 export const COMMAND_MAX = 4096;
 
+/** alt-screen 突入/離脱を表す DECSET/DECRST（CSI `?Pm h`/`?Pm l`）の対象コード。 */
+const ALT_SCREEN_MODES = new Set([47, 1047, 1049]);
+
+/**
+ * CSI `?Pm h` / `?Pm l` の params に alt-screen 系コード（47/1047/1049）が含まれるかを見る純関数。
+ *
+ * xterm の `buffer.active.type`（および `onBufferChange`）は「実際にバッファが遷移した瞬間」
+ * だけ発火するキャッシュ済み内部状態で、TUI が `\e[?1049l` を出さず異常終了すると xterm 内部で
+ * alternate に貼り付いたまま二度と遷移イベントを出さなくなる（xterm.js の確認済みの挙動：
+ * activateAltBuffer/activateNormalBuffer は「すでにその状態」なら早期 return して素通りする）。
+ * これに頼ると、1個目の TUI が異常終了した後は 2個目の TUI が実際に `\e[?1049h` を出しても
+ * xterm 内部的には「もう alternate」なので無反応＝以後ずっと検知できなくなる。
+ * そこで xterm のキャッシュ状態を経由せず、CSI シーケンスの到着そのもの（本関数の入力）を
+ * 都度見る。シェル/TUI 側は毎回このシーケンスを律儀に出すので、xterm 内部がどう記憶しているかに
+ * 依存しない。
+ */
+export function isAltScreenModeParams(params: (number | number[])[]): boolean {
+  return params.some((p) => typeof p === "number" && ALT_SCREEN_MODES.has(p));
+}
+
 /**
  * #33: `E;<nonce>;<escaped-cmdline>` の rest（"nonce;cmd"）からコマンドラインを取り出す純関数。
  *
@@ -125,6 +145,10 @@ export class CommandBlocks {
   private outputStart: IMarker | null = null;
   /** この時間(ms)以上かかったコマンドだけ完了通知の対象にする。 */
   private static NOTIFY_MS = 6000;
+  /** alt-screen（vim 等）判定の自前の写し。term.buffer.active.type の直読みや onBufferChange
+   *  （xterm 内部のキャッシュ済みバッファ状態）には依存せず、CSI ?1049/47/1047 h/l という
+   *  生シーケンスの到着そのものを自前で追う（isAltScreenModeParams のドキュメント参照）。 */
+  private altScreen = false;
 
   constructor(
     private term: Terminal,
@@ -137,11 +161,23 @@ export class CommandBlocks {
     // #32: TUI（Claude Code 等）が完了/確認待ちで撃つ通知エスケープを OS 通知へ転送。
     this.disposables.push(term.parser.registerOscHandler(9, (d) => this.onOsc9(d)));
     this.disposables.push(term.parser.registerOscHandler(777, (d) => this.onOsc777(d)));
-    // #56: alt-screen（vim 等）中は onResize をスキップするため、normal 復帰の瞬間に
-    // 作り直しを追いかける（alt 中に分割/リサイズされた場合の幅ズレ取りこぼし防止）。
+    // alt-screen 突入/離脱を、xterm のバッファ切替イベントではなく CSI ?1049/47/1047 h/l の
+    // 生シーケンス到着そのもので検知する（altScreen ドキュメント参照）。xterm 内部の
+    // InputHandler も同じシグネチャで DECSET/DECRST を処理しており、false を返す限りその本来の
+    // 処理（実際のバッファ切替）は素通しになる＝ここでは観測に徹する。
     this.disposables.push(
-      term.buffer.onBufferChange((buf) => {
-        if (buf.type === "normal") this.onResize();
+      term.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => {
+        if (isAltScreenModeParams(params)) this.altScreen = true;
+        return false;
+      }),
+    );
+    this.disposables.push(
+      term.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) => {
+        if (isAltScreenModeParams(params)) {
+          this.altScreen = false;
+          this.onResize(); // #56: alt 中に分割/リサイズされていた場合の幅ズレをここで作り直す
+        }
+        return false;
       }),
     );
   }
@@ -150,10 +186,10 @@ export class CommandBlocks {
    * #56: 分割/ウィンドウリサイズ/ズームで cols が変わった後、既存ブロック装飾を現在幅で
    * 作り直す（Terminal.svelte の fit 確定点から呼ばれる）。dispose 済み marker はレジストリ
    * から掃除する。幅が合っているエントリには触れない＝cols 不変の resize は比較だけの no-op。
-   * alt-screen 中は何もしない（handle() と同じガード。復帰は onBufferChange で拾う）。
+   * alt-screen 中は何もしない（handle() と同じガード。復帰は CSI ?1049/47/1047 l の検知で拾う）。
    */
   onResize() {
-    if (this.term.buffer.active.type === "alternate") return;
+    if (this.altScreen) return;
     const { keep, drop, stale } = planResize(this.blockDecos, this.term.cols);
     for (const e of drop) e.dec?.dispose();
     this.blockDecos = keep;
@@ -166,10 +202,15 @@ export class CommandBlocks {
   }
 
   private handle(data: string): boolean {
-    if (this.term.buffer.active.type === "alternate") return true;
     const sep = data.indexOf(";");
     const marker = sep === -1 ? data : data.slice(0, sep);
     const rest = sep === -1 ? "" : data.slice(sep + 1);
+    // altScreen は CSI ?1049/47/1047 h/l の生シーケンス検知で追っており、TUI が \e[?1049l を
+    // 出さず異常終了しても次の TUI の \e[?1049h を独立に拾えるため、xterm 側のキャッシュ済み
+    // バッファ状態のように貼り付いたままにはならない（isAltScreenModeParams ドキュメント参照）。
+    // よって特定マーカーだけ通す自己復旧は不要＝alt 中は全マーカーを一律に握り潰す
+    // （偽ブロック防止を徹底する。復帰自体は上の CSI ?l ハンドラが検知する）。
+    if (this.altScreen) return true;
     switch (marker) {
       case "A":
         this.onPromptStart();
@@ -292,6 +333,7 @@ export class CommandBlocks {
     if (get(dnd) && code === 0) return; // フォーカスモード(#20): 成功通知は出さない（失敗は昇格）
     const secs = Math.round(elapsed / 1000);
     notifyThrottled(
+      this.paneId,
       code === 0 ? "orb ✓ コマンド完了" : `orb ✗ 失敗 (exit ${code})`,
       `${secs}秒 — ${this.cwd || "(orb)"}`,
     );
@@ -300,14 +342,14 @@ export class CommandBlocks {
   /** #32: iTerm2 スタイル OSC 9 通知（`OSC 9 ; <message>`）を OS 通知へ転送。 */
   private onOsc9(data: string): boolean {
     const body = parseOsc9(data);
-    if (body != null && shouldNotifyForPane(this.paneId)) notifyThrottled("orb", body);
+    if (body != null && shouldNotifyForPane(this.paneId)) notifyThrottled(this.paneId, "orb", body);
     return true;
   }
 
   /** #32: `OSC 777 ; notify ; <title> ; <body>` を OS 通知へ転送。 */
   private onOsc777(data: string): boolean {
     const n = parseOsc777(data);
-    if (n && shouldNotifyForPane(this.paneId)) notifyThrottled(n.title, n.body);
+    if (n && shouldNotifyForPane(this.paneId)) notifyThrottled(this.paneId, n.title, n.body);
     return true;
   }
 

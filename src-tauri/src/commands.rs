@@ -139,10 +139,13 @@ pub fn get_default_bg() -> Result<String> {
     config::ensure_default_bg().map(|p| p.to_string_lossy().into_owned())
 }
 
-/// Claude のトークン使用率（サイドバー用、ブロッキング HTTP は別スレッドで実行される）。
+/// Claude のトークン使用率（サイドバー用）。401/403 リトライ込みで最悪 ~20s ブロッキングし得るため、
+/// 他の重いコマンド（checkpoint_* 等）と同様 async + spawn_blocking で専用スレッドへ逃がす。
 #[tauri::command]
-pub fn get_usage() -> Result<crate::usage::Usage> {
-    crate::usage::fetch_usage()
+pub async fn get_usage() -> Result<crate::usage::Usage> {
+    tauri::async_runtime::spawn_blocking(crate::usage::fetch_usage)
+        .await
+        .map_err(|e| AppError::Config(format!("usage task: {e}")))?
 }
 
 /// #52: cwd の案件がローカルで直近24h/1hに消費した token 量（org 全体の 5h/7d % とは別軸）。
@@ -224,7 +227,7 @@ pub fn get_git_branch(cwd: Option<String>) -> Option<String> {
 /// 出力中の `path:line` リンク（VIBE_IDEAS #37 semantic history）をクリックしたとき、
 /// ペインの cwd 基準で解決してエディタの該当行を開く。
 /// 既定は Zed（`zed <path>:<line>`、全OS共通）。zed が PATH に無い/失敗時は OS 既定アプリ
-/// で開く（行ジャンプ無し。Windows=`cmd start`／macOS=`open`／Linux=`xdg-open`）。
+/// で開く（行ジャンプ無し。Windows=`explorer.exe`／macOS=`open`／Linux=`xdg-open`）。
 /// regex の誤マッチで存在しないパスが来ることもあるので、その場合は黙って無視する。
 #[tauri::command]
 pub fn open_in_editor(cwd: Option<String>, path: String, line: Option<u32>) -> Result<()> {
@@ -250,11 +253,15 @@ pub fn open_in_editor(cwd: Option<String>, path: String, line: Option<u32>) -> R
 }
 
 /// OS 既定アプリでファイルを開く（行ジャンプ無し・Zed 不在時のフォールバック）。
+/// `abs_str` はターミナル出力中の `path:line` パターン（正規表現マッチ）由来で、
+/// Windows で許される任意の文字（`&` `|` `%` `^` 等）を含みうる信頼できない入力。
+/// `cmd /C start` はコマンドライン文字列を cmd.exe 自身の文法で再解釈するため、
+/// そうした文字を含むファイル名だと1つのパスとして渡らず誤動作しうる。
+/// 代わりに `explorer.exe` を直接 spawn する：Rust の `Command` は argv 要素として
+/// そのまま子プロセスへ渡すだけでシェルを経由しないため、文字列の再解釈が起きない。
 #[cfg(windows)]
 fn open_with_os_default(abs_str: &str) -> Result<()> {
-    crate::procutil::new_command("cmd")
-        .args(["/C", "start", "", abs_str])
-        .spawn()?;
+    crate::procutil::new_command("explorer").arg(abs_str).spawn()?;
     Ok(())
 }
 
@@ -283,38 +290,47 @@ pub fn spawn_pty(
     nonce: Option<String>,
 ) -> Result<()> {
     let cmd = shell::build_shell(initial_cmd.as_deref(), nonce.as_deref())?;
-    let handle = PtyHandle::spawn(cmd, cols, rows, on_output)?;
+    let handle = std::sync::Arc::new(PtyHandle::spawn(cmd, cols, rows, on_output)?);
     // ロックは map 更新の間だけ保持し、置き換えられた旧ハンドルの kill(=taskkill/join)
     // はロックの外で行う（ロックを握ったまま join するのを避ける）。
     let previous = {
-        let mut ptys = state.ptys.lock().unwrap();
+        let mut ptys = state.ptys.lock().unwrap_or_else(|p| p.into_inner());
         ptys.insert(pane_id, handle)
     };
-    if let Some(mut prev) = previous {
+    if let Some(prev) = previous {
         prev.kill();
     }
     Ok(())
 }
 
+/// map のロックは pane の `Arc<PtyHandle>` を1回 clone する間だけ保持し、実際の
+/// （ブロッキングしうる）write はロックを離してから行う。これにより pane A への
+/// write が詰まって（例: `less` が stdin を読まない／大きなペーストで PTY バッファが
+/// 埋まる）も、pane B の write_pty/resize_pty は state.ptys のロック待ちにならない。
 #[tauri::command]
 pub fn write_pty(state: State<'_, AppState>, pane_id: PaneId, data: Vec<u8>) -> Result<()> {
-    let ptys = state.ptys.lock().unwrap();
-    let handle = ptys.get(&pane_id).ok_or(AppError::PaneNotFound(pane_id))?;
+    let handle = {
+        let ptys = state.ptys.lock().unwrap_or_else(|p| p.into_inner());
+        ptys.get(&pane_id).cloned().ok_or(AppError::PaneNotFound(pane_id))?
+    };
     handle.write(&data)
 }
 
+/// write_pty 同様、map ロックは Arc の clone のみに限定する。
 #[tauri::command]
 pub fn resize_pty(state: State<'_, AppState>, pane_id: PaneId, cols: u16, rows: u16) -> Result<()> {
-    let ptys = state.ptys.lock().unwrap();
-    let handle = ptys.get(&pane_id).ok_or(AppError::PaneNotFound(pane_id))?;
+    let handle = {
+        let ptys = state.ptys.lock().unwrap_or_else(|p| p.into_inner());
+        ptys.get(&pane_id).cloned().ok_or(AppError::PaneNotFound(pane_id))?
+    };
     handle.resize(cols, rows)
 }
 
 #[tauri::command]
 pub fn close_pty(state: State<'_, AppState>, pane_id: PaneId) -> Result<()> {
     // ロックは remove の間だけ。kill(taskkill/join) はロックの外で。
-    let removed = state.ptys.lock().unwrap().remove(&pane_id);
-    if let Some(mut handle) = removed {
+    let removed = state.ptys.lock().unwrap_or_else(|p| p.into_inner()).remove(&pane_id);
+    if let Some(handle) = removed {
         handle.kill();
     }
     Ok(())
@@ -325,8 +341,15 @@ pub fn close_pty(state: State<'_, AppState>, pane_id: PaneId) -> Result<()> {
 /// 全 drop が正しい）。kill はロックの外で。
 #[tauri::command]
 pub fn close_all_ptys(state: State<'_, AppState>) {
-    let drained: Vec<_> = state.ptys.lock().unwrap().drain().collect();
-    for (_, mut handle) in drained {
+    // ロックは drain の間だけ保持（既に kill() はロック外＝他箇所と同じ形）。poisoning は
+    // kill_all_ptys 系と同じ方針で復旧する（一貫性のため、パニックさせて再起動不能にしない）。
+    let drained: Vec<_> = state
+        .ptys
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .drain()
+        .collect();
+    for (_, handle) in drained {
         handle.kill();
     }
 }
@@ -404,5 +427,59 @@ mod tests {
         // 拒否時はディレクトリ自体作られない（副作用なし）
         assert!(!dir.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Bug1 回帰テスト: write_pty/resize_pty/spawn_pty が使っている「map ロックは
+    /// Arc を1回 clone する間だけ保持し、実際の（ブロッキングしうる）操作はロックを
+    /// 離してから行う」というパターン（AppState.ptys: Mutex<HashMap<PaneId, Arc<..>>>
+    /// と同型）を、PtyHandle 実体無しで再現して検証する。
+    ///
+    /// pane 1 のハンドル内ロック（PtyHandle::write 相当の writer ロックを模した
+    /// Mutex<()>）を長時間（stuck write を模擬）握りっぱなしにしても、pane 2 が
+    /// map ロックを取得してハンドルを clone する一連の操作が待たされないことを
+    /// 確認する＝一つのペインの詰まりが他ペインの I/O を道連れにしないことの保証。
+    #[test]
+    fn per_pane_lock_does_not_block_other_panes() {
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+
+        let ptys: Arc<Mutex<HashMap<u64, Arc<Mutex<()>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        ptys.lock().unwrap().insert(1, Arc::new(Mutex::new(())));
+        ptys.lock().unwrap().insert(2, Arc::new(Mutex::new(())));
+
+        let stall = Duration::from_millis(300);
+
+        // pane 1: write_pty と同じ手順（map ロック→Arc clone→ロック解放→ハンドル
+        // 側ロックを長時間占有 = stuck write の模擬）。
+        let ptys_for_pane1 = Arc::clone(&ptys);
+        let pane1 = std::thread::spawn(move || {
+            let handle = {
+                let map = ptys_for_pane1.lock().unwrap();
+                Arc::clone(map.get(&1).unwrap())
+            };
+            let _held = handle.lock().unwrap();
+            std::thread::sleep(stall);
+        });
+
+        std::thread::sleep(Duration::from_millis(50)); // pane1 が握るのを待つ
+
+        // pane 2: 同じ手順を実行し、所要時間を計測する。
+        let start = Instant::now();
+        let handle2 = {
+            let map = ptys.lock().unwrap();
+            Arc::clone(map.get(&2).unwrap())
+        };
+        let _held2 = handle2.lock().unwrap();
+        let elapsed = start.elapsed();
+
+        pane1.join().unwrap();
+
+        // pane1 が stall 分ハンドル内ロックを握っていても、map ロックはとうに
+        // 解放済みなので pane2 の一連の操作はほぼ即座に終わるはず。
+        assert!(
+            elapsed < stall / 2,
+            "pane2 op took {elapsed:?}, expected to be unaffected by pane1's stalled lock ({stall:?})"
+        );
     }
 }

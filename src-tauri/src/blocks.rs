@@ -106,12 +106,20 @@ fn write_event_to(dir: &Path, day: &str, event: &BlockEvent) -> Result<()> {
     Ok(())
 }
 
+/// 1 日分の JSONL を読む際の上限バイト数。append_block_event が暴走ループ等で
+/// 1 日分を数百MBまで肥大させても、毎回全文字列化してパースしないための歯止め
+/// （usage_local.rs の `read_tail`/`MAX_TAIL_BYTES` と同じ方針を踏襲）。1 ブロックの
+/// text は最大 8000 文字（capText, blocks-log.ts）なので、通常運用の 1 日分ログは
+/// この上限に遠く及ばない＝実利用では今までと同じ結果になる。
+const MAX_DAY_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
 /// 指定日の JSONL を読み戻す。壊れた行・将来スキーマの行は黙ってスキップ（前方互換・耐障害）。
+/// 巨大化したファイルは末尾 `MAX_DAY_FILE_BYTES` のみ読む（古い方のブロックが読み戻し対象から
+/// 落ちるのは許容——履歴オーバーレイの再描画では直近が優先）。
 fn read_events_from(dir: &Path, day: &str) -> Vec<BlockEvent> {
-    let text = match std::fs::read_to_string(day_file(dir, day)) {
-        Ok(t) => t,
-        Err(_) => return Vec::new(),
-    };
+    let path = day_file(dir, day);
+    let Ok(meta) = std::fs::metadata(&path) else { return Vec::new() };
+    let text = crate::usage_local::read_tail(&path, meta.len(), MAX_DAY_FILE_BYTES);
     text.lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| serde_json::from_str::<BlockEvent>(l).ok())
@@ -359,10 +367,11 @@ fn search_events_in(dir: &Path, filters: &SearchFilters) -> SearchResult {
                 continue;
             }
         }
-        let text = match std::fs::read_to_string(day_file(dir, &day)) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
+        let path = day_file(dir, &day);
+        let Ok(meta) = std::fs::metadata(&path) else { continue };
+        // 巨大化した日次ファイルは末尾 MAX_DAY_FILE_BYTES のみ読む（read_events_from と同じ
+        // 歯止め）。検索は新しい順ヒットを優先するので、末尾＝最新側だけ見る打ち切りは自然。
+        let text = crate::usage_local::read_tail(&path, meta.len(), MAX_DAY_FILE_BYTES);
         scanned_days += 1;
         for line in text.lines().rev() {
             if line.trim().is_empty() {
@@ -541,6 +550,59 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].block_id, "ok");
         assert_eq!(got[1].block_id, "future");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Bug: `read_events_from`/`search_events_in` used to `read_to_string` a whole day's
+    /// JSONL with no size cap. A runaway `append_block_event` loop (or just heavy sustained
+    /// use) can grow a single day's file to hundreds of MB; every subsequent read would then
+    /// allocate+parse the whole thing. This proves the MAX_DAY_FILE_BYTES tail cap actually
+    /// bounds what gets parsed: the oldest record (written first, now past the cutoff) must
+    /// be dropped, while the newest record (at the very end of the file) must still parse.
+    #[test]
+    fn read_events_from_caps_a_giant_day_file_to_a_bounded_tail() {
+        use std::io::Write as _;
+
+        let dir = temp("giant-day-cap");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = day_file(&dir, "2026-07-01");
+
+        let mut file = std::fs::File::create(&path).unwrap();
+
+        // 先頭：cap が効いていれば絶対に読まれてはいけない目印イベント。
+        let mut oldest = ev("oldest", 0);
+        oldest.text = "x".repeat(1000);
+        writeln!(file, "{}", serde_json::to_string(&oldest).unwrap()).unwrap();
+
+        // MAX_DAY_FILE_BYTES を確実に超えるまで埋め草行を詰める（暴走ループの再現）。
+        let mut filler = ev("filler", 0);
+        filler.text = "y".repeat(1000);
+        let filler_line = serde_json::to_string(&filler).unwrap();
+        let target_bytes = (MAX_DAY_FILE_BYTES as usize) + 2_000_000;
+        let mut written = 0usize;
+        while written < target_bytes {
+            writeln!(file, "{filler_line}").unwrap();
+            written += filler_line.len() + 1;
+        }
+
+        // 末尾：cap が効いていても必ず読めるはずの最新イベント。
+        let newest = ev("newest", 0);
+        writeln!(file, "{}", serde_json::to_string(&newest).unwrap()).unwrap();
+        drop(file);
+
+        let file_len = std::fs::metadata(&path).unwrap().len();
+        assert!(file_len > MAX_DAY_FILE_BYTES, "test setup must exceed the cap to be meaningful");
+
+        let got = read_events_from(&dir, "2026-07-01");
+        assert!(got.iter().any(|e| e.block_id == "newest"), "tail record must survive the cap");
+        assert!(!got.iter().any(|e| e.block_id == "oldest"), "record before the cap must be dropped, not parsed");
+
+        // 同じ歯止めを共有する search_events_in でも、末尾の新しいイベントは検索可能なまま。
+        let searched = search_events_in(&dir, &filters());
+        assert!(searched.hits.iter().any(|h| h.event.block_id == "newest"));
+        assert!(!searched.hits.iter().any(|h| h.event.block_id == "oldest"));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

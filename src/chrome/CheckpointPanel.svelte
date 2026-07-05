@@ -32,6 +32,18 @@
   // 場合だけ明示チェックで解除できるようにする（ハード禁止ではなく既定オフの安全弁）。
   let overrideRunningGuard = $state(false);
   let aiPaneRunning = $derived($aiPane != null && $paneStatus.get($aiPane) === "running");
+  let panel = $state<HTMLDivElement | undefined>(undefined);
+  let selectSeq = 0;
+
+  // 実行中→完了で解除チェックを毎回リセット（再アームには必ず新しい明示チェックを要求する）。
+  // 選び直し（select 内）だけでは、同じチェックポイントを選んだまま「実行中→完了→別ターンが
+  // また実行中に」という再遷移を拾えないため、aiPaneRunning の遷移そのものを監視する。
+  let wasRunning = false;
+  $effect(() => {
+    const running = aiPaneRunning;
+    if (wasRunning && !running) overrideRunningGuard = false;
+    wasRunning = running;
+  });
 
   async function load() {
     loading = true;
@@ -46,14 +58,19 @@
     restoreError = "";
     overrideRunningGuard = false; // 選び直すたびに解除チェックはリセット（前回の解除を持ち越さない）
     if (!cwd) return;
+    const seq = ++selectSeq; // 古い応答は捨てる（後勝ち）: 別チェックポイントを選び直した後に前回の
+    // diff が遅れて解決しても、選択中のものとは無関係な内容で diffText を上書きしない。
     diffLoading = true;
     try {
-      diffText = await checkpointDiff(cwd, cp.hash);
+      const text = await checkpointDiff(cwd, cp.hash);
+      if (seq !== selectSeq) return;
+      diffText = text;
     } catch (e) {
+      if (seq !== selectSeq) return;
       diffError = String(e);
       logError(`checkpoint diff failed: ${String(e)}`);
     } finally {
-      diffLoading = false;
+      if (seq === selectSeq) diffLoading = false;
     }
   }
 
@@ -89,13 +106,23 @@
     }
   }
 
-  onMount(() => void load());
+  onMount(() => {
+    void load();
+    // ターミナルの textarea から DOM フォーカスを外す（Esc が PTY へ漏れないように）。
+    queueMicrotask(() => panel?.focus());
+  });
 </script>
 
 <svelte:window onkeydown={onKey} />
 
 <div class="overlay" onpointerdown={onClose} role="presentation">
-  <div class="panel" onpointerdown={(e) => e.stopPropagation()} role="presentation">
+  <div
+    class="panel"
+    bind:this={panel}
+    tabindex="-1"
+    onpointerdown={(e) => e.stopPropagation()}
+    role="presentation"
+  >
     <div class="bar">
       <span class="ttl">チェックポイント</span>
       <span class="hint">AI ペインのターン開始ごとに自動で控えた作業ツリーのスナップショット（直近{checkpoints.length}件）</span>
@@ -183,6 +210,9 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+  .panel:focus {
+    outline: none; /* プログラム的フォーカス（Esc 受け）用。視覚リングは不要 */
   }
   .bar {
     display: flex;

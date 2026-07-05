@@ -5,10 +5,16 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, Result};
 
 /// 案件ランチャー1件分。warp の gen-warp-launch-configs.ps1 の $projects に対応。
+/// slug/name/dir にも #[serde(default)] を付け、1エントリだけ欠損フィールドがあっても
+/// Vec<Project> 全体のパースが失敗しないようにする（load_projects 参照＝壊れたエントリだけ
+/// 弾いて他の正常なエントリは活かすための前提）。
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Project {
+    #[serde(default)]
     pub slug: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub dir: String,
     #[serde(default)]
     pub dev_cmd: String,
@@ -181,7 +187,7 @@ pub(crate) fn config_dir() -> PathBuf {
 /// bundle.resources ではなく include_bytes! で実体を持ち、dev/本番でパス解決の差を無くす）。
 /// ただし shell スクリプトは毎回 temp へ捨てる transient なのに対し、bg_image は config.toml に
 /// 永続化されるパス文字列なので、毎回ランダムパスへ展開すると再起動で保存パスが陳腐化する。
-/// そのため config_dir 下の固定パスへ「既存かつ同サイズならスキップ」する冪等展開にする。
+/// そのため config_dir 下の固定パスへ「既存かつ内容が一致すればスキップ」する冪等展開にする。
 const BG_DEFAULT: &[u8] = include_bytes!("../resources/bg-default.mp4");
 
 /// 既定背景動画の展開先（config_dir 下の固定名＝決定的・再起動後も同じパス）。
@@ -189,11 +195,15 @@ fn default_bg_dst() -> PathBuf {
     config_dir().join("bg-default.mp4")
 }
 
-/// バイト列を dst へ冪等に書く。既存かつサイズ一致ならスキップ（バイナリ更新で動画が
-/// 差し替われば長さ差で再展開＝古い動画が残らない）。dir 注入でテスト可能にするため分離。
+/// バイト列を dst へ冪等に書く。既存かつ内容が完全一致ならスキップ。バイナリ更新で動画が
+/// 差し替われば（同じ長さでも）検知して再展開＝古い動画が残らない。`bytes`（BG_DEFAULT）は
+/// include_bytes! で既にプロセスのメモリ上に丸ごとある数MBの定数で、この関数自体も起動時に
+/// 一度しか呼ばれないため、部分サンプルで妥協する理由がない＝全体比較の方が単純かつ正確
+/// （長さ＋先頭/末尾サンプルだけの比較だと中間部分だけの差し替えを見逃す）。
+/// dir 注入でテスト可能にするため分離。
 fn ensure_bytes_at(dst: &Path, bytes: &[u8]) -> Result<()> {
-    let need_write = match std::fs::metadata(dst) {
-        Ok(m) => m.len() != bytes.len() as u64,
+    let need_write = match std::fs::read(dst) {
+        Ok(existing) => existing != bytes,
         Err(_) => true,
     };
     if need_write {
@@ -215,13 +225,60 @@ pub fn ensure_default_bg() -> Result<PathBuf> {
 
 /// projects.toml を読む（read 専用＝FS を書き換えない。初回 seed は seed_defaults）。
 /// 空リストは「意図的に空」として尊重、パース失敗・ファイル無しのみメモリ既定を返す。
+/// 一部の [[project]] エントリが壊れていても（parse_projects_text 参照）、他の正常な
+/// エントリはフォールバックさせず活かす。
 pub fn load_projects() -> Vec<Project> {
     match std::fs::read_to_string(config_dir().join("projects.toml")) {
-        Ok(text) => match toml::from_str::<ProjectsFile>(&text) {
-            Ok(pf) => pf.project,
-            Err(_) => default_projects(),
-        },
+        Ok(text) => parse_projects_text(&text).unwrap_or_else(default_projects),
         Err(_) => default_projects(),
+    }
+}
+
+/// projects.toml のテキストを Vec<Project> にパースし、有効なエントリだけ残す。
+/// 1エントリだけ壊れていても他の正常なエントリを道連れにしないのが目的（load_projects
+/// 冒頭の comment にある「1件の typo で全滅」を防ぐ）。
+///
+/// `toml::Value` へ一度パースしてから `[[project]]` 配列をエントリ単位で `Project` へ
+/// deserialize する（構造体レベルで `toml::from_str::<ProjectsFile>` を丸ごと呼ぶと、
+/// 1エントリでも型違い（例: `dir = 42`）があるだけで配列全体の deserialize が失敗し、
+/// `#[serde(default)]`（フィールド欠損のみ救う）では防げない全滅が再発する＝
+/// フィールド欠損・型違いのどちらでも同じように該当エントリだけスキップする）。
+///
+/// - TOML 自体が構文的に壊れている（Err）→ None（呼び出し側で既定にフォールバック）。
+/// - `project` キーが元から無い → Some(空 Vec)（意図的な空リストとして尊重）。
+/// - `project` キーはあるが配列でない（例: `[[project]]` の打ち間違いで `[project]` に
+///   なっている、`project = "x"` 等）→ None（キー欠損と区別する。配列でない=壊れているのを
+///   「意図的な空リスト」と誤認して黙って全滅させないため。#69 followup で発見）。
+/// - 生エントリが 1 件以上あるのに有効なものが 1 件も残らない（全滅）→ None（同上。実質
+///   パース不能に近い破損とみなす）。
+fn parse_projects_text(text: &str) -> Option<Vec<Project>> {
+    let raw = toml::from_str::<toml::Value>(text).ok()?;
+    let raw_projects: Vec<toml::Value> = match raw.get("project") {
+        None => Vec::new(),
+        Some(v) => v.as_array()?.clone(),
+    };
+    let raw_count = raw_projects.len();
+    let valid: Vec<Project> = raw_projects
+        .into_iter()
+        .filter_map(|entry| match Project::deserialize(entry) {
+            Ok(p) if !p.slug.is_empty() && !p.dir.is_empty() => Some(p),
+            Ok(p) => {
+                eprintln!(
+                    "[orb] projects.toml: slug/dir が空の [[project]] エントリをスキップします（name={:?}）",
+                    p.name
+                );
+                None
+            }
+            Err(e) => {
+                eprintln!("[orb] projects.toml: 壊れた [[project]] エントリをスキップします: {e}");
+                None
+            }
+        })
+        .collect();
+    if raw_count > 0 && valid.is_empty() {
+        None
+    } else {
+        Some(valid)
     }
 }
 
@@ -262,7 +319,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ensure_bytes_writes_when_missing_and_is_size_idempotent() {
+    fn ensure_bytes_writes_when_missing_and_is_content_idempotent() {
         let dir = std::env::temp_dir().join("orb-bg-ensure-test");
         let _ = std::fs::remove_dir_all(&dir);
         let dst = dir.join("bg-default.mp4");
@@ -271,12 +328,22 @@ mod tests {
         ensure_bytes_at(&dst, b"AAAA").unwrap();
         assert_eq!(std::fs::read(&dst).unwrap(), b"AAAA");
 
-        // 既存かつ同サイズ＝スキップ（同サイズ・別内容を置き、書き換わらないことで冪等を検証）。
-        std::fs::write(&dst, b"BBBB").unwrap();
+        // 既存かつ内容一致＝スキップ。読み取り専用にしておき、もし書き込みを試みたら
+        // 失敗するはずの状態を作って、Ok が返る＝実際に書き込みが起きていないことを検証する。
+        let mut perms = std::fs::metadata(&dst).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&dst, perms).unwrap();
         ensure_bytes_at(&dst, b"AAAA").unwrap();
+        let mut perms = std::fs::metadata(&dst).unwrap().permissions();
+        perms.set_readonly(false);
+        std::fs::set_permissions(&dst, perms).unwrap();
+
+        // 同じ長さでも内容が違えば再展開する（バグ修正の確認：長さだけの比較だと
+        // 同サイズの差し替えを見逃していた）。
+        ensure_bytes_at(&dst, b"BBBB").unwrap();
         assert_eq!(std::fs::read(&dst).unwrap(), b"BBBB");
 
-        // サイズが違えば再展開（更新版の動画へ差し替わるケース）。
+        // 長さが違えば当然再展開する（更新版の動画へ差し替わるケース）。
         ensure_bytes_at(&dst, b"CCCCCC").unwrap();
         assert_eq!(std::fs::read(&dst).unwrap(), b"CCCCCC");
 
@@ -300,5 +367,88 @@ mod tests {
         assert_eq!(c.bg_pos_y, 100.0);
         assert_eq!(c.bg_zoom, 1.0);
         assert_eq!(c.ai_accent, "#a78bfa");
+    }
+
+    #[test]
+    fn parse_projects_text_keeps_valid_entries_when_one_entry_is_malformed() {
+        // 2件目に dir（と slug）を欠いた壊れたエントリを混ぜる。
+        // 1件の typo で全滅していた旧バグの再発防止テスト。
+        let text = r#"
+[[project]]
+slug = "a"
+name = "A"
+dir = "C:/a"
+
+[[project]]
+name = "typo entry missing slug and dir"
+
+[[project]]
+slug = "b"
+name = "B"
+dir = "C:/b"
+"#;
+        let projects = parse_projects_text(text).expect("parse should succeed");
+        let slugs: Vec<&str> = projects.iter().map(|p| p.slug.as_str()).collect();
+        assert_eq!(slugs, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn parse_projects_text_respects_intentional_empty_list() {
+        // [[project]] が元から無い＝意図的な空リストとして尊重（既定へフォールバックしない）。
+        let projects = parse_projects_text("").expect("empty file parses to empty list");
+        assert!(projects.is_empty());
+    }
+
+    #[test]
+    fn parse_projects_text_falls_back_when_all_entries_are_malformed() {
+        // 生エントリはあるが全部 slug/dir 欠損＝実質パース不能に近い破損として None
+        // （load_projects 側で default_projects() にフォールバックする）。
+        let text = r#"
+[[project]]
+name = "no slug or dir"
+"#;
+        assert!(parse_projects_text(text).is_none());
+    }
+
+    #[test]
+    fn parse_projects_text_returns_none_on_unparseable_toml() {
+        // TOML として構文が壊れている場合は None（フォールバック対象）。
+        assert!(parse_projects_text("[[project\nslug = \"a\"").is_none());
+    }
+
+    #[test]
+    fn parse_projects_text_keeps_valid_entries_when_one_entry_has_wrong_type() {
+        // 2件目の dir が文字列でなく数値（型違い）。#[serde(default)] は「フィールド欠損」
+        // しか救わないため、構造体レベルで toml::from_str::<ProjectsFile> を丸ごと呼ぶ実装だと
+        // ここでも全滅していた（型違いは #69 followup レビューで発見された残存ギャップ）。
+        let text = r#"
+[[project]]
+slug = "a"
+name = "A"
+dir = "C:/a"
+
+[[project]]
+slug = "typo"
+name = "typo entry"
+dir = 42
+
+[[project]]
+slug = "b"
+name = "B"
+dir = "C:/b"
+"#;
+        let projects = parse_projects_text(text).expect("parse should succeed");
+        let slugs: Vec<&str> = projects.iter().map(|p| p.slug.as_str()).collect();
+        assert_eq!(slugs, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn parse_projects_text_falls_back_when_project_key_is_not_an_array() {
+        // [[project]] の打ち間違いで [project]（テーブル）になっているケース。「project キー
+        // が無い」＝意図的な空リストと誤認して黙って全滅させず、既定へフォールバックさせる
+        // （#69 followup レビューで発見: as_array() が None を返す場合を無視すると
+        // unwrap_or_default() で空 Vec に化けてしまい、キー欠損と区別できなかった）。
+        assert!(parse_projects_text("[project]\nslug = \"a\"\ndir = \"C:/a\"\n").is_none());
+        assert!(parse_projects_text("project = \"oops\"\n").is_none());
     }
 }

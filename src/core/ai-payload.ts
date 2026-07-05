@@ -57,6 +57,18 @@ export interface PastMatchLike {
   resolvedBy: { event: PastEventLike } | null;
 }
 
+/**
+ * 過去イベントの output_body 表示用の値を決める純関数（#31 の原則: 嘘をつかない）。
+ * - output_body === null（マーカー欠落・未対応シェル等で「わからない」）→ text へフォールバック
+ *   （text が無ければプレースホルダー）。
+ * - output_body === ""（マーカーは効いており「確認済みで本当に無出力」）→ text は prompt/command の
+ *   エコーに過ぎず出力ではないので使わず、プレースホルダーそのもの。`??`/`||` 単独では
+ *   この2状態（わからない／確認済み無出力）を区別できないため、null チェックを明示する。
+ */
+function pastOutputDisplay(e: PastEventLike): string {
+  return e.output_body === null ? e.text || "(出力なし)" : e.output_body || "(出力なし)";
+}
+
 /** 過去ログの複利（Fable5 ロードマップ #3）: 「このエラー、前にも見た？」の整形。
  *  past-failures.ts の判定結果を、現在の失敗ブロックと合わせて AI が読める形にする。 */
 export function formatPastFailureContext(current: BlockAiContext, match: PastMatchLike | null): string {
@@ -71,7 +83,7 @@ export function formatPastFailureContext(current: BlockAiContext, match: PastMat
     `過去にも同じコマンドが同じディレクトリで失敗しています（${fmtWhen(f.ended_at)}、exit=${f.exit_code}）。`,
     "--- 過去の失敗 ---",
     `$ ${f.command ?? "(コマンド不明)"}`,
-    f.output_body ?? f.text,
+    pastOutputDisplay(f),
   ];
   if (match.resolvedBy) {
     const r = match.resolvedBy.event;
@@ -80,7 +92,7 @@ export function formatPastFailureContext(current: BlockAiContext, match: PastMat
       `その後 ${fmtWhen(r.ended_at)} に成功しています。何がどう変わって直ったか、今回のログと比較して教えて:`,
       "--- 過去の成功 ---",
       `$ ${r.command ?? "(コマンド不明)"}`,
-      r.output_body ?? r.text,
+      r.output_body || r.text || "(出力なし)",
     );
   } else {
     lines.push("", "この後の成功記録は見当たりません（まだ解決されていない可能性）。原因を考えて:");

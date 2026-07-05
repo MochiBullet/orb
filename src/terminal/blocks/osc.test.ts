@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { parseExitCode, parseOsc9, parseOsc777, parseCommandLine, planResize } from "./osc";
+import {
+  parseExitCode,
+  parseOsc9,
+  parseOsc777,
+  parseCommandLine,
+  planResize,
+  isAltScreenModeParams,
+} from "./osc";
 
 describe("parseExitCode (#41: no false success/failure)", () => {
   it('empty rest (D missing / Ctrl-C) => -1 (unknown/aborted, NOT success)', () => {
@@ -182,5 +189,36 @@ describe("planResize (#56: resize 時のブロック装飾レジストリ整理)
 
   it("空レジストリ → 全部空", () => {
     expect(planResize([], 80)).toEqual({ keep: [], drop: [], stale: [] });
+  });
+});
+
+describe("isAltScreenModeParams (alt-screen 検知: xterm キャッシュ非依存の生 CSI 判定)", () => {
+  it("1049（alt screen buffer cursor）を含む => true", () => {
+    expect(isAltScreenModeParams([1049])).toBe(true);
+  });
+
+  it("47（alt screen buffer）を含む => true", () => {
+    expect(isAltScreenModeParams([47])).toBe(true);
+  });
+
+  it("1047（alt screen buffer）を含む => true", () => {
+    expect(isAltScreenModeParams([1047])).toBe(true);
+  });
+
+  it("複数 param のうちどれかが対象コードなら true（1個の CSI に複数モードがまとまる実例）", () => {
+    expect(isAltScreenModeParams([2004, 1049])).toBe(true);
+  });
+
+  it("無関係なモード（bracketed paste 2004 のみ等）=> false", () => {
+    expect(isAltScreenModeParams([2004])).toBe(false);
+    expect(isAltScreenModeParams([25])).toBe(false);
+  });
+
+  it("空 params => false", () => {
+    expect(isAltScreenModeParams([])).toBe(false);
+  });
+
+  it("サブパラメータ（number[] 要素）は対象コードと解釈しない", () => {
+    expect(isAltScreenModeParams([[1049, 2]])).toBe(false);
   });
 });

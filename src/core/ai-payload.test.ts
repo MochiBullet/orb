@@ -104,6 +104,55 @@ describe("formatPastFailureContext（過去ログの複利: このエラー前�
     expect(s).toContain("cwd=C:\\proj");
     expect(s).toContain("$ cargo test");
   });
+
+  it("output_body が null（マーカー欠落）でも text が有れば生テキストへフォールバック（#31）", () => {
+    const match: PastMatchLike = {
+      failure: {
+        event: {
+          ended_at: 1700000000000,
+          exit_code: 1,
+          command: "cargo test",
+          output_body: null,
+          text: "raw captured text",
+        },
+      },
+      resolvedBy: null,
+    };
+    const s = formatPastFailureContext(structured, match);
+    expect(s).toContain("raw captured text");
+    expect(s).not.toContain("(出力なし)");
+  });
+
+  it("output_body も text も空なら「出力なし」を表示", () => {
+    const match: PastMatchLike = {
+      failure: {
+        event: { ended_at: 1700000000000, exit_code: 1, command: "cargo test", output_body: "", text: "" },
+      },
+      resolvedBy: null,
+    };
+    const s = formatPastFailureContext(structured, match);
+    expect(s).toContain("(出力なし)");
+  });
+
+  it("output_body===''（確認済み無出力）は text にプロンプト等が残っていても「出力なし」を優先", () => {
+    // マーカー欠落(null)と確認済み無出力("")は別状態: text は prompt/command のエコーに
+    // 過ぎず「出力」ではないため、"" のときは text へフォールバックしない。
+    const match: PastMatchLike = {
+      failure: {
+        event: {
+          ended_at: 1700000000000,
+          exit_code: 0,
+          command: "git push",
+          output_body: "",
+          text: "❯ git push\n",
+        },
+      },
+      resolvedBy: null,
+    };
+    const s = formatPastFailureContext(structured, match);
+    expect(s).toContain("(出力なし)");
+    expect(s.split("\n").filter((l) => l === "❯ git push").length).toBe(0);
+  });
 });
 
 describe("frameBracketedPaste (#34)", () => {

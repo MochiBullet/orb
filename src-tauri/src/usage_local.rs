@@ -117,7 +117,9 @@ fn parse_usage_line(line: &str) -> Option<(i64, u64, String)> {
 }
 
 /// ファイル末尾 `max_bytes` バイトだけ読む。境界で千切れた先頭の壊れ行は 1 行分捨てる。
-fn read_tail(path: &Path, len: u64, max_bytes: u64) -> String {
+/// `pub(crate)`: blocks.rs も同じ「日次 JSONL が無制限に肥大しても全文字列化しない」
+/// 目的でこのまま再利用する（同じロジックを二重管理しない）。
+pub(crate) fn read_tail(path: &Path, len: u64, max_bytes: u64) -> String {
     use std::io::{Read, Seek, SeekFrom};
     let Ok(mut f) = std::fs::File::open(path) else { return String::new() };
     let start = len.saturating_sub(max_bytes);

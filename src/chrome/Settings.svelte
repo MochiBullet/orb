@@ -80,6 +80,8 @@
   }
 
   function cancel() {
+    // 保存中は破棄不可（save() の continuation が確定適用するまでキャンセルを無効化）。
+    if (saving) return;
     // プレビューを保存前の値へ戻す（アクセント色＋AIペイン色＋背景）。
     const saved = get(config);
     const aiAccent = saved.ai_accent || "#a78bfa";
@@ -193,7 +195,7 @@
     <div class="note">フォント・アクセント色・合字は保存で反映 / 背景の透過とスクロールバックは新しいペイン・再起動から反映</div>
 
     <div class="btns">
-      <button onclick={cancel}>キャンセル</button>
+      <button onclick={cancel} disabled={saving}>キャンセル</button>
       <button class="save" onclick={save} disabled={saving}>保存</button>
     </div>
   </div>

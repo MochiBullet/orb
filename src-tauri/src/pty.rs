@@ -38,12 +38,17 @@ fn kill_tree(pid: u32) {
 ///   ConPTY を ClosePseudoConsole → conout を EOF にし → (3) reader を join する。
 ///   master を生かしたまま join すると ConPTY が EOF にならず永久ハングするため、
 ///   **join の前に必ず master を drop** するのが要点。
+///
+/// 全フィールドが自前で `Mutex` を持つ＝`write`/`resize`/`kill` は全て `&self` で
+/// 呼べる。これにより呼び出し側（commands.rs）は `Arc<PtyHandle>` として他ペインとは
+/// 独立にロックでき、あるペインの PTY 操作（ブロッキング write 等）が他ペインの
+/// 操作を待たせない。
 pub struct PtyHandle {
-    master: Option<Box<dyn MasterPty + Send>>,
+    master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     writer: Mutex<Option<Box<dyn Write + Send>>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
-    child_pid: Option<u32>,
-    reader: Option<JoinHandle<()>>,
+    child_pid: Mutex<Option<u32>>,
+    reader: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl PtyHandle {
@@ -99,16 +104,18 @@ impl PtyHandle {
         });
 
         Ok(PtyHandle {
-            master: Some(pair.master),
+            master: Mutex::new(Some(pair.master)),
             writer: Mutex::new(Some(writer)),
             child: Mutex::new(child),
-            child_pid,
-            reader: Some(reader_handle),
+            child_pid: Mutex::new(child_pid),
+            reader: Mutex::new(Some(reader_handle)),
         })
     }
 
     pub fn write(&self, data: &[u8]) -> Result<()> {
-        let mut guard = self.writer.lock().unwrap();
+        // poisoning は kill() 等と同じ方針で復旧する（このロックが一度でも poison すると、
+        // 素の unwrap() では以後の毎キー入力が abort する致命的な経路になり得るため）。
+        let mut guard = self.writer.lock().unwrap_or_else(|p| p.into_inner());
         match guard.as_mut() {
             Some(w) => {
                 w.write_all(data)?;
@@ -120,7 +127,9 @@ impl PtyHandle {
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<()> {
-        match self.master.as_ref() {
+        // poisoning は write() と同じ方針で復旧する（理由は write() のコメント参照）。
+        let guard = self.master.lock().unwrap_or_else(|p| p.into_inner());
+        match guard.as_ref() {
             Some(m) => m
                 .resize(PtySize {
                     rows,
@@ -133,24 +142,38 @@ impl PtyHandle {
         }
     }
 
-    /// 子プロセスツリーを倒し、ConPTY を閉じ、reader を join する（冪等）。
-    pub fn kill(&mut self) {
+    /// 子プロセスツリーを倒し、ConPTY を閉じ、reader を join する（冪等・`&self` で呼べる）。
+    ///
+    /// 各ロックは値を取り出す/操作するその場だけで手放す。`if let Some(x) = mutex.lock()...`
+    /// の形は scrutinee の一時値（MutexGuard）がブロック終端まで生き、kill_tree/join という
+    /// 重い呼び出しの間ロックを握ったままになる＝ `Arc<PtyHandle>` 経由で複数箇所（他ペインの
+    /// write_pty/resize_pty や kill_all_ptys）から並行に触れるようにした今回のリファクタの
+    /// 意味が失われる（#69 followup で発見）。poisoning は checkpoint.rs 等と同じ方針
+    /// （`unwrap_or_else(|p| p.into_inner())` で復旧）に揃える。
+    pub fn kill(&self) {
         // 1. プロセスツリーごと強制終了。pwsh が起こした子・孫(npm run dev / vim 等)も
         //    巻き込んで倒し、孤児プロセス化を防ぐ。
-        if let Some(pid) = self.child_pid.take() {
+        let pid = self.child_pid.lock().unwrap_or_else(|p| p.into_inner()).take();
+        if let Some(pid) = pid {
             kill_tree(pid);
         }
-        if let Ok(mut child) = self.child.lock() {
+        {
+            let mut child = self.child.lock().unwrap_or_else(|p| p.into_inner());
             let _ = child.kill();
         }
         // 2. stdin/stdout 端を閉じる。master(=ConPTY/HPCON) を drop すると
         //    ClosePseudoConsole が走り conout が EOF になる。これを join の前に行う。
-        if let Ok(mut w) = self.writer.lock() {
+        {
+            let mut w = self.writer.lock().unwrap_or_else(|p| p.into_inner());
             *w = None;
         }
-        self.master = None;
+        {
+            let mut m = self.master.lock().unwrap_or_else(|p| p.into_inner());
+            *m = None;
+        }
         // 3. reader を join（master drop で read が EOF を返すので即復帰する）。
-        if let Some(handle) = self.reader.take() {
+        let reader = self.reader.lock().unwrap_or_else(|p| p.into_inner()).take();
+        if let Some(handle) = reader {
             let _ = handle.join();
         }
     }

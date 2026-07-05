@@ -63,6 +63,17 @@ describe("tree", () => {
     expect(next.ratio).toBe(0.3);
   });
 
+  it("setRatio() ignores NaN and returns the tree unchanged", () => {
+    const root = splitPane(leaf(1), 1, "h", 2, 100);
+    expect(setRatio(root, 100, NaN)).toBe(root);
+  });
+
+  it("setRatio() ignores +/-Infinity and returns the tree unchanged", () => {
+    const root = splitPane(leaf(1), 1, "h", 2, 100);
+    expect(setRatio(root, 100, Infinity)).toBe(root);
+    expect(setRatio(root, 100, -Infinity)).toBe(root);
+  });
+
   it("siblingFirstLeaf() returns the neighbor leaf", () => {
     const root = splitPane(leaf(1), 1, "h", 2, 100);
     expect(siblingFirstLeaf(root, 1)).toBe(2);
