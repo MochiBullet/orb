@@ -136,19 +136,87 @@ impl Default for Config {
     }
 }
 
+/// テキストを `dir` 直下の `name` へアトミックに書く。同じディレクトリ内の一時ファイル
+/// （`name.tmp`）へ丸ごと書いてから rename で本体に差し替える＝同一ファイルシステム上の
+/// rename は原子的なので、書き込み中のクラッシュ・電源断・ディスクフル・AV ロックで
+/// 途中切れの `name` が残ることがない（#74 ROB-1）。旧来の create+truncate な
+/// `std::fs::write` 直書きだと、書き込みの途中で死ぬと半端なファイルが残り、次回起動時に
+/// パース失敗＝全設定がデフォルトへ巻き戻っていた。
+fn write_atomic(dir: &Path, name: &str, contents: &str) -> Result<()> {
+    let tmp = dir.join(format!("{name}.tmp"));
+    std::fs::write(&tmp, contents)?;
+    std::fs::rename(&tmp, dir.join(name))?;
+    Ok(())
+}
+
 /// config.toml を書き出す（設定GUI からの保存）。
 pub fn save_config(cfg: &Config) -> Result<()> {
     let dir = config_dir();
     std::fs::create_dir_all(&dir)?;
     let s = toml::to_string_pretty(cfg).map_err(|e| AppError::Config(e.to_string()))?;
-    std::fs::write(dir.join("config.toml"), s)?;
+    write_atomic(&dir, "config.toml", &s)?;
     Ok(())
 }
 
 /// config.toml を読む（read 専用＝FS を書き換えない。初回の書き出しは seed_defaults）。
 pub fn load_config() -> Config {
     match std::fs::read_to_string(config_dir().join("config.toml")) {
-        Ok(text) => toml::from_str::<Config>(&text).unwrap_or_default(),
+        Ok(text) => parse_config_text(&text),
+        Err(_) => Config::default(),
+    }
+}
+
+/// 型が不正、または欠損しているフィールドは `default` にフォールバックする。欠損は
+/// 通常 `#[serde(default)]` の高速パスで救われるケースなので黙って許すが、値が存在するのに
+/// デシリアライズに失敗した（型違い）場合だけ eprintln! でログする（parse_projects_text と
+/// 同じ「実際に壊れているものだけ知らせる」方針）。
+fn field_or_default<T: serde::de::DeserializeOwned>(v: &toml::Value, name: &str, default: T) -> T {
+    match v.get(name) {
+        None => default,
+        Some(x) => match T::deserialize(x.clone()) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                eprintln!(
+                    "[orb] config.toml: フィールド '{name}' の型が不正なので既定値にフォールバックします: {e}"
+                );
+                default
+            }
+        },
+    }
+}
+
+/// `Config` 全体としてのパースが失敗した場合に、`toml::Value` からフィールド単位で救済して
+/// 組み立てる。1フィールドの型違い（例: `font_size = "big"`）が他の正常なフィールドまで
+/// 巻き添えにして消し飛ばすのを防ぐ（#74 ROB-2。parse_projects_text で [[project]] エントリ
+/// 単位に適用したのと同じ考え方を、トップレベルの Config フィールドに適用する）。
+fn config_from_value(v: &toml::Value) -> Config {
+    Config {
+        font_size: field_or_default(v, "font_size", default_font_size()),
+        font_family: field_or_default(v, "font_family", default_font_family()),
+        scrollback: field_or_default(v, "scrollback", default_scrollback()),
+        accent: field_or_default(v, "accent", default_accent()),
+        ai_accent: field_or_default(v, "ai_accent", default_ai_accent()),
+        ligatures: field_or_default(v, "ligatures", default_ligatures()),
+        bg_image: field_or_default(v, "bg_image", default_bg_image()),
+        bg_dim: field_or_default(v, "bg_dim", default_bg_dim()),
+        bg_size: field_or_default(v, "bg_size", default_bg_size()),
+        bg_pos_x: field_or_default(v, "bg_pos_x", default_bg_pos_x()),
+        bg_pos_y: field_or_default(v, "bg_pos_y", default_bg_pos_y()),
+        bg_zoom: field_or_default(v, "bg_zoom", default_bg_zoom()),
+        show_info_on_startup: field_or_default(v, "show_info_on_startup", default_show_info_on_startup()),
+    }
+}
+
+/// config.toml のテキストを Config へパースする。高速パス＝構造体全体としてそのままパース
+/// できればそれを返す（既存の挙動のまま）。失敗した場合は toml::Value に一度パースし直し、
+/// config_from_value でフィールド単位に救済する。TOML として構文的に壊れていて Value にすら
+/// ならない場合（真の構文エラー）のみ Config::default()。
+fn parse_config_text(text: &str) -> Config {
+    if let Ok(cfg) = toml::from_str::<Config>(text) {
+        return cfg;
+    }
+    match toml::from_str::<toml::Value>(text) {
+        Ok(v) => config_from_value(&v),
         Err(_) => Config::default(),
     }
 }
@@ -163,14 +231,26 @@ pub fn seed_defaults() {
         if let Ok(s) = toml::to_string_pretty(&ProjectsFile {
             project: default_projects(),
         }) {
-            let _ = std::fs::write(pp, s);
+            let _ = write_atomic(&dir, "projects.toml", &s);
         }
     }
     let cp = dir.join("config.toml");
     if !cp.exists() {
         if let Ok(s) = toml::to_string_pretty(&Config::default()) {
-            let _ = std::fs::write(cp, s);
+            let _ = write_atomic(&dir, "config.toml", &s);
         }
+    }
+}
+
+/// home が空（USERPROFILE/HOME 未設定）の場合のフォールバックを適用する。相対パス
+/// `.config\orb`（プロセスの cwd 次第で書き込み先がブレる＝#74 ROB-5）にならないよう、
+/// 常に絶対パスを返す（shell.rs の非空ガードと同じ考え方）。home を注入で受け取り、
+/// テストで env に触らず分岐を検証できるようにする。
+fn config_dir_with_home(home: PathBuf) -> PathBuf {
+    if home.as_os_str().is_empty() {
+        std::env::temp_dir().join("orb")
+    } else {
+        home.join(".config").join("orb")
     }
 }
 
@@ -180,7 +260,7 @@ pub(crate) fn config_dir() -> PathBuf {
     if let Some(x) = std::env::var_os("XDG_CONFIG_HOME") {
         return PathBuf::from(x).join("orb");
     }
-    crate::status::home_dir().join(".config").join("orb")
+    config_dir_with_home(crate::status::home_dir())
 }
 
 /// 既定背景動画をバイナリへ埋め込む（shell-integration.ps1 と同じ方針＝Tauri の
@@ -440,6 +520,86 @@ dir = "C:/b"
         let projects = parse_projects_text(text).expect("parse should succeed");
         let slugs: Vec<&str> = projects.iter().map(|p| p.slug.as_str()).collect();
         assert_eq!(slugs, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn write_atomic_round_trips_and_leaves_no_temp_file() {
+        // save→load が同じ値を復元し、成功後に .tmp が残らないことを確認する（#74 ROB-1）。
+        let dir = std::env::temp_dir().join("orb-config-write-atomic-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let cfg = Config {
+            font_size: 21,
+            accent: "#123456".into(),
+            ..Config::default()
+        };
+        let s = toml::to_string_pretty(&cfg).unwrap();
+        write_atomic(&dir, "config.toml", &s).unwrap();
+
+        let text = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        let loaded = parse_config_text(&text);
+        assert_eq!(loaded.font_size, 21);
+        assert_eq!(loaded.accent, "#123456");
+        assert!(!dir.join("config.toml.tmp").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_atomic_overwrites_existing_file_without_leaving_temp() {
+        // 既存ファイルがある状態からの上書きでも rename が本体を差し替え、.tmp が残らない。
+        let dir = std::env::temp_dir().join("orb-config-write-atomic-overwrite-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        write_atomic(&dir, "config.toml", "font_size = 10\n").unwrap();
+        write_atomic(&dir, "config.toml", "font_size = 22\n").unwrap();
+
+        let text = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(text.contains("22"));
+        assert!(!dir.join("config.toml.tmp").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_config_text_keeps_other_fields_when_one_field_has_wrong_type() {
+        // font_size が型違い（文字列）でも、accent など他の正常なフィールドは維持される
+        // （#74 ROB-2。旧実装は toml::from_str::<Config>(&text).unwrap_or_default() で
+        // 構造体全体が失敗し、accent を含む全フィールドがデフォルトへ巻き戻っていた）。
+        let text = r##"
+font_size = "big"
+accent = "#abcdef"
+"##;
+        let cfg = parse_config_text(text);
+        assert_eq!(cfg.font_size, default_font_size());
+        assert_eq!(cfg.accent, "#abcdef");
+    }
+
+    #[test]
+    fn parse_config_text_falls_back_to_defaults_on_unparseable_toml() {
+        // TOML として構文的に壊れている（toml::Value にすらならない）場合は
+        // Config::default() へフォールバックする。
+        let cfg = parse_config_text("accent = \"unterminated");
+        assert_eq!(cfg.font_size, default_font_size());
+        assert_eq!(cfg.accent, default_accent());
+    }
+
+    #[test]
+    fn config_dir_with_home_falls_back_to_absolute_path_when_home_is_empty() {
+        // USERPROFILE/HOME 未設定（home_dir() が空 PathBuf を返す）場合に相対パス
+        // `.config\orb` へ化けない（#74 ROB-5）。常に絶対パスを返すことを確認する。
+        let dir = config_dir_with_home(PathBuf::new());
+        assert!(dir.is_absolute());
+        assert!(dir.ends_with("orb"));
+    }
+
+    #[test]
+    fn config_dir_with_home_joins_dot_config_when_home_is_set() {
+        // 通常時（home が非空）の既存挙動は変えない: home/.config/orb。
+        let dir = config_dir_with_home(PathBuf::from(r"C:\Users\someone"));
+        assert_eq!(dir, PathBuf::from(r"C:\Users\someone\.config\orb"));
     }
 
     #[test]
