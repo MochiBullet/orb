@@ -44,6 +44,12 @@ fn default_bg_image() -> String {
 fn default_bg_dim() -> f32 {
     0.6
 }
+fn default_bg_size() -> String {
+    "cover".into()
+}
+fn default_bg_pos() -> f32 {
+    50.0
+}
 fn default_show_info_on_startup() -> bool {
     true
 }
@@ -68,6 +74,14 @@ pub struct Config {
     /// 背景画像の上に敷く暗幕の不透明度 0..1（可読性確保）。画像が無ければ無効。
     #[serde(default = "default_bg_dim")]
     pub bg_dim: f32,
+    /// 背景画像の表示サイズ（CSS background-size）。"cover"=切り抜いて敷き詰め / "contain"=全体を収める。
+    #[serde(default = "default_bg_size")]
+    pub bg_size: String,
+    /// 背景画像の表示位置 0..100%（cover 時にどこを見せるか＝クロップ位置の調整）。x=水平, y=垂直。
+    #[serde(default = "default_bg_pos")]
+    pub bg_pos_x: f32,
+    #[serde(default = "default_bg_pos")]
+    pub bg_pos_y: f32,
     /// #47: 起動時に info（取扱説明書）タブを開くか。復元セッションに info タブが
     /// 無いとき末尾へ非アクティブで補充する（真の初回起動は設定に依らずアクティブで開く）。
     #[serde(default = "default_show_info_on_startup")]
@@ -84,6 +98,9 @@ impl Default for Config {
             ligatures: default_ligatures(),
             bg_image: default_bg_image(),
             bg_dim: default_bg_dim(),
+            bg_size: default_bg_size(),
+            bg_pos_x: default_bg_pos(),
+            bg_pos_y: default_bg_pos(),
             show_info_on_startup: default_show_info_on_startup(),
         }
     }

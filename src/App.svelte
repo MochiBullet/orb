@@ -47,8 +47,8 @@
         rgba(0, 0, 0, var(--bg-dim, 0))
       ),
       var(--bg-image, none);
-    background-size: cover;
-    background-position: center;
+    background-size: var(--bg-size, cover);
+    background-position: var(--bg-position, center);
   }
   .body {
     flex: 1 1 auto;

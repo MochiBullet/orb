@@ -10,6 +10,10 @@
   let saving = $state(false);
 
   const PRESETS = ["#2dd4bf", "#a78bfa", "#38bdf8", "#fbbf24", "#fb7185", "#4ade80"];
+  const BG_SIZES = [
+    { value: "cover", label: "覆う" },
+    { value: "contain", label: "全体" },
+  ];
 
   // ライブプレビュー: ドラフトのアクセント色を即 --teal に反映。
   $effect(() => {
@@ -21,7 +25,7 @@
   // 余白・暗幕はライブで見える。端末本体（xterm キャンバス）の透過はレンダラ切替を伴うため
   // 保存＋再起動/新ペインで反映される（WebGL→DOM の切替）。
   $effect(() => {
-    applyBgVars(draft.bg_image, draft.bg_dim);
+    applyBgVars(draft);
   });
 
   // 背景画像の basename 表示用。
@@ -59,7 +63,7 @@
     // プレビューを保存前の値へ戻す（アクセント色＋背景）。
     const saved = get(config);
     document.documentElement.style.setProperty("--teal", saved.accent || "#2dd4bf");
-    applyBgVars(saved.bg_image, saved.bg_dim);
+    applyBgVars(saved);
     onClose();
   }
 </script>
@@ -115,6 +119,26 @@
       <label>
         <span>暗幕（{Math.round(draft.bg_dim * 100)}%）</span>
         <input type="range" min="0" max="0.9" step="0.05" bind:value={draft.bg_dim} />
+      </label>
+      <label>
+        <span>表示サイズ</span>
+        <span class="seg">
+          {#each BG_SIZES as s}
+            <button
+              class="seg-btn"
+              class:sel={draft.bg_size === s.value}
+              onclick={() => (draft.bg_size = s.value)}>{s.label}</button
+            >
+          {/each}
+        </span>
+      </label>
+      <label>
+        <span>水平位置（{Math.round(draft.bg_pos_x)}%）</span>
+        <input type="range" min="0" max="100" step="1" bind:value={draft.bg_pos_x} />
+      </label>
+      <label>
+        <span>垂直位置（{Math.round(draft.bg_pos_y)}%）</span>
+        <input type="range" min="0" max="100" step="1" bind:value={draft.bg_pos_y} />
       </label>
     {/if}
     <div class="note">フォント・アクセント色・合字は保存で反映 / 背景画像とスクロールバックは新しいペイン・再起動から反映</div>
@@ -239,6 +263,30 @@
   .bg-btn.clear {
     color: var(--grey);
     border-color: rgba(255, 255, 255, 0.15);
+  }
+  .seg {
+    display: flex;
+    gap: 6px;
+    flex: 1;
+    max-width: 230px;
+    justify-content: flex-end;
+  }
+  .seg-btn {
+    border: 1px solid rgba(45, 212, 191, 0.3);
+    background: transparent;
+    color: var(--grey);
+    font-family: inherit;
+    font-size: 0.72rem;
+    padding: 3px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .seg-btn:hover {
+    background: rgba(45, 212, 191, 0.12);
+  }
+  .seg-btn.sel {
+    color: var(--teal);
+    border-color: var(--teal);
   }
   input[type="range"] {
     background: transparent;
