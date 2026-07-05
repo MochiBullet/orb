@@ -7,9 +7,15 @@
 //!   が「AI が動き出す直前」なので、そのまま「直前のターンに巻き戻す」の基準点になる。
 //! - 直前チェックポイントと tree が同一（＝実質変化なし）なら記録しない。連打・無変更の
 //!   ターンで保持枠を無駄に消費しない。
-//! - **ロールバック**は `git reset --hard <checkpoint>` のみ＝この関数だけが破壊的操作。
-//!   呼ばれたら問答無用で実行する単純な形にし、diff プレビュー＋確認は UI 層の責務とする
-//!   （BlockHistory 等の再実行系と同じ「実行するのは明示操作」契約）。
+//! - **ロールバック**は `git restore --source=<checkpoint> --staged --worktree -- .`（この関数
+//!   だけが破壊的操作）。呼ばれたら問答無用で実行する単純な形にし、diff プレビュー＋確認は
+//!   UI 層の責務とする（BlockHistory 等の再実行系と同じ「実行するのは明示操作」契約）。
+//!   Fable5 レビュー指摘: 以前は `git reset --hard <checkpoint>` を使っていたが、これは
+//!   作業ツリーだけでなく**ブランチの参照（HEAD）ごと**チェックポイント時点へ動かしてしまう。
+//!   チェックポイント取得後に本物のコミットをしていた場合、そのコミットがブランチから
+//!   外れて reflog 経由でしか復旧できなくなる（実機で再現・確認済み）。`git restore` は
+//!   ブランチ参照に触れず、作業ツリー/インデックスの内容だけをチェックポイント時点に戻す
+//!   ため、この事故が起きない。
 //! - git 未導入・非リポジトリ・コミット無しリポ（unborn HEAD）は静かに無効（false/空を返すだけ）。
 //! - 状態はプロセスメモリのみ（永続化しない）。再起動を跨いだ巻き戻しは対象外＝シンプルさ優先。
 
@@ -153,14 +159,17 @@ pub fn capture(cwd: &str) -> bool {
 }
 
 /// 指定チェックポイントが記録している untracked スナップショットを取り出す（restore 専用）。
-fn checkpoint_untracked(root: &str, hash: &str) -> Vec<String> {
+/// `Some(list)` = 記録あり（捕捉時に untracked が0件なら空 Vec）。`None` = このハッシュの
+/// 記録がそもそも無い＝「何が既存で何が新規か判別できない」ため、呼び出し側は untracked に
+/// 一切触れないこと（Fable5 指摘: 空 Vec と未記録を同一視すると、未記録時に「安全側」のつもり
+/// で untracked を全削除してしまう——逆に何もしないのが安全側）。
+fn checkpoint_untracked(root: &str, hash: &str) -> Option<Vec<String>> {
     checkpoints_state()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .get(&repo_key(root))
         .and_then(|list| list.iter().find(|c| c.hash == hash))
         .map(|c| c.untracked.clone())
-        .unwrap_or_default()
 }
 
 pub fn list(cwd: &str) -> Vec<Checkpoint> {
@@ -186,16 +195,20 @@ pub fn restore(cwd: &str, hash: &str) -> Result<()> {
     if !is_valid_hash(hash) {
         return Err(AppError::Config("invalid checkpoint hash".into()));
     }
-    // reset --hard 前に基準集合を取得（記録が無ければ空＝安全側＝以後の untracked を全部消す）。
+    // restore 前に基準集合を取得。
     let baseline = checkpoint_untracked(&root, hash);
-    run_git(&root, &["reset", "--hard", hash])?;
-    // reset --hard は tracked ファイルの index/worktree しか戻さず untracked には触れないため、
-    // このチェックポイント以降に新規作成された untracked ファイル（＝巻き戻したいターンが
-    // 作ったファイル）を明示的に削除する。捕捉時から存在した untracked ファイルはそのまま残す
-    // （内容の巻き戻しまでは対応しない既知の割り切り）。
-    for path in list_untracked(&root) {
-        if !baseline.contains(&path) {
-            let _ = std::fs::remove_file(Path::new(&root).join(&path)); // best-effort
+    // git restore はブランチ参照（HEAD）に触れず、作業ツリー/インデックスの内容だけを
+    // チェックポイント時点へ戻す（reset --hard との違いは冒頭の doc comment 参照）。
+    run_git(&root, &["restore", "--source", hash, "--staged", "--worktree", "--", "."])?;
+    // git restore は untracked ファイルには触れないため、このチェックポイント以降に新規作成
+    // された untracked ファイル（＝巻き戻したいターンが作ったファイル）を明示的に削除する。
+    // 捕捉時から存在した untracked ファイルはそのまま残す（内容の巻き戻しまでは対応しない
+    // 既知の割り切り）。baseline が None（記録なし）なら何が新規か判別できないため触れない。
+    if let Some(baseline) = baseline {
+        for path in list_untracked(&root) {
+            if !baseline.contains(&path) {
+                let _ = std::fs::remove_file(Path::new(&root).join(&path)); // best-effort
+            }
         }
     }
     Ok(())
@@ -335,6 +348,46 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Fable5 レビュー指摘の再現: 旧実装（`git reset --hard <checkpoint>`）は、チェックポイント
+    /// 取得後に本物のコミットをしていた場合、そのコミットをブランチ履歴から外してしまう
+    /// （reflog 経由でしか復旧できなくなる）。restore はブランチ参照を動かさず、コミットは
+    /// 一切失われないことを確認する。
+    #[test]
+    fn restore_does_not_move_head_or_lose_commits_made_after_the_checkpoint() {
+        let dir = std::env::temp_dir().join("orb-checkpoint-test-head-safety");
+        init_repo(&dir);
+        let cwd = dir.to_str().unwrap();
+
+        // チェックポイント時点の変更。
+        std::fs::write(dir.join("a.txt"), "checkpoint-state\n").unwrap();
+        assert!(capture(cwd));
+        let hash = list(cwd)[0].hash.clone();
+
+        // チェックポイント取得後、本物のコミットを2つ重ねる（AIがそのまま確定させた想定）。
+        run_git(cwd, &["add", "-A"]).unwrap();
+        run_git(cwd, &["commit", "-q", "-m", "real commit after checkpoint"]).unwrap();
+        std::fs::write(dir.join("b.txt"), "new file after checkpoint\n").unwrap();
+        run_git(cwd, &["add", "-A"]).unwrap();
+        run_git(cwd, &["commit", "-q", "-m", "add file after checkpoint"]).unwrap();
+        let head_before = run_git(cwd, &["rev-parse", "HEAD"]).unwrap();
+
+        restore(cwd, &hash).unwrap();
+
+        // HEAD（ブランチ参照）は一切動いていない＝本物のコミットは失われていない。
+        let head_after = run_git(cwd, &["rev-parse", "HEAD"]).unwrap();
+        assert_eq!(head_before, head_after, "restore はブランチ参照を動かしてはいけない");
+        let log = run_git(cwd, &["log", "--oneline"]).unwrap();
+        assert!(log.contains("real commit after checkpoint"));
+        assert!(log.contains("add file after checkpoint"));
+
+        // 作業ツリーの内容はチェックポイント時点まで戻る。
+        assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "checkpoint-state\n");
+        // チェックポイント後に追加された b.txt（tracked）は消える。
+        assert!(!dir.join("b.txt").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// レビュー指摘の再現: `git stash create` は untracked ファイルを一切拾わないため、
     /// 「tracked ファイルを直しつつ新規ファイルも作る」ターンを巻き戻すと、素朴な実装では
     /// 新規ファイルだけ生き残ってしまう。untracked スナップショット差分で削除されることを確認。
@@ -371,6 +424,29 @@ mod tests {
         assert!(
             dir.join("pre_existing_scratch.txt").exists(),
             "チェックポイントより前から存在した untracked ファイルは消さない"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Fable5 レビュー指摘の再現: `checkpoint_untracked` が記録なしを空 Vec と同一視していた
+    /// 頃は、「記録が無い＝安全側で untracked を全削除」という逆の挙動になっていた。restore に
+    /// このマップへ登録されていない（が実在する）コミットを渡した時、既存の untracked ファイルに
+    /// 一切触れないことを確認する。
+    #[test]
+    fn restore_leaves_untracked_alone_when_hash_has_no_recorded_baseline() {
+        let dir = std::env::temp_dir().join("orb-checkpoint-test-no-baseline");
+        init_repo(&dir);
+        let cwd = dir.to_str().unwrap();
+        // このマップに一切登録されていない実在コミット（init コミット自身）。
+        let untracked_hash = run_git(cwd, &["rev-parse", "HEAD"]).unwrap();
+
+        std::fs::write(dir.join("some_untracked.txt"), "should-survive\n").unwrap();
+        restore(cwd, &untracked_hash).unwrap();
+
+        assert!(
+            dir.join("some_untracked.txt").exists(),
+            "記録の無いハッシュでの restore は untracked に触れてはいけない"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
