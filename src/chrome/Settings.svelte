@@ -32,7 +32,7 @@
       const path = await open({
         multiple: false,
         directory: false,
-        filters: [{ name: "画像", extensions: ["png", "jpg", "jpeg", "webp", "bmp"] }],
+        filters: [{ name: "画像", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "gif"] }],
       });
       if (typeof path === "string") draft.bg_image = path;
     } catch {
