@@ -318,9 +318,12 @@ fn reveal_arg(abs_str: &str) -> String {
 /// ログ/画像/文書等、実行されないと分かっている閲覧専用拡張子だけ false（＝開いてよい）。
 #[cfg(windows)]
 fn is_reveal_only_ext(path: &str) -> bool {
+    // #4: .html/.htm/.svg/.xml は「閲覧専用」に見えて実際は script 実行可能な文書のため、
+    // explorer.exe の open 動詞＝既定ブラウザ起動で file:// 上の埋め込み <script> が走る
+    // （クローン直後の Mark-of-the-Web 無しファイルなら尚更）。安全側に倒し reveal-only へ回す。
     const SAFE_VIEWER_EXTS: &[&str] = &[
         "log", "txt", "md", "png", "jpg", "jpeg", "gif", "webp", "bmp", "pdf", "csv", "json",
-        "html", "htm", "svg", "toml", "yaml", "yml", "xml",
+        "toml", "yaml", "yml",
     ];
     match std::path::Path::new(path).extension().and_then(|e| e.to_str()) {
         Some(ext) => !SAFE_VIEWER_EXTS.contains(&ext.to_lowercase().as_str()),
@@ -619,9 +622,12 @@ mod tests {
             "C:\\x\\a.png",
             "C:\\x\\a.PDF", // 大文字拡張子も判定できる
             "C:\\x\\a.csv",
-            "C:\\x\\a.html",
         ] {
             assert!(!is_reveal_only_ext(safe), "{safe} should open normally");
+        }
+        // #4 回帰: .html/.htm/.svg/.xml は script 実行可能な文書のため reveal-only 側へ。
+        for driveby in ["C:\\x\\a.html", "C:\\x\\a.htm", "C:\\x\\a.svg", "C:\\x\\a.xml"] {
+            assert!(is_reveal_only_ext(driveby), "{driveby} should be reveal-only");
         }
         // 未知拡張子・拡張子無しは安全側（reveal-only）に倒す。
         assert!(is_reveal_only_ext("C:\\x\\a.unknownext"));

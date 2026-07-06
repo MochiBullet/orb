@@ -95,6 +95,17 @@ fn run_git_diff_bounded(repo_root: &str, args: &[&str]) -> Result<String> {
         .spawn()
         .map_err(|e| AppError::Config(format!("git spawn failed: {e}")))?;
     let mut stdout = child.stdout.take().expect("stdout is piped");
+    let mut stderr = child.stderr.take().expect("stderr is piped");
+    // #2: stderr は別スレッドで並行排出する。ここでの stdout 読み取りは上限つきだが、その間
+    // stderr 側を誰も読まないと OS パイプ（~64KB）が満杯になった時点で git が stderr への
+    // 書き込みでブロックし、connected な stdout 側の読み取りも進まなくなる＝相互デッドロック
+    // （旧 run_git は Command::output() で両方を並行排出しており、手書きに置き換えた際に
+    // stderr 側の並行排出が漏れていた回帰）。
+    let stderr_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr.read_to_end(&mut buf);
+        buf
+    });
     // 上限＋1バイトだけ読む＝超過を検知しつつ、確保するバッファ自体を上限で頭打ちにする。
     let mut buf = Vec::new();
     (&mut stdout)
@@ -107,6 +118,7 @@ fn run_git_diff_bounded(repo_root: &str, args: &[&str]) -> Result<String> {
         // これ以上読まない＝git が満杯のパイプでブロックし続けないよう、子を落としてから回収する。
         let _ = child.kill();
         let _ = child.wait();
+        let _ = stderr_thread.join(); // kill で stderr 側も EOF になるので回収しておく（結果は不要）。
         let mut s = String::from_utf8_lossy(&buf).into_owned();
         s.push_str(&format!(
             "\n... (diff truncated at {} MB — restore preview only)\n",
@@ -119,12 +131,9 @@ fn run_git_diff_bounded(repo_root: &str, args: &[&str]) -> Result<String> {
     let status = child
         .wait()
         .map_err(|e| AppError::Config(format!("git wait failed: {e}")))?;
+    let err_bytes = stderr_thread.join().unwrap_or_default();
     if !status.success() {
-        let mut err = String::new();
-        if let Some(mut se) = child.stderr.take() {
-            let _ = se.read_to_string(&mut err);
-        }
-        return Err(AppError::Config(err.trim().to_string()));
+        return Err(AppError::Config(String::from_utf8_lossy(&err_bytes).trim().to_string()));
     }
     Ok(String::from_utf8_lossy(&buf).trim().to_string())
 }
@@ -635,6 +644,39 @@ mod tests {
             d.len()
         );
         assert!(d.contains("diff truncated"), "打ち切り注記が付く");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #2 回帰再現: git が stdout をほとんど出さず stderr だけ大量に書こうとするケースで、
+    /// stderr を並行排出しないと OS パイプ（数十KB程度）が満杯になった時点で git 側が
+    /// stderr への書き込みでブロックし、道連れで stdout の読み取り（EOF 待ち）も終わらない
+    /// ＝相互デッドロックする。git は診断以外で通常ここまで stderr を吐かないため、シェル委譲の
+    /// git エイリアス（`!`）で「stdout はほぼ空・stderr は数百KB」を人工的に再現するスタンド
+    /// インとする。有限時間で完了すれば並行排出できている証拠（旧実装ならこの呼び出しでハング
+    /// し、テストがタイムアウトで落ちる）。
+    #[test]
+    fn diff_bounded_drains_large_stderr_without_deadlock() {
+        let dir = std::env::temp_dir().join("orb-checkpoint-test-stderr-flood");
+        init_repo(&dir);
+        let cwd = dir.to_str().unwrap();
+
+        // 80桁ゼロ埋め×4000行 ≒ 324KB を stderr に書いてから stdout に "ok" だけ書いて終了する
+        // エイリアス。OS の匿名パイプ既定サイズ（Windows/Unix とも典型的に64KB程度）を
+        // 十分に超えるため、stderr を誰も読まなければ git 側が確実にブロックする。
+        run_git(
+            cwd,
+            &[
+                "config",
+                "alias.floodstderr",
+                "!f() { i=0; while [ $i -lt 4000 ]; do printf '%080d\\n' 0 1>&2; i=$((i+1)); done; echo ok; }; f",
+            ],
+        )
+        .unwrap();
+
+        let root = repo_root(cwd).unwrap();
+        let out = run_git_diff_bounded(&root, &["floodstderr"]).unwrap();
+        assert_eq!(out, "ok", "stdout 側は並行排出された stderr の影響を受けず読み切れる");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
