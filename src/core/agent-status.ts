@@ -13,24 +13,27 @@ export type PaneStatus = "running" | "waiting" | "attention" | "done" | "failed"
 /**
  * #76/Theme-E: このペインの出力を「エージェント状態(waiting/attention)」として追跡すべきか。
  *
- * orb の存在意義＝「裏でも claude を回す」を守りつつ、過剰追跡を防ぐ。以前は静的な
- * role==="ai" で全 AI ペインを追跡していたが、これは広すぎた：claude が終了した後の role="ai"
- * ペインや、出力の途切れる長時間の非 claude コマンドを背景タブで走らせている role="ai" ペインが
- * "waiting" に化け、キュー(#51)の指示を誤ったものへ自動投入しうる。そこで「今まさに生きた
- * agent か」で絞る：
+ * 二段ゲート構成の「外側」＝追跡候補かの広めの門。実際に waiting/attention へ化けさせる可否は
+ * trackAgentOutput 内の「内側」ゲート（isCommandRunning() || isLaunchedAgentActive）で絞るので、
+ * 外側に role==="ai" を含めても過剰追跡にはならない（生きた claude 以外は内側で弾かれる）。
  *
- * - launchedActive: ランチャー起動の claude が稼働中（appStore の isLaunchedAgentActive）。
- *   OSC マーカーの来ない起動 claude を前景/背景を問わず追跡する（本 issue の肝＝背景の起動
- *   claude を追う）。claude 終了で解除されるので、素のシェルに戻った role="ai" は追わない。
+ * - role==="ai": AI(claude)ペイン。#50/#51 の肝＝サイドバー「claude 起動」や手打ちの claude を
+ *   背景タブへ回した時（launchedActive=false・前景 aiPane でもない）でも状態追跡を続ける。
+ *   v1.5.12 でここから role が抜け、この背景 claude が丸ごと無視される回帰を招いたため戻す
+ *   （生きた claude は C マーカーを出す＝内側ゲートの isCommandRunning() が true で正しく判定でき、
+ *   claude 終了後は C が止まり launchedActive も落ちるので素シェルを誤判定しない）。
+ * - launchedActive: ランチャー起動 claude が稼働中（appStore の isLaunchedAgentActive）。起動
+ *   ペインは role="ai" なので role で概ね賄えるが、ランチャー意図を明示するため残す。
  * - paneId===foregroundAiPane: パレット「このペインを AI ペインに設定」で前景指定された
  *   ペイン（前景の手動指定・action-target を退行させない）。
  */
 export function shouldTrackAgentStatus(
+  role: "shell" | "ai" | undefined,
   launchedActive: boolean,
   paneId: number,
   foregroundAiPane: number | null,
 ): boolean {
-  return launchedActive || paneId === foregroundAiPane;
+  return role === "ai" || launchedActive || paneId === foregroundAiPane;
 }
 
 /** バッジ表示（TabBar/ペイン右上/INBOX で共通）。 */

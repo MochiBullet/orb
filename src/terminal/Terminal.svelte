@@ -20,7 +20,7 @@
     aiPane,
     aiPaneActivity,
     lastShellPane,
-    showSettings,
+    anyOverlayOpen,
     layout,
     broadcast,
     registerTermClear,
@@ -257,10 +257,12 @@
   }
 
   // フォーカスが自分に移ったら実際のキーボードフォーカスも端末へ。
-  // 設定パネルを閉じた瞬間も（$showSettings が false になったら）端末へ戻す
-  // ＝設定内の input にフォーカスが残って入力が吸われるのを防ぐ。
+  // #7: 設定に限らずどのオーバーレイ（履歴/MCP/キュー/チェックポイント/パレット/設定）を
+  // 閉じた瞬間も（$anyOverlayOpen が false になったら）端末へ戻す＝オーバーレイ内の input に
+  // フォーカスが残って（あるいは body に落ちて）打鍵が吸われるのを防ぐ。開いている間は
+  // 戻さない＝オーバーレイの入力欄からフォーカスを奪わない（従来の $showSettings ゲートと同性質）。
   $effect(() => {
-    if ($focusedPane === paneId && !$showSettings) term?.focus();
+    if ($focusedPane === paneId && !$anyOverlayOpen) term?.focus();
   });
 
   // ウィンドウ復帰時、フォーカスペインの端末へ確実にフォーカスを戻す。
@@ -279,7 +281,7 @@
   function refocusIfMine() {
     if (disposed || composing) return;
     const ok = () =>
-      get(focusedPane) === paneId && !get(showSettings);
+      get(focusedPane) === paneId && !get(anyOverlayOpen);
     if (!ok()) return;
     // 既に自分の端末にフォーカスがあるなら触らない。IME 候補ウィンドウ出現等で
     // 焦点が外れていないのに focus() を呼ぶと日本語変換が中断されるのを防ぐ。
@@ -451,11 +453,13 @@
   let aiTail = "";
   const aiTailDecoder = new TextDecoder();
   function trackAgentOutput(bytes: Uint8Array) {
-    // #76/Theme-A/E: 追跡対象は「今まさに生きた agent」＝ランチャー起動 claude(isLaunchedAgentActive)
-    // か、前景の action-target(aiPane) に限る。以前の静的 role==="ai" は広すぎ、claude 終了後の
-    // role="ai" ペインや背景で長い非 claude コマンドを走らせている role="ai" ペインまで "waiting" に
-    // 化けてキュー(#51)を誤爆させた。書込み先(setPaneStatus)は一貫して自分の paneId。
-    if (!shouldTrackAgentStatus(isLaunchedAgentActive(paneId), paneId, get(aiPane))) return;
+    // #76/Theme-A/E + #50/#51 回帰修正: 外側ゲートは role==="ai"／ランチャー起動 claude／前景 aiPane を
+    // 広めに通し、実際の waiting/attention 化は下の内側ゲート(isCommandRunning() || isLaunchedAgentActive)で
+    // 絞る。v1.5.12 で外側から role が抜け、サイドバー「claude 起動」や手打ち claude を背景へ回すと
+    // 状態追跡されなくなる回帰を招いたので role を戻す（背景 claude の待機バッジ/キュー自動投入が復活）。
+    // claude 終了後の素シェルは C マーカーが止まり内側ゲートで弾かれるので誤爆しない。
+    // 書込み先(setPaneStatus)は一貫して自分の paneId。
+    if (!shouldTrackAgentStatus(role, isLaunchedAgentActive(paneId), paneId, get(aiPane))) return;
     aiTail = (aiTail + aiTailDecoder.decode(bytes, { stream: true })).slice(-800);
     // 静止後に出力が再開したら waiting/attention → running へ戻す（C は再発火しないため）。
     const cur = get(paneStatus).get(paneId);

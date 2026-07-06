@@ -137,6 +137,14 @@ export const showPalette = writable(false);
 /** パレットを開く初期モード。ヘッダーの ⓘ から開くと "help"（取扱説明）で開く。 */
 export const paletteMode = writable<"search" | "help">("search");
 
+/** #7: いずれかのオーバーレイ（ランチャー/ブロック履歴/MCP カタログ/プロンプトキュー/
+ *  チェックポイント/コマンドパレット/設定）が開いているか。Terminal の再フォーカス処理が
+ *  これを購読し、どのオーバーレイを閉じても端末へフォーカスを戻す（従来は $showSettings だけ
+ *  見ていたため、設定以外の4オーバーレイを閉じると DOM フォーカスが body に落ちて打鍵が
+ *  効かなくなっていた）。履歴/MCP/キュー/チェックポイントは Workspace のローカル $state で
+ *  Terminal からは購読できないため、Workspace が全状態から $effect でこの集約ストアへ同期する。 */
+export const anyOverlayOpen = writable(false);
+
 /** ブロードキャスト入力。ON の間、フォーカスペインへの入力を全ペインへ複製する。 */
 export const broadcast = writable(false);
 

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, setFocusedAsAiPane, aiPane, paneStatus, acknowledgePane } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, setFocusedAsAiPane, aiPane, paneStatus, acknowledgePane, anyOverlayOpen } from "../store/appStore";
   import { formatImagePath, isImagePath } from "../core/insert-path";
   import { STATUS_ICON, STATUS_LABEL } from "../core/agent-status";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -55,6 +55,17 @@
   $effect(() => {
     $activeTabId;
     zoomedPane = null;
+  });
+
+  // #7: いずれかのオーバーレイが開いているかを集約ストアへ反映（Terminal の再フォーカス処理用）。
+  // 履歴/MCP/キュー/チェックポイントはこの Workspace のローカル $state で Terminal からは
+  // 見えないため、ここで7種すべてを OR して単一ストアへ寄せる。開いた瞬間は true＝端末へ
+  // フォーカスを戻さない（オーバーレイの入力欄からフォーカスを奪わない）。全部閉じれば false＝
+  // Terminal 側の $effect が再走してフォーカスされていた端末へ確実に戻す。
+  $effect(() => {
+    anyOverlayOpen.set(
+      showLauncher || showHistory || showMcpCatalog || showPromptQueue || showCheckpoints || $showPalette || $showSettings,
+    );
   });
 
   // 新規タブで一瞬出る小さな welcome。
