@@ -55,12 +55,12 @@
     }
   }
 
+  // #6: Escape はウィンドウ側（onEscape）だけで処理する。検索欄にしか onkeydown を貼らないと、
+  // ボタン（&#9432; 等）をクリックして DOM フォーカスがそちらへ移った後は Esc が効かなくなる
+  // （McpCatalog/PromptQueue と同じ罠）。ここに Escape 分岐を残すと window 側と二重発火するので、
+  // 矢印/Tab/Enter のパレット操作のみを担う。
   function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      if (mode === "help") { mode = "search"; queueMicrotask(() => input?.focus()); }
-      else onClose();
-    } else if (e.key === "ArrowDown") {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       sel = Math.min(filtered.length - 1, sel + 1);
     } else if (e.key === "ArrowUp") {
@@ -75,6 +75,14 @@
     }
   }
 
+  // #6: フォーカスがどこにあっても Esc で閉じる（help モードなら先に search へ戻る）。
+  function onEscape(e: KeyboardEvent) {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    if (mode === "help") { mode = "search"; queueMicrotask(() => input?.focus()); }
+    else onClose();
+  }
+
   // キー操作リファレンス（#47: info タブと共有の単一ソース src/data/reference.ts）。
   const reference = KEY_REFERENCE;
 
@@ -85,6 +93,8 @@
     sel = 0;
   });
 </script>
+
+<svelte:window onkeydown={onEscape} />
 
 <div class="overlay" onpointerdown={onClose} role="presentation">
   <div class="palette" onpointerdown={(e) => e.stopPropagation()} role="presentation">

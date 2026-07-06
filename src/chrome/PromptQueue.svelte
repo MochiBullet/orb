@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
   import { layout, aiPane, focusedPane } from "../store/appStore";
   import { leafIds } from "../layout/tree";
+  import { pushToast } from "../store/toasts";
   import {
     queues,
     armedPanes,
@@ -12,6 +13,8 @@
     movePrompt,
     cancelArmed,
     resumePane,
+    pauseArmForEdit,
+    resumeArmAfterEdit,
   } from "../store/promptQueue";
 
   // #51 プロンプトキュー: 実行中の AI ペインに「次の指示」を積む → waiting で自動投入。
@@ -34,6 +37,8 @@
 
   let text = $state("");
   let editingId = $state<string | null>(null);
+  // #5: 編集開始時に予約を止めたペイン（編集終了時にここへ再評価をかける。target 切替に引きずられない）。
+  let editingPane = $state<number | null>(null);
   let ta = $state<HTMLTextAreaElement | undefined>(undefined);
 
   let q = $derived(target != null ? $queues.get(target) : undefined);
@@ -48,11 +53,21 @@
   });
   let remainSec = $derived(armed ? Math.max(0, Math.ceil((armed.sendAt - now) / 1000)) : 0);
 
+  // #5: 編集中に止めていた予約を再評価する（無ければ何もしない）。
+  function resumeEditPause() {
+    if (editingPane != null) resumeArmAfterEdit(editingPane);
+    editingPane = null;
+  }
+
   function submit() {
     if (target == null || !text.trim()) return;
     if (editingId) {
-      updatePrompt(editingId, text);
+      // 予約の猶予中に fire() 済みで既に送信されていた場合は false（黙って握り潰さず伝える）。
+      if (!updatePrompt(editingId, text)) {
+        pushToast("warn", "編集対象は既に送信されました");
+      }
       editingId = null;
+      resumeEditPause();
     } else {
       enqueuePrompt(target, text);
     }
@@ -63,12 +78,18 @@
   function beginEdit(id: string, current: string) {
     editingId = id;
     text = current;
+    // 編集中に古いテキストのまま自動発火しないよう、対象ペインの予約を一旦止める。
+    if (target != null) {
+      editingPane = target;
+      pauseArmForEdit(target);
+    }
     ta?.focus();
   }
 
   function cancelEdit() {
     editingId = null;
     text = "";
+    resumeEditPause();
   }
 
   function onTextKey(e: KeyboardEvent) {
@@ -93,6 +114,9 @@
   onMount(() => {
     queueMicrotask(() => ta?.focus());
   });
+
+  // #5: 編集中断のまま（送信/中止を経ずに）オーバーレイを閉じても、止めた予約を放置しない。
+  onDestroy(() => resumeEditPause());
 </script>
 
 <svelte:window onkeydown={onKey} />

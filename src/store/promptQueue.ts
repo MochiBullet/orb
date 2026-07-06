@@ -162,7 +162,21 @@ const holdPanes = new Set<number>();
 // #Theme-F: 破棄済みペイン（disposePaneQueue 済み）。fire() の非同期送信中にペインが破棄されると、
 // 送信失敗の catch が qEnqueueFront で「死んだペインの新規キュー」を作ってしまう（誰も掃除しない
 // リーク＝一時停止アイテムが幽霊として残る）。catch はここを見て、破棄済みなら蘇生を諦める。
+// #3: paneId は単調増加で正しさ上は無限に増えても壊れないが、閉じたペイン1個につき1エントリが
+// 溜まり続けるのは無駄。実際に意味があるのは「破棄直後にまだ inflight の送信が1件残っているか」
+// だけなので、上限を設けて超えたら挿入順で最も古いものから捨てる（大昔に破棄したペインの送信が
+// 今頃 catch に来ることは実運用上ない＝ガードの実効性は損なわない）。
 const disposedPanes = new Set<number>();
+const DISPOSED_PANES_CAP = 500;
+
+/** disposedPanes へ追加。上限超過時は最古のエントリ（Set は挿入順）を1個追い出す。 */
+function markDisposed(paneId: number): void {
+  disposedPanes.add(paneId);
+  if (disposedPanes.size > DISPOSED_PANES_CAP) {
+    const oldest = disposedPanes.values().next().value;
+    if (oldest !== undefined) disposedPanes.delete(oldest);
+  }
+}
 
 // 送信実装（テストで差し替え可能）。bracketed paste + \r ＝自動投入（#51 の例外仕様）。
 let sendImpl: (paneId: number, text: string) => Promise<void> = async (paneId, text) => {
@@ -290,9 +304,30 @@ export function removePrompt(paneId: number, itemId: string): void {
   reconcileArm(paneId);
 }
 
-export function updatePrompt(itemId: string, text: string): void {
-  if (!text.trim()) return;
-  queues.update((m) => qUpdate(m, itemId, text));
+/** 見つかって書き換えられたら true。#5: 予約の猶予中に fire() 済みで既にキューから
+ *  消えていた場合は qUpdate が不変（同一参照）を返す＝false。呼び出し側はこれを見て
+ *  「もう送信済みで編集は反映されなかった」ことを利用者に伝える。 */
+export function updatePrompt(itemId: string, text: string): boolean {
+  if (!text.trim()) return false;
+  let found = false;
+  queues.update((m) => {
+    const next = qUpdate(m, itemId, text);
+    found = next !== m;
+    return next;
+  });
+  return found;
+}
+
+/** #5: 編集開始時の予約一時停止。cancelArmed と違い holdPanes は立てない＝編集終了後に
+ *  resumeArmAfterEdit で即座に再評価できる（status 変化を待たせない）。予約が無ければ何もしない。 */
+export function pauseArmForEdit(paneId: number): void {
+  disarm(paneId);
+}
+
+/** #5: 編集終了（更新確定・編集中止・オーバーレイを閉じる）時の再評価。条件が揃っていれば
+ *  即座に予約を張り直す。 */
+export function resumeArmAfterEdit(paneId: number): void {
+  tryArm(paneId);
 }
 
 export function movePrompt(paneId: number, itemId: string, delta: -1 | 1): void {
@@ -318,6 +353,6 @@ export function resumePane(paneId: number): void {
 export function disposePaneQueue(paneId: number): void {
   disarm(paneId);
   holdPanes.delete(paneId);
-  disposedPanes.add(paneId); // #Theme-F: 送信中だった fire() の catch に「もう蘇生するな」を伝える
+  markDisposed(paneId); // #Theme-F: 送信中だった fire() の catch に「もう蘇生するな」を伝える
   queues.update((m) => qClearPane(m, paneId));
 }

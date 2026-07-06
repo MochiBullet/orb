@@ -15,9 +15,12 @@ import {
   enqueuePrompt,
   removePrompt,
   movePrompt,
+  updatePrompt,
   cancelArmed,
   resumePane,
   disposePaneQueue,
+  pauseArmForEdit,
+  resumeArmAfterEdit,
   __setSendForTest,
   GRACE_MS,
   type QueueMap,
@@ -335,5 +338,56 @@ describe("自動送信エンジン (#51: waiting→armed→送信 / ガード網
     await Promise.resolve();
     expect(get(queues).has(p)).toBe(false); // 蘇生しない＝幽霊キューを作らない
     setPaneStatus(p, null);
+  });
+
+  it("#5: updatePrompt は見つかれば true・見つからなければ false（既発火後の編集を検知するため）", () => {
+    const p = ++paneSeq;
+    enqueuePrompt(p, "old");
+    const id = get(queues).get(p)!.items[0].id;
+    expect(updatePrompt(id, "new")).toBe(true);
+    expect(get(queues).get(p)!.items[0].text).toBe("new");
+    expect(updatePrompt("no-such-id", "z")).toBe(false); // 既に dequeue 済み等を模す
+    disposePaneQueue(p);
+  });
+
+  it("#5: pauseArmForEdit は予約を止め、resumeArmAfterEdit は status 変化を待たず即再評価する", () => {
+    const p = ++paneSeq;
+    enqueuePrompt(p, "x");
+    setPaneStatus(p, "waiting");
+    expect(get(armedPanes).has(p)).toBe(true);
+    pauseArmForEdit(p); // 編集開始
+    expect(get(armedPanes).has(p)).toBe(false);
+    vi.advanceTimersByTime(GRACE_MS * 2);
+    expect(sent).toEqual([]); // 編集中は古いテキストのまま自動送信されない
+    resumeArmAfterEdit(p); // 編集終了（cancelArmed と違い status 不変でも即再予約できる）
+    expect(get(armedPanes).has(p)).toBe(true);
+    vi.advanceTimersByTime(GRACE_MS);
+    expect(sent).toEqual([{ paneId: p, text: "x" }]);
+    setPaneStatus(p, null);
+  });
+
+  it("#3: disposedPanes は上限（500）を超えると最古のガードを手放す（無限成長しない）", async () => {
+    const CAP = 500; // promptQueue.ts の DISPOSED_PANES_CAP と同値（private なのでここで固定して検証）
+    const p0 = ++paneSeq; // 最初に破棄する pane＝上限超過で押し出される想定
+    let rejectFirst!: (e: unknown) => void;
+    __setSendForTest(() => new Promise((_, rej) => { rejectFirst = rej; }));
+    enqueuePrompt(p0, "x");
+    setPaneStatus(p0, "waiting");
+    await vi.advanceTimersByTimeAsync(GRACE_MS); // fire()→送信開始（保留）
+    disposePaneQueue(p0); // disposedPanes への1件目
+
+    // p0 を押し出すのに十分な数の dispose を積む（送信中でなくても markDisposed は積まれる）。
+    __setSendForTest(async () => {});
+    for (let i = 0; i < CAP; i++) {
+      disposePaneQueue(++paneSeq);
+    }
+
+    rejectFirst(new Error("late failure")); // p0 の送信がここでようやく失敗する
+    await Promise.resolve();
+    await Promise.resolve();
+    // ガードが上限で押し出されていれば「蘇生」する＝Set が無限成長せず一定数で忘れている証拠。
+    expect(get(queues).has(p0)).toBe(true);
+    disposePaneQueue(p0);
+    setPaneStatus(p0, null);
   });
 });

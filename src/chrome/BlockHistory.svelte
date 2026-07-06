@@ -169,6 +169,9 @@
     sendToAi(formatFailureDigest(picks));
   }
 
+  // #6: input の onkeydown だけだと、行内ボタン（copy/→AI/↻ 等）をクリックしてフォーカスが
+  // 移った後は Esc が効かない（McpCatalog/PromptQueue と同じ罠）。window レベルへ上げて
+  // フォーカス位置に依存させない。
   function onKey(e: KeyboardEvent) {
     if (e.key === "Escape") {
       e.preventDefault();
@@ -176,6 +179,8 @@
     }
   }
 </script>
+
+<svelte:window onkeydown={onKey} />
 
 <div class="overlay" onpointerdown={onClose} role="presentation">
   <div class="panel" onpointerdown={(e) => e.stopPropagation()} role="presentation">
@@ -193,7 +198,6 @@
       <input
         bind:this={input}
         bind:value={query}
-        onkeydown={onKey}
         placeholder="検索で全期間横断… 例: cargo exit:fail cwd:orb  (Esc)"
       />
       {#if failedVisible.length}
