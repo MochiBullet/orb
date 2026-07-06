@@ -598,8 +598,12 @@ accent = "#abcdef"
     #[test]
     fn config_dir_with_home_joins_dot_config_when_home_is_set() {
         // 通常時（home が非空）の既存挙動は変えない: home/.config/orb。
-        let dir = config_dir_with_home(PathBuf::from(r"C:\Users\someone"));
-        assert_eq!(dir, PathBuf::from(r"C:\Users\someone\.config\orb"));
+        // 期待値も同じ join で組む＝区切り文字をハードコードしない。r"...\..." 直書きだと
+        // Linux/macOS では `\` が区切りと認識されず 1 コンポーネント化し、コードの `/` 結合と
+        // 食い違って cross-platform CI(ubuntu/macos)だけ落ちる（実際に落ちた・OS 非依存化）。
+        let home = PathBuf::from(r"C:\Users\someone");
+        let dir = config_dir_with_home(home.clone());
+        assert_eq!(dir, home.join(".config").join("orb"));
     }
 
     #[test]
