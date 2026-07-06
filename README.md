@@ -10,7 +10,9 @@
 
 ## インストール
 
-> Windows 専用。実行には **PowerShell 7 (`pwsh`)** と **WebView2 ランタイム**（Win10/11 は標準）が必要です。
+> Windows 向けにビルド済み配布物（インストーラ/ポータブル/winget）を提供。実行には **PowerShell 7 (`pwsh`)** と **WebView2 ランタイム**（Win10/11 は標準）が必要です。
+>
+> **macOS は現時点でビルド済み配布物なし。** クロスプラットフォーム対応（[#17](https://github.com/MochiBullet/orb/issues/17)）は進行中で、シェル統合・ファイルオープン等のコードは Unix/macOS 対応済みですが、Mac 向けの `.app`/`.dmg` はまだリリースしていません。当面は下記「4. ソースからビルド」でお試しください（既定シェルは bash 決め打ち・zsh は未対応）。
 
 ### 1. 手動ダウンロード（おすすめ）
 
@@ -36,16 +38,18 @@ winget install MochiBullet.orb
 
 （[winget-pkgs](https://github.com/microsoft/winget-pkgs) への登録後に利用可能）
 
-### 4. ソースからビルド
+### 4. ソースからビルド（macOS はこちらが暫定手段）
 
 ```sh
 git clone https://github.com/MochiBullet/orb
 cd orb
 pnpm install
 pnpm tauri build
-# インストーラ → src-tauri/target/release/bundle/
-# ポータブル exe → src-tauri/target/release/orb.exe
+# Windows: インストーラ → src-tauri/target/release/bundle/、ポータブル exe → src-tauri/target/release/orb.exe
+# macOS: .app → src-tauri/target/release/bundle/macos/
 ```
+
+macOS では事前に Xcode Command Line Tools（`xcode-select --install`）と Rust（rustup）が必要です。動作確認は `pnpm tauri dev` から。
 
 詳しい前提・開発手順は [開発](#開発) を参照。
 
