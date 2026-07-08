@@ -359,6 +359,7 @@ pub fn spawn_pty(
     on_output: Channel<InvokeResponseBody>,
     initial_cmd: Option<String>,
     nonce: Option<String>,
+    label: Option<String>,
 ) -> Result<()> {
     let cmd = shell::build_shell(initial_cmd.as_deref(), nonce.as_deref())?;
     let handle = std::sync::Arc::new(PtyHandle::spawn(cmd, cols, rows, on_output)?);
@@ -371,6 +372,19 @@ pub fn spawn_pty(
     if let Some(prev) = previous {
         prev.kill();
     }
+    // #82: pane_id 再利用（同一ペインの respawn）時に古いラベルを残さない。今回 label が
+    // 無ければ既存エントリを消し、あれば置き換える。
+    {
+        let mut labels = state.pane_labels.lock().unwrap_or_else(|p| p.into_inner());
+        match label {
+            Some(l) => {
+                labels.insert(pane_id, l);
+            }
+            None => {
+                labels.remove(&pane_id);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -380,11 +394,17 @@ pub fn spawn_pty(
 /// 埋まる）も、pane B の write_pty/resize_pty は state.ptys のロック待ちにならない。
 #[tauri::command]
 pub fn write_pty(state: State<'_, AppState>, pane_id: PaneId, data: Vec<u8>) -> Result<()> {
+    write_pty_impl(&state, pane_id, &data)
+}
+
+/// write_pty の中身。#82: queue.rs（インボックス watcher）からも同じロジックで書き込めるよう
+/// Tauri コマンド本体から抽出（ロジック二重管理を避ける）。
+pub(crate) fn write_pty_impl(state: &AppState, pane_id: PaneId, data: &[u8]) -> Result<()> {
     let handle = {
         let ptys = state.ptys.lock().unwrap_or_else(|p| p.into_inner());
         ptys.get(&pane_id).cloned().ok_or(AppError::PaneNotFound(pane_id))?
     };
-    handle.write(&data)
+    handle.write(data)
 }
 
 /// write_pty 同様、map ロックは Arc の clone のみに限定する。
@@ -401,6 +421,8 @@ pub fn resize_pty(state: State<'_, AppState>, pane_id: PaneId, cols: u16, rows: 
 pub fn close_pty(state: State<'_, AppState>, pane_id: PaneId) -> Result<()> {
     // ロックは remove の間だけ。kill(taskkill/join) はロックの外で。
     let removed = state.ptys.lock().unwrap_or_else(|p| p.into_inner()).remove(&pane_id);
+    // #82: リーク防止（同じ pane_id が別ラベルで再利用されても古いラベルが残らない）。
+    state.pane_labels.lock().unwrap_or_else(|p| p.into_inner()).remove(&pane_id);
     if let Some(handle) = removed {
         handle.kill();
     }
@@ -420,6 +442,8 @@ pub fn close_all_ptys(state: State<'_, AppState>) {
         .unwrap_or_else(|p| p.into_inner())
         .drain()
         .collect();
+    // #82: 全ペイン破棄なのでラベルも丸ごとクリア。
+    state.pane_labels.lock().unwrap_or_else(|p| p.into_inner()).clear();
     for (_, handle) in drained {
         handle.kill();
     }

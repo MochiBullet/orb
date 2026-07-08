@@ -121,15 +121,15 @@
 
   // 全タブの全 leaf を一度に保持（タブ切替で Terminal を unmount させない＝PTY 生存）。
   let allLeaves = $derived.by(() => {
-    const out: { tabId: number; id: number; initialCmd?: string; role?: PaneRole }[] = [];
+    const out: { tabId: number; id: number; initialCmd?: string; role?: PaneRole; label?: string }[] = [];
     for (const t of $tabs) {
       const lay = tabLayout(t);
       if (!lay) continue;
-      const infoMap = new Map<number, { initialCmd?: string; role?: PaneRole }>();
+      const infoMap = new Map<number, { initialCmd?: string; role?: PaneRole; label?: string }>();
       leafInfoMap(lay, infoMap);
       for (const id of leafIds(lay)) {
         const info = infoMap.get(id);
-        out.push({ tabId: t.id, id, initialCmd: info?.initialCmd, role: info?.role });
+        out.push({ tabId: t.id, id, initialCmd: info?.initialCmd, role: info?.role, label: info?.label });
       }
     }
     return out;
@@ -496,7 +496,7 @@
         ? `left:${rect.x}%;top:${rect.y}%;width:${rect.w}%;height:${rect.h}%`
         : ""}
     >
-      <Terminal paneId={lf.id} initialCmd={lf.initialCmd} role={lf.role} />
+      <Terminal paneId={lf.id} initialCmd={lf.initialCmd} role={lf.role} label={lf.label} />
       {#if lf.tabId === $activeTabId && lf.id !== $focusedPane}
         {@const st = $paneStatus.get(lf.id)}
         {#if st}

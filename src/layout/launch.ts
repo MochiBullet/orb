@@ -10,6 +10,8 @@ export interface Project {
   dir: string;
   dev_cmd: string;
   dev_cwd: string;
+  /** #82: 外部インボックス機能用のラベル（未設定なら従来どおり無ラベルで起動）。 */
+  label?: string;
 }
 
 export function listProjects(): Promise<Project[]> {
@@ -92,7 +94,7 @@ export function launchProject(p: Project, preset: LaunchPreset = "continue", opt
     id: nextPaneId(),
     dir: "h",
     ratio: 0.4,
-    a: leaf(ai, `${cd(p.dir)}; ${buildClaudeCmd(preset, opts)}`, "ai"),
+    a: leaf(ai, `${cd(p.dir)}; ${buildClaudeCmd(preset, opts)}`, "ai", p.label),
     b: {
       kind: "split",
       id: nextPaneId(),

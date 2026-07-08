@@ -14,11 +14,11 @@ export type Splitter = { id: number; dir: "h" | "v"; ratio: number; parent: Rect
  * （Workspace が leaf を flat keyed で生成し、ツリーは矩形計算だけに使う）。
  */
 export type PaneNode =
-  | { kind: "leaf"; paneId: number; initialCmd?: string; role?: PaneRole }
+  | { kind: "leaf"; paneId: number; initialCmd?: string; role?: PaneRole; label?: string }
   | { kind: "split"; id: number; dir: "h" | "v"; ratio: number; a: PaneNode; b: PaneNode };
 
-export function leaf(paneId: number, initialCmd?: string, role?: PaneRole): PaneNode {
-  return { kind: "leaf", paneId, initialCmd, role };
+export function leaf(paneId: number, initialCmd?: string, role?: PaneRole, label?: string): PaneNode {
+  return { kind: "leaf", paneId, initialCmd, role, label };
 }
 
 /** target leaf を分割し、「既存 + 新 leaf」の split に置き換える。 */
@@ -131,11 +131,11 @@ export function computeSplitters(node: PaneNode, rect: Rect, out: Splitter[]): v
 /** leaf の付帯情報（起動コマンド・role）を paneId で引けるマップに。 */
 export function leafInfoMap(
   node: PaneNode,
-  out: Map<number, { initialCmd?: string; role?: PaneRole }>,
+  out: Map<number, { initialCmd?: string; role?: PaneRole; label?: string }>,
 ): void {
   if (node.kind === "leaf") {
     warnIfDuplicatePaneId(out, node.paneId, "leafInfoMap");
-    out.set(node.paneId, { initialCmd: node.initialCmd, role: node.role });
+    out.set(node.paneId, { initialCmd: node.initialCmd, role: node.role, label: node.label });
     return;
   }
   leafInfoMap(node.a, out);

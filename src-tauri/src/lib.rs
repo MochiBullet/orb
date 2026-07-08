@@ -5,6 +5,7 @@ mod procutil;
 mod config;
 mod error;
 mod pty;
+mod queue;
 mod shell;
 mod state;
 mod status;
@@ -53,10 +54,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(app_state)
-        .setup(|_app| {
+        .manage(app_state.clone())
+        .setup(move |_app| {
             // 初回のみ設定ファイルを seed（読み取りコマンドから書き込み副作用を分離）。
             config::seed_defaults();
+            // #82: 外部インボックス監視スレッドを起動（無効時＝ディレクトリ未作成なら no-op ループ）。
+            queue::spawn_watcher(app_state.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

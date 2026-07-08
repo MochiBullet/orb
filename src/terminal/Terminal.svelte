@@ -58,8 +58,13 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { get } from "svelte/store";
 
-  let { paneId, initialCmd, role }: { paneId: number; initialCmd?: string; role?: "shell" | "ai" } =
-    $props();
+  let { paneId, initialCmd, role, label }: {
+    paneId: number;
+    initialCmd?: string;
+    role?: "shell" | "ai";
+    /** #82: 外部インボックス機能用のペインラベル。指定時のみ spawn_pty へ渡す。 */
+    label?: string;
+  } = $props();
   const RESIZE_DEBOUNCE_MS = 150;
   const cfg = get(config);
   // #33: OSC 633;E（コマンドライン）の偽造防止 nonce。spawn 時に ORB_NONCE として子シェルへ
@@ -515,6 +520,7 @@
         },
         initialCmd,
         oscNonce,
+        label,
       );
       logInfo(`pane ${paneId}: pty spawned`);
     } catch (e) {

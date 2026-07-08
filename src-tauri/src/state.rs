@@ -19,9 +19,23 @@ pub type PaneId = u64;
 #[derive(Default, Clone)]
 pub struct AppState {
     pub ptys: Arc<Mutex<HashMap<PaneId, Arc<PtyHandle>>>>,
+    /// #82: 外部インボックス機能用のペインラベル（例: "worker:a"）。`ptys` とは別の
+    /// Mutex にする＝ラベル検索（queue watcher の定期ポーリング）が PTY I/O のロックを
+    /// 巻き込まない。
+    pub pane_labels: Arc<Mutex<HashMap<PaneId, String>>>,
 }
 
 impl AppState {
+    /// #82: ラベルから対応する pane_id を探す（queue watcher 用）。同じラベルが複数ペインに
+    /// 付いていた場合は先勝ち（運用上ラベルは一意に付ける前提のため、通常は起こらない）。
+    pub fn pane_for_label(&self, label: &str) -> Option<PaneId> {
+        let labels = self.pane_labels.lock().unwrap_or_else(|p| p.into_inner());
+        labels
+            .iter()
+            .find(|(_, v)| v.as_str() == label)
+            .map(|(k, _)| *k)
+    }
+
     /// 全 PTY をツリーごと kill する（drain はしない＝呼び出し直後にプロセスが
     /// 終了する想定の後始末なので、map から取り除く必要はない）。通常終了
     /// （`ExitRequested`）専用＝ブロッキングで確実に取得し、全 PTY を必ず kill する。

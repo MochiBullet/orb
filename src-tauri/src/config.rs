@@ -21,6 +21,11 @@ pub struct Project {
     /// モノレポ等で dev サーバの cwd が dir と異なる場合のみ。空なら dir を使う。
     #[serde(default)]
     pub dev_cwd: String,
+    /// #82: 外部インボックス機能用のラベル。`Some` なら起動時に AI ペインの spawn_pty へ
+    /// 渡り、`%TEMP%\orb-queue\inbox\` 経由でそのペインへテキストを注入できるようになる。
+    /// 利用者がローカルの projects.toml に任意で追加する値で、orb 既定の案件一覧には含めない。
+    #[serde(default)]
+    pub label: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -369,6 +374,7 @@ fn default_projects() -> Vec<Project> {
         dir: dir.into(),
         dev_cmd: "npm run dev".into(),
         dev_cwd: dev_cwd.into(),
+        label: None,
     };
     vec![
         p("plimal-ms", "PLIMAL-Ms", r"C:\Users\hiyok\PLIMAL-Ms", ""),

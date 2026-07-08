@@ -18,6 +18,7 @@ export class PtyClient {
     onData: (bytes: Uint8Array) => void,
     initialCmd?: string,
     nonce?: string,
+    label?: string,
   ): Promise<void> {
     const channel = new Channel<ArrayBuffer>();
     channel.onmessage = (msg) => onData(new Uint8Array(msg));
@@ -30,6 +31,8 @@ export class PtyClient {
       initialCmd: initialCmd ?? null,
       // #33: OSC 633;E 偽造防止 nonce（ORB_NONCE として子シェルへ渡る）。
       nonce: nonce ?? null,
+      // #82: 外部インボックス機能用のペインラベル（未指定なら従来どおり無ラベル）。
+      label: label ?? null,
     });
   }
 
