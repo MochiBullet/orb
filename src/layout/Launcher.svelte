@@ -4,6 +4,7 @@
     listProjects,
     launchProject,
     launchProjects,
+    launchAiRow,
     LAUNCH_PRESETS,
     type Project,
     type LaunchPreset,
@@ -33,6 +34,8 @@
   let approvals = $state<Approval[]>([]);
   let bulkModel = $state("default");
   let bulkEffort = $state("auto");
+  // AI ペインだけを1タブに横並びで起動するか（オフ=従来どおり案件ごとに別タブでAI/dev/git）。
+  let oneScreen = $state(false);
 
   onMount(async () => {
     projects = await listProjects();
@@ -74,10 +77,12 @@
   }
 
   function launchAll() {
-    launchProjects(
-      approvals.map((a) => ({ project: a.project, opts: { model: a.model, effort: a.effort } })),
-      preset,
-    );
+    const items = approvals.map((a) => ({ project: a.project, opts: { model: a.model, effort: a.effort } }));
+    if (oneScreen) {
+      launchAiRow(items, preset);
+    } else {
+      launchProjects(items, preset);
+    }
     onClose();
   }
 
@@ -171,6 +176,10 @@
             >{ps.label}</button>
           {/each}
         </div>
+        <label class="one-screen">
+          <input type="checkbox" bind:checked={oneScreen} />
+          1画面にまとめる（AIペインだけを1タブに横並び、dev/gitペインは作らない）
+        </label>
         <button class="launch-all" onpointerdown={launchAll}
           >この設定で{approvals.length}件を起動する（放置OK）</button
         >
@@ -517,6 +526,15 @@
     border-radius: 6px;
     font-size: 0.74rem;
     padding: 3px 6px;
+  }
+  .one-screen {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 14px 0;
+    color: var(--grey);
+    font-size: 0.76rem;
+    cursor: pointer;
   }
   .launch-all {
     margin: 10px 14px 14px;

@@ -131,3 +131,52 @@ export function launchProjects(
     launchProject(project, preset, opts);
   }
 }
+
+/** N ペインを横一列に均等分割する split ツリーを組む（columns3 の可変本数版）。 */
+function rowOf(nodes: PaneNode[]): PaneNode {
+  if (nodes.length === 1) return nodes[0];
+  const [first, ...rest] = nodes;
+  return { kind: "split", id: nextPaneId(), dir: "h", ratio: 1 / nodes.length, a: first, b: rowOf(rest) };
+}
+
+/**
+ * 複数案件の AI ペインだけを、1つの新規タブにまとめて起動する（dev/git ペインは作らない）。
+ * 複数の常駐セッションを同一画面に並べて見比べたい/連携させたい場合向け（例: labelを使った
+ * 外部インボックス経由でお互いにメッセージを送り合う運用、#82）。
+ *
+ * レイアウト: 先頭の案件を「司令塔」として左半分を占有し、残りは右半分を横並びで均等分割する
+ * （2件なら実質50/50の単純な左右分割、3件以上で右側がさらに分かれる）。1件だけの場合は
+ * 単純に1ペインを占有する。
+ *
+ * タブの代表 AI ペイン（tab.ai、checkpoint 自動捕捉やサイドバーの model/effort 表示が紐づく）は
+ * 先頭案件（司令塔）のものになる——既存の「タブ1つにつき AI ペイン1つ」という前提を崩さないための
+ * 代表選出。他の AI ペインも role="ai"・label 付きで独立して動作する（この代表選出の影響を受けない）。
+ */
+export function launchAiRow(
+  items: { project: Project; opts?: ModelEffort }[],
+  preset: LaunchPreset = "continue",
+): number[] {
+  if (items.length === 0) return [];
+  const aiIds = items.map(() => nextPaneId());
+  const leaves = items.map((it, i) =>
+    leaf(aiIds[i], `${cd(it.project.dir)}; ${buildClaudeCmd(preset, it.opts)}`, "ai", it.project.label),
+  );
+  const tree = leaves.length === 1 ? leaves[0] : {
+    kind: "split" as const,
+    id: nextPaneId(),
+    dir: "h" as const,
+    ratio: 0.5,
+    a: leaves[0],
+    b: rowOf(leaves.slice(1)),
+  };
+  const name = items.map((it) => it.project.name).join(" / ");
+  openProjectTab(tree, aiIds[0], name);
+  items.forEach((it, i) => {
+    const ai = aiIds[i];
+    setPaneCwd(ai, it.project.dir);
+    markLaunchedAgent(ai);
+    if (it.opts?.model && it.opts.model !== "default") setPaneModelEffort(ai, { model: it.opts.model });
+    if (it.opts?.effort && it.opts.effort !== "auto") setPaneModelEffort(ai, { effort: it.opts.effort });
+  });
+  return aiIds;
+}

@@ -38,6 +38,7 @@
   import { localDay, type SearchResult } from "../core/blocks-log";
   import { buildSessionSummary } from "../core/session-summary";
   import { frameBracketedPaste } from "../core/ai-payload";
+  import { initExternalLaunchListener } from "./external-launch";
 
   let showLauncher = $state(false);
   let showHistory = $state(false); // #31: ブロック履歴オーバーレイ（耐久ログからの再描画）
@@ -78,6 +79,7 @@
   // ドロップ時だけ動く。ペイン単位だと全ペインで多重発火するので Workspace で1回だけ受ける。
   let dragUnlisten: (() => void) | undefined;
   let winFocusUnlisten: (() => void) | undefined;
+  let externalLaunchUnlisten: (() => void) | undefined;
   const dropEncoder = new TextEncoder();
   function quotePath(p: string): string {
     return /\s/.test(p) ? `"${p}"` : p;
@@ -188,6 +190,10 @@
     });
     // #54: AI ペインのターン開始ごとに作業ツリーを非破壊で控える（チェックポイント）。
     checkpointCaptureUnsub = initCheckpointCapture();
+    // #82 followup: 外部プロセスからの「このslug群を1画面で起動して」要求を受ける。
+    void initExternalLaunchListener()
+      .then((un) => (externalLaunchUnlisten = un))
+      .catch(() => {});
   });
 
   onDestroy(() => {
@@ -197,6 +203,7 @@
     winFocusUnlisten?.();
     dragUnlisten?.();
     checkpointCaptureUnsub?.();
+    externalLaunchUnlisten?.();
   });
 
   function onKey(e: KeyboardEvent) {
