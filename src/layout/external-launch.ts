@@ -37,5 +37,9 @@ async function handleLaunchRequest(payload: LaunchRequestPayload): Promise<void>
       logWarn(`external-launch: unknown project slug "${slug}" (projects.toml に無い、スキップ)`);
     }
   }
-  if (items.length > 0) launchAiRow(items);
+  // "continue" ではなく明示的に "fresh"（`claude` 単体、`--continue` 無し）を使う。
+  // `claude --continue` は cwd に関わらず直近の会話を再開しうるため（実機検証で確認: 新規
+  // ペインのはずが、たまたま直近アクティブだった全く無関係な別セッションを継続してしまった）、
+  // 外部トリガーの新規起動でこれを踏むと意図しない会話に接続する事故になる。
+  if (items.length > 0) launchAiRow(items, "fresh");
 }
