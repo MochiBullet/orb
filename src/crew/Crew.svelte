@@ -26,6 +26,12 @@
   // 置くと絵全体が上に寄る。視覚的な重心が中央へ来るぶんだけ下へずらす。
   const STAGE_Y = -CENTER_Y + 14;
 
+  // 絵全体の縦の実寸(px): 最奥キャラの吹き出し上端から、最前列タイル/名前ラベルの下端まで。
+  // 帯(ウィンドウの 1/4)がこれより低い窓では、はみ出す代わりに全体を縮める。
+  const CONTENT_H = 215;
+  let bandH = $state(0);
+  let scale = $derived(bandH > 0 ? Math.min(1, bandH / CONTENT_H) : 1);
+
   let info = $derived.by(() => {
     const m = new Map<number, { role?: PaneRole; label?: string }>();
     if ($layout) leafInfoMap($layout, m);
@@ -69,8 +75,9 @@
   });
 </script>
 
-<div class="crew" class:paused={!windowFocused}>
-  <div class="stage" style:transform="translate3d({-CENTER_X}px, {STAGE_Y}px, 0)">
+<div class="crew" class:paused={!windowFocused} bind:clientHeight={bandH}>
+  <!-- scale を先に書く＝translate ごと拡縮されるので、縮めても帯の中央に収まったままになる。 -->
+  <div class="stage" style:transform="scale({scale}) translate3d({-CENTER_X}px, {STAGE_Y}px, 0)">
     {#each FLOOR as f (`${f.col},${f.row}`)}
       <div class="tile" aria-hidden="true" style:transform="translate3d({f.x}px, {f.y}px, 0)"></div>
     {/each}
@@ -255,8 +262,15 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    /* 席が埋まるとラベル同士が重なって全部読めなくなるので、常時は出さない。
+       フォーカス中の 1 人とホバー中の 1 人だけ名乗る（全員分の名前は title で引ける）。 */
+    opacity: 0;
+    transition: opacity 0.15s ease-out;
   }
+  .member:hover .name,
+  .member:focus-visible .name,
   .member.focused .name {
+    opacity: 1;
     color: var(--fg);
   }
 
