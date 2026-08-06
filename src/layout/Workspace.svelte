@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, setFocusedAsAiPane, aiPane, paneStatus, acknowledgePane, anyOverlayOpen } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, crewVisible, setFocusedAsAiPane, aiPane, paneStatus, acknowledgePane, anyOverlayOpen } from "../store/appStore";
   import { formatImagePath, isImagePath } from "../core/insert-path";
   import { STATUS_ICON, STATUS_LABEL } from "../core/agent-status";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -267,6 +267,9 @@
     } else if (k === "q") {
       e.preventDefault();
       showPromptQueue = true; // プロンプトキュー (Ctrl+Shift+Q, #51)
+    } else if (k === "j") {
+      e.preventDefault();
+      crewVisible.update((v) => !v); // Crew ビュー表示切替 (Ctrl+Shift+J)
     }
   }
 
@@ -311,6 +314,11 @@
       label: "通知: フォーカスモード(DND) 切替",
       hint: "Ctrl+Shift+N",
       run: () => dnd.update((d) => !d),
+    },
+    {
+      label: "Crew: 上部のキャラ帯を表示切替",
+      hint: "Ctrl+Shift+J · ペイン 1 個 = キャラ 1 体",
+      run: () => crewVisible.update((v) => !v),
     },
     {
       label: "サイドバー: 左右入替",

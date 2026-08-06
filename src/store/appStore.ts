@@ -172,6 +172,10 @@ function persistedBool(key: string, fallback: boolean) {
  *  永続なので「起動のたびに有効化」は不要＝一度 ON にすれば以後そのまま。 */
 export const dnd = persistedBool("orb.dnd", false);
 
+/** Crew ビュー（上部のアイソメ帯）の表示。dnd と同じ localStorage 永続で、
+ *  一度切れば以後そのまま＝起動のたびの操作が要らない。 */
+export const crewVisible = persistedBool("orb.crew", true);
+
 /** 新規タブ作成のたびに増えるカウンタ。Workspace が購読して小さな welcome を一瞬出す。
  *  初回タブ/セッション復元（ensureFirstTab）では増やさない＝起動直後に余計な演出を出さない。 */
 export const tabWelcome = writable(0);

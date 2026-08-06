@@ -6,7 +6,8 @@
   import Sidebar from "./chrome/Sidebar.svelte";
   import Toasts from "./chrome/Toasts.svelte";
   import Workspace from "./layout/Workspace.svelte";
-  import { sidebarSide, saveScrollbacks } from "./store/appStore";
+  import Crew from "./crew/Crew.svelte";
+  import { sidebarSide, saveScrollbacks, crewVisible } from "./store/appStore";
   import { bgMedia } from "./core/theme";
   import { pushToast } from "./store/toasts";
 
@@ -55,6 +56,8 @@
     <Toasts />
     <TitleBar />
     <TabBar />
+    <!-- ペイン＝キャラのアイソメ帯。非表示時は DOM ごと消す＝描画コストが完全にゼロになる。 -->
+    {#if $crewVisible}<Crew />{/if}
     <div class="body" class:reverse={$sidebarSide === "left"}>
       <div class="ws">
         <Workspace />
