@@ -36,9 +36,22 @@
   function tipText(label: string, status: PaneStatus | null): string {
     return status ? `${label} — ${STATUS_LABEL[status]}` : label;
   }
+
+  // 非フォーカス時はアニメーションを止める（裏に回った orb が CPU を使い続けないように）。
+  let windowFocused = $state(true);
+  $effect(() => {
+    const on = () => (windowFocused = true);
+    const off = () => (windowFocused = false);
+    window.addEventListener("focus", on);
+    window.addEventListener("blur", off);
+    return () => {
+      window.removeEventListener("focus", on);
+      window.removeEventListener("blur", off);
+    };
+  });
 </script>
 
-<div class="crew">
+<div class="crew" class:paused={!windowFocused}>
   <div class="stage" style:transform="translate3d({-CENTER_X}px, {STAGE_Y}px, 0)">
     {#each FLOOR as f (`${f.col},${f.row}`)}
       <div class="tile" aria-hidden="true" style:transform="translate3d({f.x}px, {f.y}px, 0)"></div>
@@ -54,12 +67,18 @@
         aria-label={tipText(m.label, m.status)}
         onclick={() => focusedPane.set(m.paneId)}
       >
-        <div class="monitor"></div>
+        <!-- 描画順がそのまま前後関係。人を描いたあとに机と画面を重ねると
+             「机の向こうに座っている」ように見える（脚と胴の下半分が隠れる）。 -->
         <div class="shadow"></div>
         <div class="rig">
           <div class="body"></div>
           <div class="head"></div>
         </div>
+        <div class="desk"></div>
+        <div class="screen"></div>
+        {#if m.action === "calling" || m.action === "urgent"}
+          <div class="bubble">{m.action === "urgent" ? "!" : "?"}</div>
+        {/if}
         <div class="name">{m.label}</div>
       </button>
     {/each}
@@ -137,12 +156,22 @@
   .member.down {
     --crew-c: var(--red);
   }
-  /* 奥(上)に置くモニタ。back 向きのキャラはこれに向かって座っている。 */
-  .monitor {
-    width: 28px;
-    height: 19px;
-    left: -14px;
-    top: -74px;
+  /* 机（床タイルと同じ菱形）と、その上に載る画面。人より後に描くので手前に来る。 */
+  .desk {
+    width: 54px;
+    height: 27px;
+    left: -27px;
+    top: -8px;
+    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+    /* 床タイル(--surface の半透明)より明るくして、床ではなく家具として読ませる。 */
+    background: var(--surface);
+    filter: brightness(1.7);
+  }
+  .screen {
+    width: 22px;
+    height: 15px;
+    left: -11px;
+    top: -20px;
     border-radius: 2px;
     background: var(--black);
     border: 1px solid var(--surface);
@@ -198,7 +227,7 @@
   }
   .name {
     left: -40px;
-    top: 8px;
+    top: 22px;
     width: 80px;
     text-align: center;
     font-size: 9px;
@@ -210,5 +239,91 @@
   }
   .member.focused .name {
     color: var(--fg);
+  }
+
+  /* 動かすのは transform / opacity / filter のみ。位置決めの transform は .member 側が
+     持っているので、アニメーションは必ず内側の .rig に当てる（打ち消し事故を防ぐ）。 */
+  @keyframes crew-bob {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(-2px);
+    }
+  }
+  @keyframes crew-hop {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    40% {
+      transform: translateY(-9px);
+    }
+  }
+  @keyframes crew-breathe {
+    from {
+      transform: scaleY(1);
+    }
+    to {
+      transform: scaleY(1.03);
+    }
+  }
+  @keyframes crew-blink {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0.45;
+    }
+  }
+  .typing .rig {
+    animation: crew-bob 0.35s ease-in-out infinite alternate;
+  }
+  .urgent .rig {
+    animation: crew-hop 0.6s ease-in-out infinite;
+  }
+  .idle .rig,
+  .resting .rig {
+    transform-origin: bottom center;
+    animation: crew-breathe 2.4s ease-in-out infinite alternate;
+  }
+  .calling .rig {
+    animation: crew-blink 0.9s ease-in-out infinite alternate;
+  }
+  /* 落ちたキャラは色を抜いて少し沈める。動かないこと自体が失敗のサイン。 */
+  .down .rig {
+    transform: translateY(3px);
+    filter: grayscale(1);
+  }
+  .typing .screen {
+    background: color-mix(in srgb, var(--crew-c) 22%, var(--black));
+    box-shadow: 0 0 9px var(--crew-c);
+  }
+  .urgent .screen,
+  .calling .screen {
+    box-shadow: 0 0 11px var(--crew-c);
+  }
+  .bubble {
+    left: 10px;
+    top: -72px;
+    padding: 1px 7px;
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--fg);
+    font-size: 12px;
+    line-height: 1.4;
+    font-weight: 700;
+  }
+  /* 非フォーカス時 / 動き軽減設定で全アニメーションを止める。 */
+  .crew.paused :global(*) {
+    animation-play-state: paused;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rig {
+      animation: none !important;
+    }
+    .member {
+      transition: none;
+    }
   }
 </style>
