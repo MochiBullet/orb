@@ -2,6 +2,7 @@
   // Crew ビュー: アクティブタブのペインを 1 体ずつのアイソメなキャラとして上部の帯に描く。
   // 状態は agent-status.ts の PaneStatus に完全に乗る（ここで判定は一切しない）。
   // 動かすのは transform と opacity だけ＝compositor-only（PERFORMANCE.md）。
+  import { fade } from "svelte/transition";
   import { layout, paneStatus, focusedPane } from "../store/appStore";
   import { leafIds, leafInfoMap, type PaneRole } from "../layout/tree";
   import { STATUS_LABEL, type PaneStatus } from "../core/agent-status";
@@ -37,6 +38,23 @@
     return status ? `${label} — ${STATUS_LABEL[status]}` : label;
   }
 
+  // 入場: 新しいキャラを最初の 1 フレームだけ帯の左外に置き、次のフレームで席へ移す。
+  // 位置の補間は .member の CSS transition が行うので、JS 側は「もう着席したか」の集合を
+  // 1 度だけ更新するだけ＝毎フレームのループは無い。
+  //
+  // paneId は nextPaneId() の単調増加で再利用されないため、閉じたペインの id が seated に
+  // 残っても誤って「着席済み」と判定されることはない（掃除は不要）。
+  const ENTRY_X = -300;
+  let seated = $state(new Set<number>());
+  $effect(() => {
+    const missing = crew.map((c) => c.paneId).filter((id) => !seated.has(id));
+    if (missing.length === 0) return;
+    const raf = requestAnimationFrame(() => {
+      seated = new Set([...seated, ...missing]);
+    });
+    return () => cancelAnimationFrame(raf);
+  });
+
   // 非フォーカス時はアニメーションを止める（裏に回った orb が CPU を使い続けないように）。
   let windowFocused = $state(true);
   $effect(() => {
@@ -62,10 +80,11 @@
       <button
         class="member {m.action} {m.facing}"
         class:focused={$focusedPane === m.paneId}
-        style:transform="translate3d({p.x}px, {p.y}px, 0)"
+        style:transform="translate3d({seated.has(m.paneId) ? p.x : ENTRY_X}px, {p.y}px, 0)"
         title={tipText(m.label, m.status)}
         aria-label={tipText(m.label, m.status)}
         onclick={() => focusedPane.set(m.paneId)}
+        out:fade={{ duration: 320 }}
       >
         <!-- 描画順がそのまま前後関係。人を描いたあとに机と画面を重ねると
              「机の向こうに座っている」ように見える（脚と胴の下半分が隠れる）。 -->
