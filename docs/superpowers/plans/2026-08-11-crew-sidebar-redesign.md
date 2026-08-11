@@ -466,7 +466,7 @@ import { STATUS_LABEL, STATUS_PRIORITY, type PaneStatus } from "../core/agent-st
 - [ ] **Step 4: テストが通ることを確認**
 
 Run: `pnpm vitest run src/crew/model.test.ts`
-Expected: PASS（16 件）
+Expected: PASS（15 件）
 
 - [ ] **Step 5: コミット**
 
