@@ -146,11 +146,11 @@
         {/each}
       </div>
       <div class="badges">
-        <span class="badges-label">状態バッジ（タブ・ペイン右上・サイドバー INBOX）:</span>
+        <span class="badges-label">状態バッジ（タブ・ペイン右上・サイドバー CREW）:</span>
         {#each STATUS_PRIORITY as s (s)}
           <span class="badge">{STATUS_ICON[s]} {STATUS_LABEL[s]}</span>
         {/each}
-        <span class="badges-note">— 手が要るペインには INBOX から1クリックでジャンプ。フォーカスすると既読で消える。</span>
+        <span class="badges-note">— 手が要るペインには CREW から1クリックでジャンプ。フォーカスすると既読で消える。手が要るペインが無いときも、CREW は作業中のペインを見せ続ける。</span>
       </div>
     </section>
 
