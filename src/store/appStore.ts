@@ -1,4 +1,5 @@
 import { writable, get } from "svelte/store";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { PaneNode } from "../layout/tree";
 import type { PaneStatus } from "../core/agent-status";
 
@@ -26,8 +27,26 @@ export const windowFocused = writable<boolean>(
   typeof document !== "undefined" ? document.hasFocus() : true,
 );
 if (typeof window !== "undefined") {
+  // DOM の focus/blur だけでは足りない。WebView2 は alt-tab 復帰でこれを発火しないことがあり
+  // （Terminal.svelte の refocusIfMine が同じ理由で Tauri ネイティブを主軸にしている）、
+  // 発火しないと store が古い値のまま固まる＝見ている pane にバッジが出続ける。
+  // Tauri の onFocusChanged を主軸にし、DOM イベントは保険として残す。
   window.addEventListener("focus", () => windowFocused.set(true));
   window.addEventListener("blur", () => windowFocused.set(false));
+  const win = (() => {
+    try {
+      return getCurrentWindow();
+    } catch {
+      return null; // Tauri 外（テスト/ブラウザ）では DOM イベントだけで動く
+    }
+  })();
+  if (win) {
+    // onFocusChanged は「変化」でしか発火しない。起動時から前面にあるウィンドウでは
+    // 一度も呼ばれず初期値のまま固まるので、実際の状態を一度読んで初期値を上書きする
+    // （document.hasFocus() はページ読み込み時点の値で、まだ false のことがある）。
+    void win.isFocused().then((f) => windowFocused.set(f)).catch(() => {});
+    void win.onFocusChanged(({ payload: focused }) => windowFocused.set(focused)).catch(() => {});
+  }
 }
 
 /** AI(claude)ペインの ID。Ctrl+L で選択テキストの送信先になる。null=AIペイン無し。 */
