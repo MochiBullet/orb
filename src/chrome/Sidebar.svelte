@@ -227,17 +227,27 @@
     }
   }
 
+  /** projects.toml の [[quick_launch]] を読み直す。起動時と定期リフレッシュの両方から呼ぶ。 */
+  function refreshQuickLaunch(): Promise<void> {
+    return listQuickLaunch()
+      .then((qs) => {
+        quickLaunches = qs;
+      })
+      .catch((e) => logError(`quick launch list failed: ${String(e)}`));
+  }
+
   onMount(() => {
     void initialLoad();
-    void listQuickLaunch()
-      .then((qs) => (quickLaunches = qs))
-      .catch((e) => logError(`quick launch list failed: ${String(e)}`));
+    void refreshQuickLaunch();
     timer = window.setInterval(() => {
       refreshUsage();
       refreshStatus();
       // #52: 同じ案件に居座って作業し続けても「直近1h」burn が固まらないよう、
       // cwd 変化時の debounce effect と同じ頻度感で追従させる（レビュー指摘の修正）。
       void refreshLocalUsage(get(cwdStore));
+      // projects.toml を編集してもアプリを再起動するまでボタンが出ない、を避ける。
+      // 読むのは小さな TOML 1 本なので、この間隔なら実測できるコストにならない。
+      void refreshQuickLaunch();
     }, 30000);
     // MCP 生死は重い（数秒）ので起動処理から外し、起動が落ち着いた頃に一度だけ実行（#43: 起動高速化）。
     // この時点の cwd（OSC Cwd が届いていれば実 cwd）をキーに取得し、以後 cwd 追従を解禁する。
