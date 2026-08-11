@@ -12,7 +12,8 @@
     type CrewCandidate,
   } from "./model";
   import { charSvg } from "./char-svg";
-  import { validateSheet, frameRect } from "./sprite";
+  import { validateSheet, frameRect, SPRITE_ORDER } from "./sprite";
+  import { resolveCrewSpritePath, crewSpriteBaseReady } from "./sprite-path";
   import { layout, focusedPane, paneStatus, paneStatusSince, paneLastCommand } from "../store/appStore";
   import { config } from "../core/config";
   import { tabs, activeTabId, switchTab } from "../layout/tabs";
@@ -106,6 +107,8 @@
   }
 
   $effect(() => {
+    $crewSpriteBaseReady; // 依存登録のためだけに読む。boot 完了で true になり、下で
+    // resolveCrewSpritePath が null 続きだったスロットをこの effect ごと再試行させる。
     const slots = $config.crew;
     for (let i = 0; i < slots.length; i++) {
       const sprite = slots[i]?.sprite?.trim() ?? "";
@@ -118,6 +121,8 @@
         continue;
       }
       if (validatedFor.get(i) === sprite) continue; // 既に検証済みの同じ画像
+      const resolved = resolveCrewSpritePath(sprite);
+      if (!resolved) continue; // base 未解決。validatedFor に書かないので base 解決後に再試行される
       validatedFor.set(i, sprite);
       warnedFor.delete(i); // 画像が変わったら、また失敗し得るのでガードを解く
       const slotIndex = i;
@@ -134,7 +139,7 @@
       img.onerror = () => {
         warnSpriteFailure(slotIndex, name, "画像を読み込めませんでした");
       };
-      img.src = convertFileSrc(sprite);
+      img.src = convertFileSrc(resolved);
     }
   });
 </script>
@@ -143,19 +148,24 @@
   {@const slot = $config.crew[i]}
   {@const pose = poseForStatus(seat.status)}
   {@const frame = spriteFrame.get(i)}
+  {@const spriteSrc = slot?.sprite ? resolveCrewSpritePath(slot.sprite) : null}
   <button
     class="seat"
     onclick={() => jumpToPane(seat)}
     title="クリックでジャンプ: {seat.tabName} / pane {seat.paneId}"
   >
     <span class="char">
-      {#if slot?.sprite && frame}
-        <span class="sprite-box" style="width:{frame}px;height:{frame}px">
+      {#if slot?.sprite && frame && spriteSrc}
+        <!-- サイドバーは168px固定。差し替えシートの元解像度(frame=validateSheetの検査値、
+             64pxでも128pxでも)に関わらず、既定SVGと同じ CHAR_SIZE で表示する。シート全体を
+             CHAR_SIZE*コマ数 幅へ拡縮し、ポーズのコマ番号 × CHAR_SIZE だけ左へオフセットして
+             CHAR_SIZE四方の窓で切り抜く（frame は妥当性判定にのみ使い、レイアウトには使わない）。 -->
+        <span class="sprite-box" style="width:{CHAR_SIZE}px;height:{CHAR_SIZE}px">
           <img
             class="sprite"
-            src={convertFileSrc(slot.sprite)}
+            src={convertFileSrc(spriteSrc)}
             alt=""
-            style="width:{frame}px;height:{frame}px;object-position:-{frameRect(pose, frame).x}px 0"
+            style="width:{CHAR_SIZE * SPRITE_ORDER.length}px;height:{CHAR_SIZE}px;object-position:-{frameRect(pose, CHAR_SIZE).x}px 0"
           />
         </span>
       {:else}
@@ -215,7 +225,11 @@
   }
   .sprite {
     display: block;
-    object-fit: none;
+    /* シート全体を width/height の指定どおりに拡縮する（object-fit: none だと指定サイズを
+       無視して原寸のまま描画されてしまい、128px 原寸シートが168px幅のサイドバーを突き破る）。
+       img 自身の width/height は常にシート原寸と同じアスペクト比（CHAR_SIZE*コマ数 : CHAR_SIZE）
+       で指定しているので、fill でも歪まない。 */
+    object-fit: fill;
   }
   .info {
     flex: 1 1 auto;

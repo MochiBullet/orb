@@ -5,6 +5,7 @@ import "./styles/app.css";
 import App from "./App.svelte";
 import { loadConfig } from "./core/config";
 import { initDefaultBg } from "./core/theme";
+import { initCrewSpriteBase } from "./crew/sprite-path";
 import { initGlobalErrorHandlers } from "./core/errors";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 
@@ -33,6 +34,9 @@ async function boot() {
   // ストアで App.svelte が購読しているため mount 前に待つ必要が無く、fire-and-forget にして
   // 解決後に背景がポップインする形にする（UI は即座に表示）。
   void initDefaultBg();
+  // crew スプライトの相対パス解決に使う config_dir() の絶対パスも同じく fire-and-forget で
+  // 一度だけキャッシュする（sprite-path.ts 参照。未解決の間 Crew.svelte は既定 SVG を出す）。
+  void initCrewSpriteBase();
 }
 
 void boot();

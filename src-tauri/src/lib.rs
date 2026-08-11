@@ -75,6 +75,7 @@ pub fn run() {
             commands::save_config,
             config::import_crew_sprite,
             commands::get_default_bg,
+            commands::get_config_dir,
             commands::get_usage,
             commands::get_local_usage,
             commands::checkpoint_capture,

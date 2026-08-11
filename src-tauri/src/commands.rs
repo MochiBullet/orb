@@ -139,6 +139,15 @@ pub fn get_default_bg() -> Result<String> {
     config::ensure_default_bg().map(|p| p.to_string_lossy().into_owned())
 }
 
+/// config_dir() の絶対パス。crew.sprite（config_dir() からの相対パス、例 "crew/slot0.png"）を
+/// convertFileSrc に渡せる絶対パスへ解決するために使う（get_default_bg と同じ「Rust が絶対パスを
+/// 教え、フロントは起動時に一度キャッシュして以後は同期結合するだけ」パターン）。
+/// config_dir() 自体はパス計算のみでディスクに触れないため失敗しない＝Result 不要。
+#[tauri::command]
+pub fn get_config_dir() -> String {
+    config::config_dir().to_string_lossy().into_owned()
+}
+
 /// Claude のトークン使用率（サイドバー用）。401/403 リトライ込みで最悪 ~20s ブロッキングし得るため、
 /// 他の重いコマンド（checkpoint_* 等）と同様 async + spawn_blocking で専用スレッドへ逃がす。
 #[tauri::command]
