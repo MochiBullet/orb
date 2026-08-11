@@ -17,6 +17,9 @@ import {
   registerPaneAltScreen,
   unregisterPaneAltScreen,
   isPaneInAltScreen,
+  paneLastCommand,
+  setPaneLastCommand,
+  clearPaneLastCommand,
 } from "./appStore";
 
 describe("cwd レジストリ (#45: タブ切替でサイドバーの cwd が旧ペインのまま残らない)", () => {
@@ -177,5 +180,27 @@ describe("isPaneInAltScreen (#77 FN-4b)", () => {
 
   it("未登録ペインは false 扱い（分からない時は配送を止めない）", () => {
     expect(isPaneInAltScreen(88888)).toBe(false);
+  });
+});
+
+describe("paneLastCommand", () => {
+  it("ペインごとに直近のコマンドを覚える", () => {
+    setPaneLastCommand(5, "cargo test");
+    expect(get(paneLastCommand).get(5)).toBe("cargo test");
+    setPaneLastCommand(5, "cargo build");
+    expect(get(paneLastCommand).get(5)).toBe("cargo build");
+  });
+
+  it("ペイン破棄で忘れる", () => {
+    setPaneLastCommand(7, "ls");
+    clearPaneLastCommand(7);
+    expect(get(paneLastCommand).has(7)).toBe(false);
+  });
+
+  it("空文字と null は覚えない（空の行を出さない）", () => {
+    setPaneLastCommand(6, "");
+    expect(get(paneLastCommand).has(6)).toBe(false);
+    setPaneLastCommand(6, null);
+    expect(get(paneLastCommand).has(6)).toBe(false);
   });
 });

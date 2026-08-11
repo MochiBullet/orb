@@ -41,6 +41,7 @@
     setPaneStatus,
     clearPaneCwd,
     clearPaneModelEffort,
+    clearPaneLastCommand,
     isLaunchedAgentActive,
     clearLaunchedAgent,
   } from "../store/appStore";
@@ -792,6 +793,7 @@
     clearLaunchedAgent(paneId); // #Theme-A: 起動 agent フラグを残さない（ID 再利用時の誤判定防止）
     clearPaneCwd(paneId); // #45: 破棄ペインの cwd を残さない
     clearPaneModelEffort(paneId); // #78 UX-5: 破棄ペインの model/effort 上書きを残さない
+    clearPaneLastCommand(paneId); // 破棄ペインの直近コマンドを残さない
     unregisterTermClear(paneId);
     unregisterTermSerialize(paneId); // #78 UX-6
     unregisterTermWrite(paneId);

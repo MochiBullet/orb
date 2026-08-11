@@ -64,6 +64,32 @@ export function setPaneStatus(paneId: number, s: PaneStatus | null) {
   });
 }
 
+/** ペインごとの直近コマンド行。Crew のシェルペイン表示だけが読む。
+ *  AI ペインでは常に "claude" が入るので、描画側で role を見て出し分けること。 */
+export const paneLastCommand = writable<ReadonlyMap<number, string>>(new Map());
+
+export function setPaneLastCommand(paneId: number, cmd: string | null) {
+  const v = cmd?.trim();
+  if (!v) return; // 空を入れて「コマンド行だけ空白」にしない
+  paneLastCommand.update((m) => {
+    if (m.get(paneId) === v) return m;
+    const next = new Map(m);
+    next.set(paneId, v);
+    return next;
+  });
+}
+
+/** ペイン破棄時のレジストリ掃除（Terminal.svelte の onDestroy から）。
+ *  消さないと閉じたペインの直近コマンドが溜まり続ける（ID 再利用で誤表示にもなる）。 */
+export function clearPaneLastCommand(paneId: number) {
+  paneLastCommand.update((m) => {
+    if (!m.has(paneId)) return m;
+    const next = new Map(m);
+    next.delete(paneId);
+    return next;
+  });
+}
+
 /** フォーカス＝確認済み。「手が要る」系（waiting/attention/done/failed）のバッジを消す。
  *  running は進行中の事実なので残す。 */
 export function acknowledgePane(paneId: number) {

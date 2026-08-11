@@ -1,5 +1,5 @@
 import type { Terminal, IMarker, IDecoration, IDisposable } from "@xterm/xterm";
-import { aiPane, setPaneCwd, dnd, setPaneStatus, clearLaunchedAgent } from "../../store/appStore";
+import { aiPane, setPaneCwd, dnd, setPaneStatus, clearLaunchedAgent, setPaneLastCommand } from "../../store/appStore";
 import { get } from "svelte/store";
 import { invoke } from "@tauri-apps/api/core";
 import { shouldNotifyForPane, notifyThrottled } from "./notify";
@@ -346,7 +346,10 @@ export class CommandBlocks {
   /** #33: `E;<nonce>;<escaped-cmd>` を検証してコマンドラインを確定する。 */
   private onCommandLine(rest: string) {
     const cmd = parseCommandLine(rest, this.nonce);
-    if (cmd != null) this.pendingCommand = cmd;
+    if (cmd != null) {
+      this.pendingCommand = cmd;
+      setPaneLastCommand(this.paneId, cmd);
+    }
   }
 
   private onPromptStart() {
