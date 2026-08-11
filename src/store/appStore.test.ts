@@ -127,7 +127,8 @@ describe("paneStatusSince", () => {
     const first = get(paneStatusSince).get(1);
     expect(first).toBeTypeOf("number");
 
-    setPaneStatus(1, "running"); // 同じ値の再設定
+    vi.advanceTimersByTime(50); // 時間を進める
+    setPaneStatus(1, "running"); // 同じ値の再設定＝時刻は動かない
     expect(get(paneStatusSince).get(1)).toBe(first);
 
     vi.advanceTimersByTime(100); // 時間を進める
