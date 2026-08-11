@@ -104,6 +104,45 @@ fn default_crew_slots() -> Vec<CrewSlot> {
     ]
 }
 
+/// 枠番号 → config_dir() からの相対パス。枠ごとに固定名なので、取り込みは常に上書き＝
+/// 古いスプライトが溜まらない。
+pub fn crew_sprite_rel(slot: usize) -> String {
+    format!("crew/slot{slot}.png")
+}
+
+/// 取り込み前の検証。枠は2つだけ、受けるのは PNG だけ。実際にPNGとして妥当か（6コマの
+/// スプライトシートか等）はフロント側が Image.naturalWidth/naturalHeight で検査する
+/// （このプロジェクトの png クレートはエンコード専用でこの経路には引き込まない）ので、
+/// ここでの拡張子チェックは「明らかに違うファイルを弾く」ゲート程度の意味しか持たない。
+fn validate_crew_import(slot: usize, src: &str) -> std::result::Result<(), String> {
+    if slot >= 2 {
+        return Err(format!("枠 {slot} は存在しません"));
+    }
+    let is_png = std::path::Path::new(src)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("png"));
+    if !is_png {
+        return Err("PNG ファイルを選んでください".into());
+    }
+    Ok(())
+}
+
+/// 選ばれたファイルを config_dir() 下の固定名へコピーする。設定GUI のファイルピッカーが
+/// 返した絶対パスを受け取り、config.toml に永続化できる相対パスへ変換して返す。
+// config.rs は `use crate::error::Result` で1引数版 Result を持つため、標準の
+// Result<T, E> をそのまま使う場合はフルパスで明示する必要がある。
+#[tauri::command]
+pub fn import_crew_sprite(slot: usize, src: String) -> std::result::Result<String, String> {
+    validate_crew_import(slot, &src)?;
+    let dir = config_dir().join("crew");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("保存先を作れません: {e}"))?;
+    let rel = crew_sprite_rel(slot);
+    let dest = config_dir().join(&rel);
+    std::fs::copy(&src, &dest).map_err(|e| format!("コピーに失敗しました: {e}"))?;
+    Ok(rel)
+}
+
 /// orb 本体の設定（config.toml）。
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -674,5 +713,18 @@ sprite = "crew/slot0.png"
         assert_eq!(c.crew.len(), 1);
         assert_eq!(c.crew[0].name, "枠A");
         assert_eq!(c.crew[0].sprite, "crew/slot0.png");
+    }
+
+    #[test]
+    fn crew_sprite_dest_is_scoped_to_slot() {
+        assert_eq!(crew_sprite_rel(0), "crew/slot0.png");
+        assert_eq!(crew_sprite_rel(1), "crew/slot1.png");
+    }
+
+    #[test]
+    fn crew_sprite_rejects_unknown_slot_and_non_png() {
+        assert!(validate_crew_import(2, "a.png").is_err());
+        assert!(validate_crew_import(0, "a.jpg").is_err());
+        assert!(validate_crew_import(0, "a.PNG").is_ok());
     }
 }

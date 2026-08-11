@@ -73,6 +73,7 @@ pub fn run() {
             commands::list_projects,
             commands::get_config,
             commands::save_config,
+            config::import_crew_sprite,
             commands::get_default_bg,
             commands::get_usage,
             commands::get_local_usage,
