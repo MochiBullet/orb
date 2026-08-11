@@ -124,26 +124,48 @@ pub fn crew_sprite_rel(slot: usize, dir: &Path) -> String {
     rel
 }
 
-/// name が枠 slot 用のスプライトファイル名か（新旧どちらの命名規則も拾う）。
-/// 旧仕様の固定名 `slot{N}.png` と、新仕様の一意名 `slot{N}-{ts}[-{n}].png` の両方を
-/// 対象にする＝旧バージョンで書かれたファイルが残っていても掃除できる。
-fn is_slot_sprite_file(name: &str, slot: usize) -> bool {
-    name == format!("slot{slot}.png") || name.starts_with(&format!("slot{slot}-"))
+/// name が crew スロット用のスプライトファイルの命名規則に合うか（新旧どちらも拾う）。
+/// 旧仕様の固定名 `slot{N}.png` と、新仕様の一意名 `slot{N}-{ts}[-{n}].png` の両方に
+/// マッチする＝旧バージョンで書かれたファイルが残っていても掃除の対象に入る。
+/// スロット番号は問わない（sweep_crew_sprites は全スロットをまとめて一度に掃除するため、
+/// ここでは「crew ディレクトリの中にある、スプライト由来っぽいファイルかどうか」だけを見る）。
+fn is_crew_sprite_file(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("slot") else {
+        return false;
+    };
+    let digits_end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    digits_end > 0 && rest.ends_with(".png")
 }
 
-/// 枠 slot の古いスプライトファイル（`keep` 以外）を削除する。best-effort:
-/// crew_dir が無い/個々の削除に失敗（既に無い等）しても呼び出し側の成功は妨げない。
-fn cleanup_old_crew_sprites(crew_dir: &Path, slot: usize, keep: &Path) {
-    let entries = match std::fs::read_dir(crew_dir) {
+/// 保存済み Config が実際に参照しているスプライトだけを残し、crew/ 配下の他の
+/// slot*.png ファイルを削除する。呼び出しは「config.toml への書き込みが確定した後」
+/// のみに限定する＝削除して良いという確証（=新しい設定が既に保存済み）が取れて
+/// 初めて掃除する設計（Critical: キャンセルで未保存の import 先が消える不具合の再発防止）。
+///
+/// 削除候補は crew_dir を実際に走査して見つけたファイル名（is_crew_sprite_file の
+/// パターン）だけに限り、cfg 側の sprite 文字列を辿って「このパスを消せ」と指図させることは
+/// しない。keep 集合（cfg が参照するパス）はあくまで「消さない」側のフィルタとしてのみ使う＝
+/// 手で書き換えた config.toml が任意のファイルパスを指しても、そのパスをたどって削除する経路が
+/// 無いので実害が無い（cleanup_old_crew_sprites が持っていた安全性を踏襲）。
+/// best-effort: crew_dir が無い/個々の削除に失敗（既に無い等）しても呼び出し側の成功は妨げない。
+fn sweep_crew_sprites(cfg: &Config, dir: &Path) {
+    let crew_dir = dir.join("crew");
+    let entries = match std::fs::read_dir(&crew_dir) {
         Ok(e) => e,
         Err(_) => return,
     };
+    let keep: std::collections::HashSet<PathBuf> = cfg
+        .crew
+        .iter()
+        .filter(|s| !s.sprite.is_empty())
+        .map(|s| dir.join(&s.sprite))
+        .collect();
     for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
-        if path == keep {
+        if keep.contains(&path) {
             continue;
         }
-        if is_slot_sprite_file(&entry.file_name().to_string_lossy(), slot) {
+        if is_crew_sprite_file(&entry.file_name().to_string_lossy()) {
             let _ = std::fs::remove_file(&path);
         }
     }
@@ -185,9 +207,11 @@ fn import_crew_sprite_into(slot: usize, src: &str, dir: &Path) -> std::result::R
     let rel = crew_sprite_rel(slot, dir);
     let dest = dir.join(&rel);
     std::fs::copy(src, &dest).map_err(|e| format!("コピーに失敗しました: {e}"))?;
-    // 新ファイルの書き込みに成功した後でのみ古いファイルを消す＝コピー失敗時に
-    // 既存の（まだ有効な）スプライトを失わない。
-    cleanup_old_crew_sprites(&crew_dir, slot, &dest);
+    // ここでは古いファイルを消さない。この時点ではまだ draft（設定GUI 上の下書き）に
+    // しか反映されておらず、ユーザーがこの後キャンセルする可能性がある。キャンセルされた
+    // 場合、旧ファイルは config.toml が今も指している「現役の」スプライトなので、ここで
+    // 消すと保存していないのにユーザーの画像が消える（Critical バグそのもの）。不要になった
+    // ファイルの掃除は save_config が config.toml を書き終えた後の sweep_crew_sprites に任せる。
     Ok(rel)
 }
 
@@ -275,6 +299,11 @@ pub fn save_config(cfg: &Config) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     let s = toml::to_string_pretty(cfg).map_err(|e| AppError::Config(e.to_string()))?;
     write_atomic(&dir, "config.toml", &s)?;
+    // config.toml への書き込みが確定した「後」にのみ、もう参照されなくなった crew
+    // スプライト（差し替えで超過した旧ファイル・「既定に戻す」で捨てられたファイル）を
+    // 掃除する。書き込みより前に消すと、途中で失敗した場合に cfg が指す予定だった
+    // ファイルより先に旧ファイルが消えてしまい、設定は古いまま画像だけ無くなる状態になる。
+    sweep_crew_sprites(cfg, &dir);
     Ok(())
 }
 
@@ -791,11 +820,15 @@ sprite = "crew/slot0.png"
     }
 
     #[test]
-    fn reimporting_a_different_sprite_yields_a_different_path_and_deletes_the_old_file() {
-        // タスクの核心の再現テスト: 同じ枠へ2回目の取り込みをしたとき、
+    fn reimporting_a_different_sprite_yields_two_different_paths_and_both_files_exist() {
+        // タスクの核心の再現テスト（Critical 修正後の期待値）: 同じ枠へ2回目の取り込みを
+        // したとき、
         // 1) 返る相対パス文字列が変わる（Crew.svelte の validatedFor キャッシュと <img src> の
-        //    どちらも「文字列が変われば再検証/再取得される」前提に乗るための必須条件）
-        // 2) 枠0の古いファイルが削除されている（積み上がらない）
+        //    どちらも「文字列が変われば再検証/再取得される」前提に乗るための必須条件。これは
+        //    修正前から成立していたプロパティで、退行させてはいけない）
+        // 2) import 時点ではもう削除が起きない＝1回目・2回目どちらのファイルもまだ両方
+        //    ディスク上に存在する（キャンセルされたら1回目のファイルが「現役」のまま残る
+        //    必要があるため。削除は save_config 後の sweep_crew_sprites に委譲した）。
         let dir = std::env::temp_dir().join("orb-crew-import-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -811,7 +844,9 @@ sprite = "crew/slot0.png"
         let rel2 = import_crew_sprite_into(0, src2.to_str().unwrap(), &dir).unwrap();
 
         assert_ne!(rel1, rel2, "differently-content re-import must yield a different stored path");
-        assert!(!dir.join(&rel1).exists(), "old slot file must be deleted after re-import");
+        assert!(dir.join(&rel1).exists(), "old slot file must NOT be deleted at import time");
+        assert!(dir.join(&rel2).exists());
+        assert_eq!(std::fs::read(dir.join(&rel1)).unwrap(), b"AAAA");
         assert_eq!(std::fs::read(dir.join(&rel2)).unwrap(), b"BBBB");
 
         // 他の枠のファイルは無関係に残る（誤爆しない）。
@@ -822,20 +857,49 @@ sprite = "crew/slot0.png"
     }
 
     #[test]
-    fn cleanup_old_crew_sprites_is_noop_when_nothing_to_delete() {
-        // 初回インポート相当（削除対象なし）でも panic/error なく完了する。
-        let dir = std::env::temp_dir().join("orb-crew-cleanup-noop-test");
+    fn sweep_crew_sprites_removes_unreferenced_and_keeps_referenced() {
+        // Important 修正の核心テスト: 保存済み Config が参照するパスだけが生き残り、
+        // 差し替え/「既定に戻す」で放置された crew/slot* ファイルは消える。
+        let dir = std::env::temp_dir().join("orb-crew-sweep-test");
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("crew")).unwrap();
+        let crew_dir = dir.join("crew");
+        std::fs::create_dir_all(&crew_dir).unwrap();
 
-        let keep = dir.join("crew/slot0-1.png");
-        std::fs::write(&keep, b"x").unwrap();
-        cleanup_old_crew_sprites(&dir.join("crew"), 0, &keep); // 自分自身以外に削除対象が無い
-        assert!(keep.exists());
+        // 枠0: 旧ファイル(超過分)と現行ファイルが両方ディスク上にある状態を再現。
+        std::fs::write(crew_dir.join("slot0-1.png"), b"old").unwrap();
+        std::fs::write(crew_dir.join("slot0-2.png"), b"new").unwrap();
+        // 枠1: 「既定に戻す」で参照が外れたファイル（config は空文字＝既定 SVG を指す）。
+        std::fs::write(crew_dir.join("slot1-1.png"), b"abandoned").unwrap();
+        // crew/ 配下だが命名規則に合わない無関係ファイル（掃除対象に含めない）。
+        std::fs::write(crew_dir.join("readme.txt"), b"note").unwrap();
 
+        let mut cfg = Config::default();
+        cfg.crew[0].sprite = "crew/slot0-2.png".into();
+        cfg.crew[1].sprite = String::new();
+
+        sweep_crew_sprites(&cfg, &dir);
+
+        assert!(!crew_dir.join("slot0-1.png").exists(), "unreferenced old slot0 file must be swept");
+        assert!(crew_dir.join("slot0-2.png").exists(), "referenced slot0 file must survive the sweep");
+        assert!(!crew_dir.join("slot1-1.png").exists(), "abandoned slot1 file must be swept");
+        assert!(crew_dir.join("readme.txt").exists(), "non-sprite file must be left alone");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sweep_crew_sprites_does_not_panic_when_crew_dir_missing_or_empty() {
+        let dir = std::env::temp_dir().join("orb-crew-sweep-noop-test");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let cfg = Config::default();
         // crew ディレクトリ自体が無い（read_dir 失敗）場合でも panic しない。
-        let _ = std::fs::remove_dir_all(&dir);
-        cleanup_old_crew_sprites(&dir.join("crew"), 0, &keep);
+        sweep_crew_sprites(&cfg, &dir);
+
+        // 空の crew ディレクトリでも panic せず、何も起きない。
+        std::fs::create_dir_all(dir.join("crew")).unwrap();
+        sweep_crew_sprites(&cfg, &dir);
+        assert!(dir.join("crew").read_dir().unwrap().next().is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
