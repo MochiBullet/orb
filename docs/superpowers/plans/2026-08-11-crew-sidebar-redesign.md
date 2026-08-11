@@ -355,7 +355,7 @@ export function resolveName(slotName: string | undefined, c: CrewCandidate): str
 - [ ] **Step 4: テストが通ることを確認**
 
 Run: `pnpm vitest run src/crew/model.test.ts`
-Expected: PASS（9 件）
+Expected: PASS（8 件）
 
 - [ ] **Step 5: コミット**
 
