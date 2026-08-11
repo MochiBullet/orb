@@ -16,7 +16,7 @@
   import { tabs } from "../layout/tabs";
   import { leafIds } from "../layout/tree";
   import { logError } from "../core/log";
-  import { buildClaudeCmd } from "../layout/launch";
+  import { buildClaudeCmd, listQuickLaunch, runQuickLaunch, type QuickLaunch } from "../layout/launch";
   import { MODEL_OPTIONS, EFFORT_OPTIONS } from "../core/model-effort";
   import Crew from "../crew/Crew.svelte";
 
@@ -73,6 +73,9 @@
     aiPaneActivity.set(Date.now());
   }
 
+  // クイック起動ボタン（projects.toml の [[quick_launch]]）。設定が無ければ空のまま＝
+  // ボタン行自体を出さない。
+  let quickLaunches = $state<QuickLaunch[]>([]);
   let usage = $state<Usage | null>(null);
   let status = $state<ClaudeStatus | null>(null);
   /** 案件ランチャーの一括起動で model/effort を具体値付き起動した場合、config 由来の
@@ -226,6 +229,9 @@
 
   onMount(() => {
     void initialLoad();
+    void listQuickLaunch()
+      .then((qs) => (quickLaunches = qs))
+      .catch((e) => logError(`quick launch list failed: ${String(e)}`));
     timer = window.setInterval(() => {
       refreshUsage();
       refreshStatus();
@@ -294,6 +300,20 @@
       <button class="startbtn" onclick={() => startClaude("continue")} title="claude --continue（会話を再開）">continue</button>
     </div>
   </div>
+
+  {#if quickLaunches.length > 0}
+    <div class="sec">
+      <div class="startrow qlrow">
+        {#each quickLaunches as q (q.name)}
+          <button
+            class="startbtn"
+            onclick={() => void runQuickLaunch(q)}
+            title={`${q.slugs.join(" / ")} を今のタブへ追加`}
+          >{q.name}</button>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   <div class="sec">
     <div class="label">TOKENS</div>
@@ -514,6 +534,10 @@
   .startrow {
     display: flex;
     gap: 5px;
+  }
+  /* クイック起動ボタンは設定次第で本数が増える。claude/continue の2本枠と違い折り返す。 */
+  .qlrow {
+    flex-wrap: wrap;
   }
   .startbtn {
     flex: 1 1 0;

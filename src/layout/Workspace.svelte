@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, crewVisible, setFocusedAsAiPane, aiPane, paneStatus, acknowledgePane, anyOverlayOpen } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, crewVisible, setFocusedAsAiPane, aiPane, paneStatus, acknowledgePane, anyOverlayOpen, workspaceWidthPx } from "../store/appStore";
   import { formatImagePath, isImagePath } from "../core/insert-path";
   import { STATUS_ICON, STATUS_LABEL } from "../core/agent-status";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -80,6 +80,8 @@
   let dragUnlisten: (() => void) | undefined;
   let winFocusUnlisten: (() => void) | undefined;
   let externalLaunchUnlisten: (() => void) | undefined;
+  // クイック起動ボタンの width_px→比率換算用（appStore.workspaceWidthPx へ実寸を追従）。
+  let wsResizeObserver: ResizeObserver | undefined;
   const dropEncoder = new TextEncoder();
   function quotePath(p: string): string {
     return /\s/.test(p) ? `"${p}"` : p;
@@ -190,6 +192,13 @@
     });
     // #54: AI ペインのターン開始ごとに作業ツリーを非破壊で控える（チェックポイント）。
     checkpointCaptureUnsub = initCheckpointCapture();
+    // ワークスペース実寸(px)を追従。observe() 呼び出し直後に現在サイズで1回発火するため、
+    // クイック起動ボタンが押される前に大抵は実寸が入っている。
+    wsResizeObserver = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w) workspaceWidthPx.set(w);
+    });
+    wsResizeObserver.observe(wsEl);
     // #82 followup: 外部プロセスからの「このslug群を1画面で起動して」要求を受ける。
     void initExternalLaunchListener()
       .then((un) => (externalLaunchUnlisten = un))
@@ -204,6 +213,7 @@
     dragUnlisten?.();
     checkpointCaptureUnsub?.();
     externalLaunchUnlisten?.();
+    wsResizeObserver?.disconnect();
   });
 
   function onKey(e: KeyboardEvent) {

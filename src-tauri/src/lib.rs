@@ -71,6 +71,7 @@ pub fn run() {
             commands::close_pty,
             commands::close_all_ptys,
             commands::list_projects,
+            commands::list_quick_launch,
             commands::get_config,
             commands::save_config,
             config::import_crew_sprite,

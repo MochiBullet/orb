@@ -1,7 +1,7 @@
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::State;
 
-use crate::config::{self, Config, Project};
+use crate::config::{self, Config, Project, QuickLaunch};
 use crate::error::{AppError, Result};
 use crate::pty::PtyHandle;
 use crate::shell;
@@ -11,6 +11,12 @@ use crate::state::{AppState, PaneId};
 #[tauri::command]
 pub fn list_projects() -> Vec<Project> {
     config::load_projects()
+}
+
+/// projects.toml のクイック起動ボタン一覧（サイドバー用）。
+#[tauri::command]
+pub fn list_quick_launch() -> Vec<QuickLaunch> {
+    config::load_quick_launch()
 }
 
 /// #53: 画像バイト列を `%TEMP%\orb-shots\` に保存してフルパスを返す（呼び元は

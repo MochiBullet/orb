@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { nextPaneId, setPaneModelEffort, setPaneCwd, markLaunchedAgent } from "../store/appStore";
+import { get } from "svelte/store";
+import { nextPaneId, setPaneModelEffort, setPaneCwd, markLaunchedAgent, layout, workspaceWidthPx } from "../store/appStore";
 import { openProjectTab } from "./tabs";
 import { leaf, type PaneNode } from "./tree";
 import { MODEL_OPTIONS, EFFORT_OPTIONS } from "../core/model-effort";
+import { pushToast } from "../store/toasts";
 
 export interface Project {
   slug: string;
@@ -16,6 +18,35 @@ export interface Project {
 
 export function listProjects(): Promise<Project[]> {
   return invoke("list_projects");
+}
+
+/** サイドバーのクイック起動ボタン1件分（projects.toml の [[quick_launch]]）。 */
+export interface QuickLaunch {
+  name: string;
+  slugs: string[];
+  width_px: number;
+}
+
+export function listQuickLaunch(): Promise<QuickLaunch[]> {
+  return invoke("list_quick_launch");
+}
+
+/** slug 群を案件一覧に対して解決する純ロジック。順序を保ち、未知の slug は落として
+ *  dropped に集める（呼び出し側がトーストで報告するための情報。押したのに何も起きない
+ *  ように見える「静かな失敗」を作らないため、必ず何が落ちたか分かるようにしておく）。 */
+export function resolveQuickLaunchSlugs(
+  slugs: string[],
+  projects: Project[],
+): { resolved: Project[]; dropped: string[] } {
+  const bySlug = new Map(projects.map((p) => [p.slug, p]));
+  const resolved: Project[] = [];
+  const dropped: string[] = [];
+  for (const slug of slugs) {
+    const p = bySlug.get(slug);
+    if (p) resolved.push(p);
+    else dropped.push(slug);
+  }
+  return { resolved, dropped };
 }
 
 /** pwsh で安全に cd するスニペット（シングルクオートは '' へエスケープ）。
@@ -132,11 +163,38 @@ export function launchProjects(
   }
 }
 
-/** N ペインを横一列に均等分割する split ツリーを組む（columns3 の可変本数版）。 */
-function rowOf(nodes: PaneNode[]): PaneNode {
+/** N ペインを一列（dir 方向）に均等分割する split ツリーを組む（columns3 の可変本数版）。
+ *  launchAiRow の横並び行と、クイック起動の縦積み列の両方がこれを共有する。 */
+function equalSplit(nodes: PaneNode[], dir: "h" | "v"): PaneNode {
   if (nodes.length === 1) return nodes[0];
   const [first, ...rest] = nodes;
-  return { kind: "split", id: nextPaneId(), dir: "h", ratio: 1 / nodes.length, a: first, b: rowOf(rest) };
+  return { kind: "split", id: nextPaneId(), dir, ratio: 1 / nodes.length, a: first, b: equalSplit(rest, dir) };
+}
+
+/** 各案件を AI ペイン(leaf) に組み立てる。cd+claude起動コマンド・role・ルーティングlabel・
+ *  表示名title の組み方は launchAiRow / クイック起動で共通（呼び出し元をまたいで揃えるための
+ *  唯一の場所）。 */
+function buildAiLeaves(
+  items: { project: Project; opts?: ModelEffort }[],
+  preset: LaunchPreset,
+): { leaves: PaneNode[]; aiIds: number[] } {
+  const aiIds = items.map(() => nextPaneId());
+  const leaves = items.map((it, i) =>
+    leaf(aiIds[i], `${cd(it.project.dir)}; ${buildClaudeCmd(preset, it.opts)}`, "ai", it.project.label, it.project.name),
+  );
+  return { leaves, aiIds };
+}
+
+/** buildAiLeaves で組んだ各 AI ペインの cwd 追跡・起動中フラグ・model/effort 記録を確定する
+ *  （タブへどう配置したかに関わらず共通の後処理）。 */
+function registerAiRowPanes(items: { project: Project; opts?: ModelEffort }[], aiIds: number[]): void {
+  items.forEach((it, i) => {
+    const ai = aiIds[i];
+    setPaneCwd(ai, it.project.dir);
+    markLaunchedAgent(ai);
+    if (it.opts?.model && it.opts.model !== "default") setPaneModelEffort(ai, { model: it.opts.model });
+    if (it.opts?.effort && it.opts.effort !== "auto") setPaneModelEffort(ai, { effort: it.opts.effort });
+  });
 }
 
 /**
@@ -157,26 +215,85 @@ export function launchAiRow(
   preset: LaunchPreset = "continue",
 ): number[] {
   if (items.length === 0) return [];
-  const aiIds = items.map(() => nextPaneId());
-  const leaves = items.map((it, i) =>
-    leaf(aiIds[i], `${cd(it.project.dir)}; ${buildClaudeCmd(preset, it.opts)}`, "ai", it.project.label, it.project.name),
-  );
+  const { leaves, aiIds } = buildAiLeaves(items, preset);
   const tree = leaves.length === 1 ? leaves[0] : {
     kind: "split" as const,
     id: nextPaneId(),
     dir: "h" as const,
     ratio: 0.5,
     a: leaves[0],
-    b: rowOf(leaves.slice(1)),
+    b: equalSplit(leaves.slice(1), "h"),
   };
   const name = items.map((it) => it.project.name).join(" / ");
   openProjectTab(tree, aiIds[0], name);
-  items.forEach((it, i) => {
-    const ai = aiIds[i];
-    setPaneCwd(ai, it.project.dir);
-    markLaunchedAgent(ai);
-    if (it.opts?.model && it.opts.model !== "default") setPaneModelEffort(ai, { model: it.opts.model });
-    if (it.opts?.effort && it.opts.effort !== "auto") setPaneModelEffort(ai, { effort: it.opts.effort });
-  });
+  registerAiRowPanes(items, aiIds);
   return aiIds;
+}
+
+// ---- サイドバーのクイック起動ボタン --------------------------------------------------------
+// launchAiRow（新規タブ・司令塔+横並び）とは別の配置: 「今見ているタブ」のレイアウトはそのまま
+// 残し（=既存ペインは一切壊さない）、右側に細い縦長ペイン列を1本足すだけ。常時起動している
+// 主ペインの隣に補助ペインを添えたいだけ、という運用向け（新規タブを増やさない）。
+
+/** ドラッグ分割(Workspace.svelte の startDrag)の 0.15/0.85 とは別の緩いクランプ。この列は
+ *  そもそも「狭い常駐ペイン」前提（既定 168px）で使われるため、ドラッグ用の下限をそのまま
+ *  流用すると既定値ですら下限へ丸められて狭さの意図が消えてしまう。ここでは 0除算・符号反転・
+ *  画面を飲み込む/消えるだけを避ける最小限のガードに留める。 */
+const MIN_QUICK_LAUNCH_RATIO = 0.05;
+const MAX_QUICK_LAUNCH_RATIO = 0.9;
+/** ワークスペース実寸が取れない/0以下の時のフォールバック比率（新ペイン側の取り分）。 */
+const FALLBACK_QUICK_LAUNCH_RATIO = 0.2;
+
+/** クイック起動ペイン列の幅(px)を、作成時点のワークスペース実寸(px)から split 比率
+ *  （新ペイン側=右側の取り分, 0..1）へ換算する。orb の分割は比率ベースで px を保持し
+ *  続けられない（ウィンドウをリサイズすると比率のまま追従する設計）ため、ボタンを押した
+ *  瞬間の実寸だけを基準に一度だけ換算する。
+ *  実寸が取得できない/0以下なら FALLBACK_QUICK_LAUNCH_RATIO にフォールバック（0除算で
+ *  レイアウトを壊さない）。結果は [MIN_QUICK_LAUNCH_RATIO, MAX_QUICK_LAUNCH_RATIO] へ
+ *  クランプし、極端な width_px 指定（ワークスペースより大きい／0／負値）でも既存コンテンツが
+ *  消える・新規ペインがつぶれる、を避ける。 */
+export function widthPxToRatio(widthPx: number, workspaceWidthPxVal: number): number {
+  const fraction = workspaceWidthPxVal > 0 ? widthPx / workspaceWidthPxVal : FALLBACK_QUICK_LAUNCH_RATIO;
+  return Math.min(MAX_QUICK_LAUNCH_RATIO, Math.max(MIN_QUICK_LAUNCH_RATIO, fraction));
+}
+
+/** クイック起動で並べる各案件を縦積みの split ツリーに組む（1件ならそのまま1ペイン）。
+ *  leaf() の組み方は buildAiLeaves を経由するため launchAiRow と揃う。 */
+function buildQuickLaunchColumn(
+  items: { project: Project }[],
+  preset: LaunchPreset,
+): { tree: PaneNode; aiIds: number[] } {
+  const { leaves, aiIds } = buildAiLeaves(items, preset);
+  return { tree: equalSplit(leaves, "v"), aiIds };
+}
+
+/**
+ * クイック起動ボタン1個分の実処理（サイドバー用）。config の slugs を案件一覧に対して解決し、
+ * 縦積みの AI ペイン列を「今見ているタブ」のレイアウト全体(a)の右側(b)へ水平分割で追加する。
+ * 新しいタブは増やさず、既存レイアウトも一切壊さない（新しい split で包むだけ）。
+ *
+ * 未知の slug はスキップしてトーストで知らせる（無言の失敗はこのプロジェクトが繰り返し
+ * 踏んできた地雷なので、押したのに何も起きないように見える状態を必ず可視化する）。
+ * 1件も解決できなければレイアウトには触れず、トーストだけ出す。
+ */
+export async function runQuickLaunch(entry: QuickLaunch): Promise<void> {
+  const projects = await listProjects();
+  const { resolved, dropped } = resolveQuickLaunchSlugs(entry.slugs, projects);
+  if (dropped.length > 0) {
+    pushToast("warn", `クイック起動「${entry.name}」: 未登録の案件をスキップしました（${dropped.join(", ")}）`);
+  }
+  if (resolved.length === 0) return;
+
+  const items = resolved.map((project) => ({ project }));
+  // 外部ランチャー経路(#82)と同じ理由で "fresh" を使う: `claude --continue` は cwd に関わらず
+  // 直近の会話を再開しうるため、ボタン1つで意図しない会話に接続する事故を避ける。
+  const { tree: column, aiIds } = buildQuickLaunchColumn(items, "fresh");
+
+  const current = get(layout);
+  const newPaneFraction = widthPxToRatio(entry.width_px, get(workspaceWidthPx));
+  const root: PaneNode = current
+    ? { kind: "split", id: nextPaneId(), dir: "h", ratio: 1 - newPaneFraction, a: current, b: column }
+    : column; // 既存レイアウトが無い（info タブ等）場合は素直に新ペイン列をそのまま使う
+  layout.set(root);
+  registerAiRowPanes(items, aiIds);
 }

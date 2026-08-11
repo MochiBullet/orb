@@ -28,10 +28,32 @@ pub struct Project {
     pub label: Option<String>,
 }
 
+/// クイック起動ボタン1件分。サイドバーのボタンを押すと slugs を順に解決し、先頭以外を
+/// 縦長ペインへ縦積みで並べて「今見ているタブ」の右側へ追加する（詳細は launch.ts 側）。
+/// Project と同じ resilience パターン: 全フィールドに #[serde(default)] を付け、1エントリの
+/// 欠損/型違いが他の正常なエントリを巻き添えにしないようにする（parse_quick_launch_text 参照）。
+#[derive(Serialize, Deserialize, Clone)]
+pub struct QuickLaunch {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub slugs: Vec<String>,
+    /// 追加ペイン列の幅(px)。フロント側でボタンを押した瞬間のワークスペース実寸から
+    /// split 比率へ換算する（orb の分割は比率ベースで px を保持し続けられないため）。
+    #[serde(default = "default_quick_launch_width_px")]
+    pub width_px: u32,
+}
+
+fn default_quick_launch_width_px() -> u32 {
+    168
+}
+
 #[derive(Serialize, Deserialize, Default)]
 struct ProjectsFile {
     #[serde(default, rename = "project")]
     project: Vec<Project>,
+    #[serde(default, rename = "quick_launch")]
+    quick_launch: Vec<QuickLaunch>,
 }
 
 fn default_font_size() -> u16 {
@@ -380,6 +402,7 @@ pub fn seed_defaults() {
     if !pp.exists() {
         if let Ok(s) = toml::to_string_pretty(&ProjectsFile {
             project: default_projects(),
+            quick_launch: Vec::new(),
         }) {
             let _ = write_atomic(&dir, "projects.toml", &s);
         }
@@ -510,6 +533,50 @@ fn parse_projects_text(text: &str) -> Option<Vec<Project>> {
     } else {
         Some(valid)
     }
+}
+
+/// projects.toml の quick_launch 一覧を読む（read 専用）。設定されていなければ空 Vec
+/// （= サイドバーにボタンが1つも出ない。load_projects と違い、既定のクイック起動は無い＝
+/// 空リストへのフォールバックは「意図的な空」と「壊れて読めない」のどちらでも同じでよい）。
+pub fn load_quick_launch() -> Vec<QuickLaunch> {
+    match std::fs::read_to_string(config_dir().join("projects.toml")) {
+        Ok(text) => parse_quick_launch_text(&text).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// projects.toml のテキストを Vec<QuickLaunch> にパースする。parse_projects_text と同じ
+/// 「1エントリの破損で全滅させない」方針: toml::Value 経由でエントリ単位に deserialize し、
+/// 型違い・フィールド欠損のどちらでも該当エントリだけスキップする。
+///
+/// - TOML 自体が構文的に壊れている → None（呼び出し側で空 Vec にフォールバック）。
+/// - `quick_launch` キーが無い → Some(空 Vec)（ボタン無し、意図的な状態として尊重）。
+/// - キーはあるが配列でない → None（parse_projects_text と同じく打ち間違いを黙って握り潰さない）。
+/// - name/slugs のどちらかが空なエントリ（表示名が無い/起動先が無い）はスキップ。
+fn parse_quick_launch_text(text: &str) -> Option<Vec<QuickLaunch>> {
+    let raw = toml::from_str::<toml::Value>(text).ok()?;
+    let raw_entries: Vec<toml::Value> = match raw.get("quick_launch") {
+        None => Vec::new(),
+        Some(v) => v.as_array()?.clone(),
+    };
+    let valid: Vec<QuickLaunch> = raw_entries
+        .into_iter()
+        .filter_map(|entry| match QuickLaunch::deserialize(entry) {
+            Ok(q) if !q.name.is_empty() && !q.slugs.is_empty() => Some(q),
+            Ok(q) => {
+                eprintln!(
+                    "[orb] projects.toml: name/slugs が空の [[quick_launch]] エントリをスキップします（name={:?}）",
+                    q.name
+                );
+                None
+            }
+            Err(e) => {
+                eprintln!("[orb] projects.toml: 壊れた [[quick_launch]] エントリをスキップします: {e}");
+                None
+            }
+        })
+        .collect();
+    Some(valid)
 }
 
 fn default_projects() -> Vec<Project> {
@@ -854,6 +921,46 @@ sprite = "crew/slot0.png"
         assert!(dir.join(&rel_other).exists());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_quick_launch_text_parses_well_formed_entry() {
+        let text = r#"
+[[quick_launch]]
+name = "team"
+slugs = ["a", "b"]
+width_px = 200
+"#;
+        let entries = parse_quick_launch_text(text).expect("parse should succeed");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "team");
+        assert_eq!(entries[0].slugs, vec!["a", "b"]);
+        assert_eq!(entries[0].width_px, 200);
+    }
+
+    #[test]
+    fn parse_quick_launch_text_respects_file_with_none() {
+        // quick_launch キーが元から無い＝ボタン無しとして尊重（既定は用意しない）。
+        let entries = parse_quick_launch_text("").expect("empty file parses to empty list");
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn parse_quick_launch_text_skips_entry_missing_a_field_but_keeps_others() {
+        // 1件目は slugs 欠損（壊れたエントリ）、2件目は width_px 欠損（#[serde(default)] で
+        // 168 に救済される正常なエントリ）。壊れた1件だけがスキップされ、他は活きる。
+        let text = r#"
+[[quick_launch]]
+name = "broken"
+
+[[quick_launch]]
+name = "ok"
+slugs = ["x"]
+"#;
+        let entries = parse_quick_launch_text(text).expect("parse should succeed");
+        let names: Vec<&str> = entries.iter().map(|q| q.name.as_str()).collect();
+        assert_eq!(names, vec!["ok"]);
+        assert_eq!(entries[0].width_px, 168, "missing width_px falls back to the default");
     }
 
     #[test]

@@ -8,6 +8,11 @@ export const cwd = writable<string>("");
 /** ペインのレイアウトツリー（フロント権威）。null = 未初期化。 */
 export const layout = writable<PaneNode | null>(null);
 
+/** Workspace.svelte の `.workspace` 要素の現在実寸(px)。ResizeObserver で追従更新される。
+ *  クイック起動ボタンが width_px（px）を分割比率へ換算する基準に使う（ボタンを押した瞬間の
+ *  実寸を読む＝orb の分割は比率ベースで px を保持し続けられないため）。未マウント時は 0。 */
+export const workspaceWidthPx = writable<number>(0);
+
 /** フォーカス中のペイン ID（分割・クローズ・枠ハイライトの対象）。 */
 export const focusedPane = writable<number>(0);
 
