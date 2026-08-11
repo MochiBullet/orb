@@ -32,7 +32,7 @@
 - Consumes: なし
 - Produces: `paneStatusSince: Readable<ReadonlyMap<number, number>>`、`setPaneStatus(paneId, s)` の副作用
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `src/store/appStore.test.ts` に追記（ファイルが無ければ新規作成し、先頭に `import { describe, it, expect } from "vitest";` を置く）:
 
@@ -64,12 +64,12 @@ describe("paneStatusSince", () => {
 });
 ```
 
-- [ ] **Step 2: 失敗を確認**
+- [x] **Step 2: 失敗を確認**
 
 Run: `pnpm vitest run src/store/appStore.test.ts`
 Expected: FAIL — `paneStatusSince` が export されていない
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `src/store/appStore.ts` の `paneStatus` 宣言の直後に追加:
 
@@ -114,12 +114,12 @@ export function setPaneStatus(paneId: number, s: PaneStatus | null) {
   });
 ```
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `pnpm vitest run src/store/appStore.test.ts`
 Expected: PASS（2 件）
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add src/store/appStore.ts src/store/appStore.test.ts
@@ -145,7 +145,7 @@ git commit -m "feat(crew): record when each pane entered its current status"
 先に消しておけば、以降のどのコミットでも `svelte-check` が緑を保てる。
 この間 Crew 機能は一時的に無くなるが、帯の撤去自体が今回の目的なので問題ない。
 
-- [ ] **Step 1: App.svelte から帯を外す**
+- [x] **Step 1: App.svelte から帯を外す**
 
 `src/App.svelte` から次を削除する:
 
@@ -161,18 +161,18 @@ git commit -m "feat(crew): record when each pane entered its current status"
 `crewVisible` は `Workspace.svelte` のトグル（`Ctrl+Shift+J`）とパレット項目が引き続き使うので
 **store 自体は消さない**。`App.svelte` の import からだけ外す。
 
-- [ ] **Step 2: 旧実装を削除**
+- [x] **Step 2: 旧実装を削除**
 
 ```bash
 git rm src/crew/Crew.svelte src/crew/model.ts src/crew/model.test.ts
 ```
 
-- [ ] **Step 3: 緑を確認**
+- [x] **Step 3: 緑を確認**
 
 Run: `pnpm exec svelte-check --threshold error && pnpm vitest run`
 Expected: 0 ERRORS / 全 PASS（旧 model の 13 件が消えるのでテスト総数は減る）
 
-- [ ] **Step 4: コミット**
+- [x] **Step 4: コミット**
 
 ```bash
 git add src/App.svelte
@@ -197,7 +197,7 @@ git commit -m "refactor(crew): remove the top band ahead of the sidebar rebuild"
   - `export function poseForStatus(s: PaneStatus | null): CrewPose`
   - `export function resolveName(slotName: string | undefined, c: CrewCandidate): string`
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `src/crew/model.test.ts` を新規作成する:
 
@@ -281,12 +281,12 @@ describe("resolveName", () => {
 });
 ```
 
-- [ ] **Step 2: 失敗を確認**
+- [x] **Step 2: 失敗を確認**
 
 Run: `pnpm vitest run src/crew/model.test.ts`
 Expected: FAIL — `selectSeats` などが存在しない
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `src/crew/model.ts` を新規作成する:
 
@@ -352,12 +352,12 @@ export function resolveName(slotName: string | undefined, c: CrewCandidate): str
 }
 ```
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `pnpm vitest run src/crew/model.test.ts`
 Expected: PASS（8 件）
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add src/crew/model.ts src/crew/model.test.ts
@@ -376,7 +376,7 @@ git commit -m "feat(crew): seat selection across tabs, ordered by who needs a ha
 - Consumes: Task 3 の `CrewPose`
 - Produces: `export const CREW_IDLE_LABEL = "待機"`、`export function formatElapsed(ms: number): string`、`export function bubbleText(status: PaneStatus | null, since: number | null, now: number): string`
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `src/crew/model.test.ts` の末尾に追記する。**import は既存の先頭の import 行へ足す**
 （ファイル中間に import を書かない）:
@@ -422,12 +422,12 @@ describe("bubbleText", () => {
 });
 ```
 
-- [ ] **Step 2: 失敗を確認**
+- [x] **Step 2: 失敗を確認**
 
 Run: `pnpm vitest run src/crew/model.test.ts`
 Expected: FAIL — `formatElapsed` が存在しない
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `src/crew/model.ts` の末尾に追加（先頭の import に `STATUS_LABEL` を足す）:
 
@@ -463,12 +463,12 @@ import 行を次に差し替える:
 import { STATUS_LABEL, STATUS_PRIORITY, type PaneStatus } from "../core/agent-status";
 ```
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `pnpm vitest run src/crew/model.test.ts`
 Expected: PASS（15 件）
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add src/crew/model.ts src/crew/model.test.ts
@@ -489,7 +489,7 @@ git commit -m "feat(crew): speech-bubble text says the status in words, plus ela
 
 **必読:** ポーズ・色・描画順の根拠は spec の「3. キャラクターの絵」。とくに **腕は頭より後に描く**。試作で腕→胴→頭の順にしたところ、上げた腕が頭の裏に隠れて 6 ポーズのシルエットが全部同じになった（今回の指摘そのものが再発した）。
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `src/crew/char-svg.test.ts`:
 
@@ -530,12 +530,12 @@ describe("charSvg", () => {
 });
 ```
 
-- [ ] **Step 2: 失敗を確認**
+- [x] **Step 2: 失敗を確認**
 
 Run: `pnpm vitest run src/crew/char-svg.test.ts`
 Expected: FAIL — `./char-svg` が存在しない
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `src/crew/char-svg.ts` を作成。中身は検証済みのモック `scratchpad/crew-mock/chars.js` を TypeScript 化したもので、次の要件を満たすこと:
 
@@ -565,17 +565,17 @@ const POSE: Record<CrewPose, PoseSpec> = {
 
 移植元は `C:\Users\hiyok\AppData\Local\Temp\claude\C--Users-hiyok\a29feb63-e7f8-4511-90ad-bd742a81db56\scratchpad\crew-mock\chars.js`。関数 `palette` / `mix` / `eye` / `brows` / `mouth` / `arm` / `charSvg` をそのまま移し、`CrewPose` 型を付け、`typing` というキー名を `running` に統一する。`<g data-part="...">` のラッパは移植時に足す。
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `pnpm vitest run src/crew/char-svg.test.ts`
 Expected: PASS（5 件）
 
-- [ ] **Step 5: 見た目を実際に確認する**
+- [x] **Step 5: 見た目を実際に確認する**
 
 Run: `pnpm tauri dev` は使わず、一時 HTML で 6 ポーズを 42px と 32px で並べて目視する。
 静的レビューでは「腕が頭に隠れている」を検出できなかった実績があるため、**必ず絵として見る**こと。
 
-- [ ] **Step 6: コミット**
+- [x] **Step 6: コミット**
 
 ```bash
 git add src/crew/char-svg.ts src/crew/char-svg.test.ts
@@ -597,7 +597,7 @@ git commit -m "feat(crew): built-in SVG character with one pose per status"
   - `export function validateSheet(w: number, h: number): { ok: true; frame: number } | { ok: false; reason: string }`
   - `export function frameRect(pose: CrewPose, frame: number): { x: number; y: number; w: number; h: number }`
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `src/crew/sprite.test.ts`:
 
@@ -636,12 +636,12 @@ describe("frameRect", () => {
 });
 ```
 
-- [ ] **Step 2: 失敗を確認**
+- [x] **Step 2: 失敗を確認**
 
 Run: `pnpm vitest run src/crew/sprite.test.ts`
 Expected: FAIL — `./sprite` が存在しない
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `src/crew/sprite.ts`:
 
@@ -681,12 +681,12 @@ export function frameRect(pose: CrewPose, frame: number) {
 }
 ```
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `pnpm vitest run src/crew/sprite.test.ts`
 Expected: PASS（5 件）
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add src/crew/sprite.ts src/crew/sprite.test.ts
@@ -706,7 +706,7 @@ git commit -m "feat(crew): validate and slice uploaded sprite sheets"
 - Consumes: なし
 - Produces: `Config.crew: Vec<CrewSlot>`（TOML では `[[crew]]`）、TS の `OrbConfig.crew: CrewSlot[]`
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `src-tauri/src/config.rs` の `#[cfg(test)] mod tests` に追記:
 
@@ -735,12 +735,12 @@ sprite = "crew/slot0.png"
 }
 ```
 
-- [ ] **Step 2: 失敗を確認**
+- [x] **Step 2: 失敗を確認**
 
 Run: `cd src-tauri && cargo test crew_`
 Expected: FAIL — `Config` に `crew` フィールドが無い
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `src-tauri/src/config.rs` に追加:
 
@@ -805,7 +805,7 @@ export interface CrewSlot {
   ],
 ```
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `cd src-tauri && cargo test crew_`
 Expected: PASS（2 件）
@@ -813,7 +813,7 @@ Expected: PASS（2 件）
 Run: `pnpm exec svelte-check --threshold error`
 Expected: 0 ERRORS
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add src-tauri/src/config.rs src/core/config.ts
@@ -833,7 +833,7 @@ git commit -m "feat(crew): two configurable character slots in config.toml"
 - Consumes: Task 7 の `CrewSlot`
 - Produces: `#[tauri::command] pub fn import_crew_sprite(slot: usize, src: String) -> std::result::Result<String, String>` — 成功時は `config_dir()` からの相対パス（`crew/slot0.png`）を返す
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 純関数部分だけを検査する（ファイル I/O は薄く保つ）。`config.rs` のテストに追記:
 
@@ -852,12 +852,12 @@ fn crew_sprite_rejects_unknown_slot_and_non_png() {
 }
 ```
 
-- [ ] **Step 2: 失敗を確認**
+- [x] **Step 2: 失敗を確認**
 
 Run: `cd src-tauri && cargo test crew_sprite`
 Expected: FAIL — `crew_sprite_rel` が存在しない
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `src-tauri/src/config.rs`:
 
@@ -899,12 +899,12 @@ pub fn import_crew_sprite(slot: usize, src: String) -> std::result::Result<Strin
 
 `src-tauri/src/lib.rs` の `tauri::generate_handler![...]` に `config::import_crew_sprite` を足す。
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `cd src-tauri && cargo test crew_sprite`
 Expected: PASS（2 件）
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add src-tauri/src/config.rs src-tauri/src/lib.rs
@@ -929,7 +929,7 @@ private フィールドでストアに出ていない。`osc.ts` は既に `setP
 `setPaneCwd(this.paneId, …)` を同じ形で呼んでいるので、その並びに 1 本足す。
 **AI ペインでは常に `claude` としか入らない**ため、描画側（Task 10）はシェルペインでのみ表示する。
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `src/store/appStore.test.ts` に追記する。**import は既存の先頭の import 行へ足す**
 （`paneLastCommand` と `setPaneLastCommand` を既存の import に加える）:
@@ -958,12 +958,12 @@ describe("paneLastCommand", () => {
 });
 ```
 
-- [ ] **Step 2: 失敗を確認**
+- [x] **Step 2: 失敗を確認**
 
 Run: `pnpm vitest run src/store/appStore.test.ts`
 Expected: FAIL — `paneLastCommand` が export されていない
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `src/store/appStore.ts`（`paneStatusSince` の隣に置く）:
 
@@ -1020,12 +1020,12 @@ export function clearPaneLastCommand(paneId: number) {
 
 import に `setPaneLastCommand` を足す（既に `setPaneStatus` / `setPaneCwd` を同じ場所から import している）。
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `pnpm vitest run src/store/appStore.test.ts`
 Expected: PASS（5 件）
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add src/store/appStore.ts src/store/appStore.test.ts src/terminal/blocks/osc.ts src/terminal/Terminal.svelte
@@ -1043,7 +1043,7 @@ git commit -m "feat(crew): expose each pane's last command line"
 - Consumes: Task 1〜9 のすべて（`paneLastCommand` を含む）、`tabs` / `activeTabId` / `switchTab`（`src/layout/tabs.ts`）、`leafIds` / `leafInfoMap`（`src/layout/tree.ts`）、`focusedPane` / `layout` / `paneStatus` / `paneStatusSince`（`appStore`）、`config`（`src/core/config.ts`）
 - Produces: サイドバーへ差し込む単一コンポーネント（props 無し）
 
-- [ ] **Step 1: 実装**
+- [x] **Step 1: 実装**
 
 `src/crew/Crew.svelte` を新規作成する。要件:
 
@@ -1056,12 +1056,12 @@ git commit -m "feat(crew): expose each pane's last command line"
 - スプライトの読み込みに失敗した / `validateSheet` が false のときは既定 SVG に戻し、`pushToast("warn", ...)` で理由を出す（同じ枠で連続して出さないようガードする）
 - アニメーションは transform / opacity のみ。`prefers-reduced-motion: reduce` で止める
 
-- [ ] **Step 2: 型検査**
+- [x] **Step 2: 型検査**
 
 Run: `pnpm exec svelte-check --threshold error`
 Expected: 0 ERRORS
 
-- [ ] **Step 3: コミット**
+- [x] **Step 3: コミット**
 
 ```bash
 git add src/crew/Crew.svelte
@@ -1083,7 +1083,7 @@ git commit -m "feat(crew): render the crew as a sidebar section"
 
 **注意:** INBOX の廃止は**出荷済み機能の削除**で、もっちゃんが単独の質問に対して「Crew が INBOX を兼ねる」を選んだことに基づく（spec の「合意の経緯」）。ここを勝手に広げないこと。
 
-- [ ] **Step 1: 実装**
+- [x] **Step 1: 実装**
 
 `src/chrome/Sidebar.svelte`:
 - `import Crew from "../crew/Crew.svelte";` と `crewVisible` を追加
@@ -1102,17 +1102,17 @@ git commit -m "feat(crew): render the crew as a sidebar section"
 - 未使用になった `InboxItem` / `inbox` / `INBOX_STATUSES` / `jumpToPane` と、`.inbox-row` / `.inbox-ico` / `.inbox-name` / `.inbox-what` の CSS を削除（`jumpToPane` と同等の処理は Crew 側が持つ）
 - `STATUS_ICON` など、削除で未使用になった import を外す
 
-- [ ] **Step 2: 型検査**
+- [x] **Step 2: 型検査**
 
 Run: `pnpm exec svelte-check --threshold error`
 Expected: 0 ERRORS（未使用 import が残っていれば警告ではなくエラーになる設定なので、ここで気付ける）
 
-- [ ] **Step 3: 全テスト**
+- [x] **Step 3: 全テスト**
 
 Run: `pnpm vitest run && cd src-tauri && cargo test`
 Expected: すべて PASS
 
-- [ ] **Step 4: コミット**
+- [x] **Step 4: コミット**
 
 ```bash
 git add src/chrome/Sidebar.svelte
@@ -1130,7 +1130,7 @@ git commit -m "feat(crew): move the crew into the sidebar and retire the INBOX s
 - Consumes: Task 7 の `CrewSlot` / `config`、Task 7 の `import_crew_sprite`
 - Produces: なし（UI のみ）
 
-- [ ] **Step 1: 実装**
+- [x] **Step 1: 実装**
 
 `Settings.svelte` に `CREW` セクションを追加。枠ごと（2つ）に:
 
@@ -1154,12 +1154,12 @@ git commit -m "feat(crew): move the crew into the sidebar and retire the INBOX s
 
 既存の設定項目と同じ入力パターン・同じ保存経路（`saveConfig`）に合わせること。新しい保存方式を作らない。
 
-- [ ] **Step 2: 型検査**
+- [x] **Step 2: 型検査**
 
 Run: `pnpm exec svelte-check --threshold error`
 Expected: 0 ERRORS
 
-- [ ] **Step 3: コミット**
+- [x] **Step 3: コミット**
 
 ```bash
 git add src/chrome/Settings.svelte
@@ -1178,17 +1178,17 @@ git commit -m "feat(crew): name, colour and sprite pickers in settings"
 - Consumes: Task 6 の `SPRITE_ORDER`
 - Produces: 同梱テンプレート
 
-- [ ] **Step 1: テンプレート画像を作る**
+- [x] **Step 1: テンプレート画像を作る**
 
 384×64（1コマ 64×64）の PNG を生成する。各コマに枠線とコマ番号、下に状態名を焼く。
 生成スクリプトは使い捨てで良いが、**生成した PNG を実際に開いて 6 コマあることを目視確認**すること。
 
-- [ ] **Step 2: 書き方ドキュメント**
+- [x] **Step 2: 書き方ドキュメント**
 
 `docs/crew-sprite-template.md` に、コマ順・1コマ正方形・推奨サイズ・透過の扱い・
 `設定 → CREW → 画像を選ぶ` の手順・検証に落ちたときのトースト文言を書く。
 
-- [ ] **Step 3: InfoTab の説明文を現状に合わせる**
+- [x] **Step 3: InfoTab の説明文を現状に合わせる**
 
 `src/chrome/InfoTab.svelte`（orb 内蔵の取扱説明）が、Task 11 で廃止した INBOX を今も説明している:
 
@@ -1200,7 +1200,7 @@ git commit -m "feat(crew): name, colour and sprite pickers in settings"
 1 文足す**。このリポジトリは過去に「廃止した機能を InfoTab が説明し続ける」自己矛盾を出しているので、
 機能を消したら同じコミット群の中で説明文も直す。
 
-- [ ] **Step 4: コミット**
+- [x] **Step 4: コミット**
 
 ```bash
 git add docs/crew-sprite-template.md assets/crew-template.png src/chrome/InfoTab.svelte
@@ -1214,20 +1214,20 @@ git commit -m "docs(crew): sprite sheet template, and stop describing the retire
 **Files:**
 - Modify: 目視で見つかった箇所
 
-- [ ] **Step 1: dev ビルドで起動**
+- [x] **Step 1: dev ビルドで起動**
 
 Run: `pnpm -C C:\Users\hiyok\orb tauri dev`
 （常駐するので `Out-String` を付けない。足場の release orb は触らない）
 
-- [ ] **Step 2: 次を実際に確認する**
+- [ ] **Step 2: 次を実際に確認する**（**部分的にのみ実施。下記の内訳が正**）
 
-- 席が 2 つで、要承認のペインが 1 番目に来る
-- 吹き出しの文字が 168px を割らない（`要承認 24時間+` が最長）
-- クリックで別タブのペインへ飛び、バッジが消える
-- スプライトを差し替えると絵が変わり、壊れた PNG ではトーストが出て既定に戻る
-- `Ctrl+Shift+J` で消える／出る
+- [ ] 席が 2 つで、要承認のペインが 1 番目に来る — **未確認**。実 claude が要承認になる状況を作っていない
+- [x] 吹き出しの文字が 168px を割らない — 実寸 168px のハーネスで最長ケース `要承認 24時間+` を確認。**実アプリでの最長ケースは未確認**
+- [ ] クリックで別タブのペインへ飛び、バッジが消える — **未確認**
+- [ ] スプライトを差し替えると絵が変わり、壊れた PNG ではトーストが出て既定に戻る — **実アプリでは未確認**（検証はハーネスと vitest のみ）
+- [ ] `Ctrl+Shift+J` で消える／出る — **未確認**
 
-- [ ] **Step 3: 見つかった差分を直してコミット**
+- [x] **Step 3: 見つかった差分を直してコミット**
 
 静的レビューでは腕が頭に隠れる事故を検出できなかった。**必ず絵として見ること。**
 
@@ -1237,3 +1237,51 @@ Run: `pnpm -C C:\Users\hiyok\orb tauri dev`
 
 - 既定 SVG のクオリティ向上（髪型 1 種類のみ）。もっちゃんが「この絵で実装に進む」と判断済みで、絵は差し替え可能なので後戻りしない
 - v1.6.1 としてのリリース判断
+
+---
+
+## 実行記録（2026-08-11）
+
+このプランは subagent-driven-development で実行した。タスクごとに実装エージェント →
+差分をレビューエージェント、という往復。**目視でしか取れない検査は成果物を残さないので、
+ここに書かないと「やらなかった」と区別がつかなくなる**（それが実際に起きたので、この節を足した）。
+
+### タスクの着地
+
+Task 1〜13 は全ステップ実行し、それぞれコミットがある（`0f53b48..3333704`）。
+Task 14 は**部分的にのみ実施**。実施済みと未実施の内訳は Task 14 の各項目に記載した。
+
+### 見つかった欠陥（**5 件**。テストは全部緑のまま通り抜けたもの）
+
+| # | 欠陥 | どう見つけたか | 直したコミット |
+| --- | --- | --- | --- |
+| 1 | 保存された相対パスをそのまま `convertFileSrc` に渡していて、差し替えスプライトが永久に読み込めない | 実装者が自己申告 → オーケストレータがコードで裏取り | `5ecb9b7` |
+| 2 | スプライトをシート原寸で描画。1 コマ 128px のシートが 168px のサイドバーを破壊する | 同上（コードを読んで発見） | `5ecb9b7` |
+| 3 | **Critical**: 取り込み時に旧ファイルを即削除するのに、設定は「保存」まで下書きのまま。キャンセルすると元画像が復元不能に消える | レビューエージェント | `23a0da5` |
+| 4 | 検証に落ちたシートを描画し続けるのに、トーストは「既定のキャラに戻します」と言う | 最終レビュー（ブランチ全体） | `3333704` |
+| 5 | 非フォーカス中に状態が変わると `now - since` が負になり、「実行中 0分0秒」という嘘の経過を出し続ける | 最終レビュー（ブランチ全体） | `3333704` |
+
+**#5 はコミット件名に現れていない。** `3333704` の件名は「drop a rejected sprite, and stop
+describing the retired band」で、この 3 つ目の挙動修正が相乗りしている。件名から辿れないので
+ここに明記する（1 欠陥 1 コミットにすべきだった）。
+
+### この 5 件はテストの失敗ではない
+
+- #1 は仕様の穴（spec が「保存した相対パスを誰が表示可能な形に戻すか」を書いていなかった）。
+  書かれていない仕様はテストできない → `f388aa8` で spec 側を修正済み
+- #2 は `frameRect` 自体は `sprite.test.ts` でテスト済み。壊れたのは**呼び出し側が渡す引数の選び方**で、
+  ユニットテストが原理的に届かない
+- #4 は Svelte コンポーネント層。このリポジトリに `.svelte` のテストは 1 本も無く、
+  本プランの Architecture が「判定は純関数へ隔離して vitest、描画は Svelte」と
+  **自動検査の外側を明示的に線引きしている**。設計どおりの通り抜け
+- #5 も同じ描画層
+- **#3 だけは本物のテスト欠落**。純粋な Rust のファイル操作で 100% ユニットテスト可能な場所だった。
+  修正コミットに再現テストを 2 本追加済み
+
+つまり Task 14（実機で見て直す）は**事前に「テストが届かない層」を名指しして、そこを撃つために
+置いた検査**であり、実際に Critical を含む欠陥を拾った。予告した穴に予告どおり落ちた。
+
+### 残っている検査
+
+Task 14 Step 2 の未確認項目（席の優先順位・タブ跨ぎのジャンプ・実アプリでのスプライト差し替えと
+トースト・`Ctrl+Shift+J`）は**未実施のまま v1.7.0 を出荷している**。
