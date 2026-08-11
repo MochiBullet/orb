@@ -1028,7 +1028,7 @@ Expected: PASS（5 件）
 - [ ] **Step 5: コミット**
 
 ```bash
-git add src/store/appStore.ts src/terminal/blocks/osc.ts src/store/appStore.test.ts
+git add src/store/appStore.ts src/store/appStore.test.ts src/terminal/blocks/osc.ts src/terminal/Terminal.svelte
 git commit -m "feat(crew): expose each pane's last command line"
 ```
 
