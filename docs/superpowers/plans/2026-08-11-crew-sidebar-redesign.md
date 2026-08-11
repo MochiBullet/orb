@@ -1138,6 +1138,18 @@ git commit -m "feat(crew): move the crew into the sidebar and retire the INBOX s
 - 色の color input
 - 「画像を選ぶ」ボタン → `open({ filters: [{ name: "PNG", extensions: ["png"] }], multiple: false })` → 選ばれたら `invoke("import_crew_sprite", { slot: i, src })` → 返った相対パスを `config.crew[i].sprite` に入れて `saveConfig`
 - 「既定に戻す」ボタン → `sprite` を空にして `saveConfig`
+
+**⚠️ 差し替えが反映されない問題を必ず潰すこと（Task 10 のレビューで発見）。**
+`import_crew_sprite` は常に `crew/slot{N}.png` という固定名へ上書きするため、
+**画像を入れ替えても `config.crew[i].sprite` の文字列が変わらない**。その結果:
+
+1. `Crew.svelte` の検証 `$effect` が `validatedFor.get(i) === sprite` で「検証済み」と判断してスキップする
+2. `<img src>` の URL も変わらないので、ブラウザが古い画像をキャッシュから出す
+
+＝**設定画面から差し替えても見た目が変わらない**。今は sprite が常に空なので露出していないだけで、
+このタスクで確実に踏む。対処は取り込み時にファイル名を一意にする（例 `crew/slot{N}-{連番}.png` を書き、
+**同じ枠の古いファイルは削除する**）のが素直で、上記 1 と 2 を同時に解決できる。
+固定名のまま query で誤魔化すと 1 が残るので不可。
 - テンプレートの場所とコマ順（`running, waiting, attention, done, failed, idle`）を 1 行で明記
 
 既存の設定項目と同じ入力パターン・同じ保存経路（`saveConfig`）に合わせること。新しい保存方式を作らない。
