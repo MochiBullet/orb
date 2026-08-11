@@ -1,6 +1,6 @@
 {
   "name": "orb",
-  "version": "1.5.13",
+  "version": "1.6.0",
   "description": "ORB — a Rust/Tauri vibe-coding terminal",
   "type": "module",
   "scripts": {
