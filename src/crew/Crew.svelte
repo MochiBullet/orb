@@ -93,6 +93,16 @@
     window.removeEventListener("blur", onWindowBlur);
   });
 
+  // 非フォーカス中は上の effect が interval を止めたままなので、その間に席の状態が変わっても
+  // now は古い値のまま止まる。since はその新しい状態の時刻なので now - since が負になり、
+  // formatElapsed が 0 に丸めて「実行中 0分0秒」という嘘の経過を表示し続けてしまう（フォーカス
+  // が戻るまで）。interval は再開せず（背景 orb の CPU 対策はそのまま維持）、席データが
+  // 変わった瞬間だけ now を打ち直す。now 自体はここで読まないので再帰しない。
+  $effect(() => {
+    seating;
+    now = Date.now();
+  });
+
   // ---- スプライト差し替え ---------------------------------------------------
   // 検証結果を枠index単位でキャッシュする。読み込み失敗/コマ数不正は既定SVGへ戻し、
   // トーストで理由を出す（#79 のエラー可視化。黙って壊れた背景動画の再発防止）。
@@ -100,7 +110,19 @@
   const validatedFor = new Map<number, string>(); // slot -> 検証済みの sprite パス（同じ画像の再検証を避ける）
   const warnedFor = new Set<number>(); // slot -> 直近失敗を既にトーストしたか（連続再描画での連打防止）
 
+  // 検証失敗時、spriteFrame にそのスロットの古い検証結果（別画像の時のフレーム値）が
+  // 残っていると、markup は spriteFrame の有無だけで sprite/SVG を判定するため、トーストで
+  // 「既定のキャラに戻します」と言いながら壊れたシートを描画し続けてしまう。連打防止の
+  // early-return より前で必ず落とす（トーストが出ない再失敗でもフレームは落とす必要があるため）。
+  function dropSpriteFrame(slot: number) {
+    if (!spriteFrame.has(slot)) return;
+    const next = new Map(spriteFrame);
+    next.delete(slot);
+    spriteFrame = next;
+  }
+
   function warnSpriteFailure(slot: number, name: string, reason: string) {
+    dropSpriteFrame(slot);
     if (warnedFor.has(slot)) return;
     warnedFor.add(slot);
     pushToast("warn", `${name} の画像を読み込めませんでした。既定のキャラに戻します（${reason}）`);

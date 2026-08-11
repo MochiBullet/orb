@@ -261,7 +261,7 @@
         <div class="bg-name-row"><span class="bg-name" title={slot.sprite}>{crewSpriteName(slot.sprite)}</span></div>
       {/if}
     {/each}
-    <div class="note">画像は{SPRITE_ORDER.length}コマ横一列・各コマ正方形、並び順は {SPRITE_ORDER.join(", ")}</div>
+    <div class="note">画像は{SPRITE_ORDER.length}コマ横一列・各コマ正方形、並び順は {SPRITE_ORDER.join(", ")}（テンプレート: assets/crew-template.png、手順は docs/crew-sprite-template.md）</div>
 
     <div class="note">フォント・アクセント色・合字は保存で反映 / 背景の透過とスクロールバックは新しいペイン・再起動から反映</div>
 

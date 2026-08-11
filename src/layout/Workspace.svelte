@@ -316,8 +316,8 @@
       run: () => dnd.update((d) => !d),
     },
     {
-      label: "Crew: 上部のキャラ帯を表示切替",
-      hint: "Ctrl+Shift+J · ペイン 1 個 = キャラ 1 体",
+      label: "Crew: サイドバーのキャラ欄を表示切替",
+      hint: "Ctrl+Shift+J · 手が要るペインを2席で表示",
       run: () => crewVisible.update((v) => !v),
     },
     {

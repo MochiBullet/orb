@@ -36,7 +36,7 @@ export function shouldTrackAgentStatus(
   return role === "ai" || launchedActive || paneId === foregroundAiPane;
 }
 
-/** バッジ表示（TabBar/ペイン右上/INBOX で共通）。 */
+/** バッジ表示（TabBar/ペイン右上/CREW で共通）。 */
 export const STATUS_ICON: Record<PaneStatus, string> = {
   running: "🟢",
   waiting: "🟡",
@@ -53,7 +53,7 @@ export const STATUS_LABEL: Record<PaneStatus, string> = {
   failed: "失敗",
 };
 
-/** タブ集約・INBOX の並びで使う優先度（先勝ち）。「あなたの手が要る」ほど先。 */
+/** タブ集約・CREW の並びで使う優先度（先勝ち）。「あなたの手が要る」ほど先。 */
 export const STATUS_PRIORITY: PaneStatus[] = ["attention", "failed", "waiting", "done", "running"];
 
 /** 複数ペインの状態をタブ1個のバッジへ集約する（最優先の1個。無ければ null）。 */

@@ -34,7 +34,7 @@ export function setFocusedAsAiPane() {
  *  Terminal.svelte がフォーカス変化で更新し、破棄時に自分なら null へ戻す。 */
 export const lastShellPane = writable<number | null>(null);
 
-/** #50: ペインごとの活動状態バッジ（paneId → 状態）。TabBar/ペイン右上/INBOX の単一ソース。
+/** #50: ペインごとの活動状態バッジ（paneId → 状態）。TabBar/ペイン右上/CREW の単一ソース。
  *  osc.ts（D 確定）と Terminal.svelte（AI ペインのアイドル判定）が書き、フォーカスで
  *  「手が要る」系だけ消える（acknowledgePane）。 */
 export const paneStatus = writable<ReadonlyMap<number, PaneStatus>>(new Map());
@@ -212,7 +212,7 @@ function persistedBool(key: string, fallback: boolean) {
  *  永続なので「起動のたびに有効化」は不要＝一度 ON にすれば以後そのまま。 */
 export const dnd = persistedBool("orb.dnd", false);
 
-/** Crew ビュー（上部のアイソメ帯）の表示。dnd と同じ localStorage 永続で、
+/** Crew ビュー（サイドバーのキャラ欄）の表示。dnd と同じ localStorage 永続で、
  *  一度切れば以後そのまま＝起動のたびの操作が要らない。 */
 export const crewVisible = persistedBool("orb.crew", true);
 
