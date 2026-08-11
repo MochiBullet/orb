@@ -831,7 +831,7 @@ git commit -m "feat(crew): two configurable character slots in config.toml"
 
 **Interfaces:**
 - Consumes: Task 7 の `CrewSlot`
-- Produces: `#[tauri::command] pub fn import_crew_sprite(slot: usize, src: String) -> Result<String, String>` — 成功時は `config_dir()` からの相対パス（`crew/slot0.png`）を返す
+- Produces: `#[tauri::command] pub fn import_crew_sprite(slot: usize, src: String) -> std::result::Result<String, String>` — 成功時は `config_dir()` からの相対パス（`crew/slot0.png`）を返す
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -869,7 +869,9 @@ pub fn crew_sprite_rel(slot: usize) -> String {
 }
 
 /// 取り込み前の検証。枠は2つだけ、受けるのは PNG だけ。
-fn validate_crew_import(slot: usize, src: &str) -> Result<(), String> {
+// config.rs は `use crate::error::Result` で1引数版 Result を持つ。2引数の標準 Result を
+// 使う箇所は std::result::Result と完全修飾する（同ファイル内の既存コメント参照）。
+fn validate_crew_import(slot: usize, src: &str) -> std::result::Result<(), String> {
     if slot >= 2 {
         return Err(format!("枠 {slot} は存在しません"));
     }
@@ -884,7 +886,7 @@ fn validate_crew_import(slot: usize, src: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn import_crew_sprite(slot: usize, src: String) -> Result<String, String> {
+pub fn import_crew_sprite(slot: usize, src: String) -> std::result::Result<String, String> {
     validate_crew_import(slot, &src)?;
     let dir = config_dir().join("crew");
     std::fs::create_dir_all(&dir).map_err(|e| format!("保存先を作れません: {e}"))?;
