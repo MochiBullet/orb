@@ -82,7 +82,15 @@ AI ペイン（waiting / attention はここにしか出ない）
 
 ### 2. 席の選び方
 
-**対象はアクティブタブの全ペイン**（シェル・AI を問わない。現行 Crew と同じ `leafIds`）。
+**対象は全タブの全ペイン**（シェル・AI を問わない）。
+
+現行 Crew はアクティブタブだけを見ていたが、**INBOX は全タブを走査している**
+（`Sidebar.svelte` の `inbox` 導出が `$tabs` を回り、アクティブタブだけ `$layout` を権威として使う）。
+Crew が INBOX を引き継ぐ以上、ここを引き継がないと **別タブで要承認になったペインが
+サイドバーから消える**＝機能後退になる。したがって Crew も全タブを走査し、
+席のクリックは **タブ切替＋ペインフォーカス**（既存 `jumpToPane` と同じ挙動）とする。
+
+名前の表示には、そのペインが属する**タブ名**も使えるようにする（INBOX は `tabName · pN` を出していた）。
 
 `STATUS_PRIORITY = ["attention", "failed", "waiting", "done", "running"]` の順に並べ、上位 2 件を席に着ける。
 この配列は既にバッジ・タブ集約・INBOX が共有している単一ソースで、**Crew もそこに乗るだけ**（判定を二重実装しない）。
@@ -171,8 +179,12 @@ sprite = ""
 
 ### 7. INBOX の廃止
 
-`Sidebar.svelte` の `INBOX` セクションを削除し、その役割（手が要るペインの一覧＋1 クリックで移動＋
-フォーカスで自動確認）を Crew セクションが引き継ぐ。`acknowledgePane` の呼び出し経路は変更しない。
+`Sidebar.svelte` の `INBOX` セクションを削除し、その役割を Crew セクションが引き継ぐ。引き継ぐのは次の 3 つ:
+
+1. **全タブ横断**の走査（上記 2 節）
+2. **1 クリックで移動** — `jumpToPane` と同じ「タブ切替 → `focusedPane` 設定」
+3. **フォーカスで自動確認** — `focusedPane.subscribe(acknowledgePane)`（`appStore.ts`）が既に張られているので、
+   Crew 側は `focusedPane` を設定するだけでよい。`acknowledgePane` の呼び出し経路は**変更しない**
 
 Crew が INBOX より増える点: 手が要るペインが 1 つも無いときに **作業中のペインを見せる**（INBOX は空になる）。
 
