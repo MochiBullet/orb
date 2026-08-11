@@ -29,7 +29,7 @@
     $tabs.forEach((t, i) => {
       const l = t.id === $activeTabId ? $layout : t.layout;
       if (!l) return;
-      const info = new Map<number, { initialCmd?: string; role?: PaneRole; label?: string }>();
+      const info = new Map<number, { initialCmd?: string; role?: PaneRole; label?: string; title?: string }>();
       leafInfoMap(l, info);
       for (const pid of leafIds(l)) {
         const meta = info.get(pid);
@@ -39,6 +39,7 @@
           tabName: t.name ?? `tab ${i + 1}`,
           role: meta?.role ?? "shell",
           label: meta?.label,
+          title: meta?.title,
           status: $paneStatus.get(pid) ?? null,
           since: $paneStatusSince.get(pid) ?? null,
           command: $paneLastCommand.get(pid) ?? null,

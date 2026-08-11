@@ -18,8 +18,11 @@ export interface CrewCandidate {
   tabId: number;
   tabName: string;
   role: PaneRole;
-  /** ランチャー由来のラベル（案件名）。 */
+  /** #82 外部インボックスのルーティングキー。ユーザーが意図的に opaque な文字列を付け得るため、
+   *  表示名としては使わない（tree.ts の leaf コメント参照）。 */
   label?: string;
+  /** 人間向けの表示名（案件名など）。名前表示では label より優先する。 */
+  title?: string;
   status: PaneStatus | null;
   /** status になった時刻(ms)。null = 不明。 */
   since: number | null;
@@ -49,10 +52,13 @@ export function poseForStatus(s: PaneStatus | null | undefined): CrewPose {
   return s ?? "idle";
 }
 
-/** 枠に付けた名前を最優先。無ければ案件ラベル、それも無ければタブ名とペインID。 */
+/** 枠に付けた名前を最優先。無ければ表示名（title、案件名）、それも無ければルーティングlabel
+ *  （opaqueなことがあるため title より下位）、それも無ければタブ名とペインID。 */
 export function resolveName(slotName: string | undefined, c: CrewCandidate): string {
   const slot = slotName?.trim();
   if (slot) return slot;
+  const title = c.title?.trim();
+  if (title) return title;
   const label = c.label?.trim();
   if (label) return label;
   return `${c.tabName} · p${c.paneId}`;

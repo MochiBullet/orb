@@ -94,7 +94,7 @@ export function launchProject(p: Project, preset: LaunchPreset = "continue", opt
     id: nextPaneId(),
     dir: "h",
     ratio: 0.4,
-    a: leaf(ai, `${cd(p.dir)}; ${buildClaudeCmd(preset, opts)}`, "ai", p.label),
+    a: leaf(ai, `${cd(p.dir)}; ${buildClaudeCmd(preset, opts)}`, "ai", p.label, p.name),
     b: {
       kind: "split",
       id: nextPaneId(),
@@ -159,7 +159,7 @@ export function launchAiRow(
   if (items.length === 0) return [];
   const aiIds = items.map(() => nextPaneId());
   const leaves = items.map((it, i) =>
-    leaf(aiIds[i], `${cd(it.project.dir)}; ${buildClaudeCmd(preset, it.opts)}`, "ai", it.project.label),
+    leaf(aiIds[i], `${cd(it.project.dir)}; ${buildClaudeCmd(preset, it.opts)}`, "ai", it.project.label, it.project.name),
   );
   const tree = leaves.length === 1 ? leaves[0] : {
     kind: "split" as const,

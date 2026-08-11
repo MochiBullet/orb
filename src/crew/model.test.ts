@@ -69,10 +69,30 @@ describe("poseForStatus", () => {
 
 describe("resolveName", () => {
   it("枠名 → ランチャーlabel → タブ名+ペインID の順に落ちる", () => {
-    const c = cand({ paneId: 4, label: "PLIMAL", tabName: "tab 2" });
+    const c = cand({ paneId: 4, label: "proj-a", tabName: "tab 2" });
     expect(resolveName("枠1", c)).toBe("枠1");
-    expect(resolveName("", c)).toBe("PLIMAL");
+    expect(resolveName("", c)).toBe("proj-a");
     expect(resolveName("", cand({ paneId: 4, tabName: "tab 2" }))).toBe("tab 2 · p4");
+  });
+
+  it("表示名(title)はルーティングlabelより優先される", () => {
+    const c = cand({ paneId: 4, label: "routing-key-xyz", title: "Project Name" });
+    expect(resolveName("", c)).toBe("Project Name");
+  });
+
+  it("表示名(title)が無ければルーティングlabelにフォールバックする", () => {
+    const c = cand({ paneId: 4, label: "routing-key-xyz" });
+    expect(resolveName("", c)).toBe("routing-key-xyz");
+  });
+
+  it("枠名は表示名(title)より優先される", () => {
+    const c = cand({ paneId: 4, label: "routing-key-xyz", title: "Project Name" });
+    expect(resolveName("枠1", c)).toBe("枠1");
+  });
+
+  it("表示名(title)もlabelも無ければタブ名+ペインIDに落ちる", () => {
+    const c = cand({ paneId: 9, tabName: "tab 3" });
+    expect(resolveName("", c)).toBe("tab 3 · p9");
   });
 });
 
