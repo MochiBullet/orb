@@ -6,10 +6,17 @@
   import { hexToRgbTriplet } from "../core/color";
   import { pushToast } from "../store/toasts";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { invoke } from "@tauri-apps/api/core";
+  import { SPRITE_ORDER } from "../crew/sprite";
 
   let { onClose }: { onClose: () => void } = $props();
 
-  let draft = $state<OrbConfig>({ ...get(config) });
+  // crew は唯一のネスト配列フィールド。`{ ...get(config) }` は浅いコピーなので crew 配列と
+  // 各枠オブジェクトの参照はストアの現在値と共有されたままになる＝そこへ直接書くと
+  // save() 前でも config ストアの実体を書き換えてしまい、キャンセルしても crew の編集だけ
+  // 巻き戻らない（他フィールドは全部プリミティブなのでこの問題が起きない）。枠オブジェクトも
+  // 複製して参照を切り離す。
+  let draft = $state<OrbConfig>({ ...get(config), crew: get(config).crew.map((s) => ({ ...s })) });
   let saving = $state(false);
 
   const PRESETS = ["#2dd4bf", "#a78bfa", "#38bdf8", "#fbbf24", "#fb7185", "#4ade80"];
@@ -67,6 +74,36 @@
     } catch {
       /* ダイアログのキャンセル/失敗は無視 */
     }
+  }
+
+  // Crew ビュー用の画像差し替え。選んだ PNG を Rust 側にコピーしてもらい、返った相対パスを
+  // draft.crew[i].sprite へ入れる（保存は既存の save() 経路に相乗り＝二重の永続化を作らない）。
+  // import_crew_sprite は取り込みごとに一意なファイル名を返す（固定名だと差し替えても
+  // 文字列が変わらず、Crew.svelte の検証キャッシュ＋ブラウザの画像キャッシュに阻まれて
+  // 見た目が変わらない不具合があった。Rust 側 import_crew_sprite_into の対応で解決済み）。
+  async function pickCrewSprite(i: number) {
+    try {
+      const path = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "PNG", extensions: ["png"] }],
+      });
+      if (typeof path !== "string") return;
+      const rel = await invoke<string>("import_crew_sprite", { slot: i, src: path });
+      draft.crew[i].sprite = rel;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      pushToast("error", "画像の取り込みに失敗しました: " + msg.slice(0, 120));
+    }
+  }
+
+  // sprite を空に戻す＝ Crew.svelte は空文字を「既定 SVG を使う」と解釈する。
+  function revertCrewSprite(i: number) {
+    draft.crew[i].sprite = "";
+  }
+
+  function crewSpriteName(sprite: string): string {
+    return sprite.split(/[\\/]/).pop() ?? sprite;
   }
 
   async function save() {
@@ -198,6 +235,34 @@
         <input type="range" min="0" max="100" step="1" bind:value={draft.bg_pos_y} />
       </label>
     {/if}
+
+    <div class="title crew-title">CREW</div>
+    {#each draft.crew as slot, i (i)}
+      <label>
+        <span>名前 {i + 1}</span>
+        <input bind:value={slot.name} placeholder="空なら案件ラベル" />
+      </label>
+      <label>
+        <span>色 {i + 1}</span>
+        <span class="accent-row">
+          <input type="color" bind:value={slot.color} aria-label="crew slot {i + 1} color" />
+        </span>
+      </label>
+      <label>
+        <span>画像 {i + 1}</span>
+        <span class="seg">
+          <button class="seg-btn" onclick={() => pickCrewSprite(i)}>画像を選ぶ</button>
+          <button class="seg-btn" onclick={() => revertCrewSprite(i)} disabled={!slot.sprite}
+            >既定に戻す</button
+          >
+        </span>
+      </label>
+      {#if slot.sprite}
+        <div class="bg-name-row"><span class="bg-name" title={slot.sprite}>{crewSpriteName(slot.sprite)}</span></div>
+      {/if}
+    {/each}
+    <div class="note">画像は{SPRITE_ORDER.length}コマ横一列・各コマ正方形、並び順は {SPRITE_ORDER.join(", ")}</div>
+
     <div class="note">フォント・アクセント色・合字は保存で反映 / 背景の透過とスクロールバックは新しいペイン・再起動から反映</div>
 
     <div class="btns">
@@ -323,6 +388,16 @@
   .seg-btn.sel {
     color: var(--teal);
     border-color: var(--teal);
+  }
+  .seg-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .seg-btn:disabled:hover {
+    background: transparent;
+  }
+  .crew-title {
+    margin-top: 4px;
   }
   input[type="range"] {
     background: transparent;
