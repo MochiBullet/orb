@@ -113,12 +113,12 @@
 
 ## 10. コスト・可観測性・相互運用（オープン性 moat）
 
-58. **ライブ・トークン/コストHUD** ⭐ — エージェントのローカルJSONLを読み、ペイン別/案件別の消費とburn rateを常時表示。**もっちゃんの既存「usage float HUD」＋usage API資産をorbに内蔵移植＝ほぼ再利用**。`Impact★4 Diff★5 Effort S 基盤◎`
+58. **ライブ・トークン/コストHUD** ⭐ — エージェントのローカルJSONLを読み、ペイン別/案件別の消費とburn rateを常時表示。**既存の「usage float HUD」＋usage API 資産を orb に内蔵移植＝ほぼ再利用**。`Impact★4 Diff★5 Effort S 基盤◎`
 59. **予算ガードレール** — 5h/週次上限に対し残量予測（burn rate×reset）、閾値で警告・モデル降格提案・並列数の自動抑制。`Impact★4 Diff★5 Effort S–M 基盤◎`
 60. **MCP/権限の可視化＆トグル** — 有効MCP・権限をサイドバーで一望＆切替（既存MCP表示の発展）。`Impact★3 Diff★4 Effort M 基盤◎`
 61. **モデルピッカー＋BYOK** — Claude/GPT/Gemini＋自前キーを切替。コスト/品質コントロール・ロックイン回避。`Impact★3 Diff★2 Effort S–M 基盤◎`
 62. **WSL/SSH 自動プロファイル検出** — WSLディストリ/SSHホストを自動列挙しランチャーへ。「どこで回すか」をゼロ設定に。`Impact★3 Diff★3 Effort S–M 基盤◎`（Windows Terminal）
-63. **Adaptive rendering（省電力/ゲームモード）** — 出力アイドルでFPSスロットル、高負荷時のみ滑らか。**ノートPC(i7)の発熱/電池に効く＝もっちゃんの「軽量×リッチ」原則に完全合致**。`Impact★3 Diff★4 Effort M 基盤○`（Rio）
+63. **Adaptive rendering（省電力/ゲームモード）** — 出力アイドルでFPSスロットル、高負荷時のみ滑らか。**ノートPC(i7)の発熱/電池に効く＝「軽量×リッチ」の方針に完全合致**。`Impact★3 Diff★4 Effort M 基盤○`（Rio）
 64. **プラグインSDK（JS/Tauri）** — ユーザーが独自のエージェント/MCP/テーマ統合を後付け。`Impact★3 Diff★3 Effort L 基盤△`（Tabby/Hyper・大コミットだがSvelte/Vite基盤と相性）
 
 *（番号は分類整理の結果 50→64件に膨張。コアは50案、+14は競合由来の補強候補。実装は下のショートリストの順で。）*
