@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { selectSeats, poseForStatus, resolveName, MAX_SEATS, type CrewCandidate } from "./model";
+import { selectSeats, poseForStatus, resolveName, MAX_SEATS, formatElapsed, bubbleText, CREW_IDLE_LABEL, type CrewCandidate } from "./model";
 
 function cand(p: Partial<CrewCandidate> & { paneId: number }): CrewCandidate {
   return {
@@ -73,5 +73,40 @@ describe("resolveName", () => {
     expect(resolveName("枠1", c)).toBe("枠1");
     expect(resolveName("", c)).toBe("PLIMAL");
     expect(resolveName("", cand({ paneId: 4, tabName: "tab 2" }))).toBe("tab 2 · p4");
+  });
+});
+
+describe("formatElapsed", () => {
+  it("分と秒で出す", () => {
+    expect(formatElapsed(0)).toBe("0分0秒");
+    expect(formatElapsed(48_000)).toBe("0分48秒");
+    expect(formatElapsed(192_000)).toBe("3分12秒");
+  });
+
+  it("1時間を超えたら時間と分にする", () => {
+    expect(formatElapsed(3_600_000)).toBe("1時間0分");
+    expect(formatElapsed(7_500_000)).toBe("2時間5分");
+  });
+
+  it("24時間を超えたら頭打ちにする", () => {
+    expect(formatElapsed(90_000_000)).toBe("24時間+");
+  });
+
+  it("負の値は0秒として扱う（時計のズレで壊さない）", () => {
+    expect(formatElapsed(-5_000)).toBe("0分0秒");
+  });
+});
+
+describe("bubbleText", () => {
+  it("状態名と経過を並べる", () => {
+    expect(bubbleText("attention", 1000, 193_000)).toBe("要承認 3分12秒");
+  });
+
+  it("状態が無ければ待機と言い、経過は出さない", () => {
+    expect(bubbleText(null, null, 1000)).toBe(CREW_IDLE_LABEL);
+  });
+
+  it("時刻が不明なら状態名だけ出す（嘘の数字を出さない）", () => {
+    expect(bubbleText("running", null, 1000)).toBe("実行中");
   });
 });
