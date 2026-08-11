@@ -911,7 +911,7 @@ git commit -m "feat(crew): import a chosen sprite sheet into the config dir"
 
 **Interfaces:**
 - Consumes: なし
-- Produces: `paneLastCommand: Readable<ReadonlyMap<number, string>>`、`setPaneLastCommand(paneId, cmd)`
+- Produces: `paneLastCommand: Readable<ReadonlyMap<number, string>>`、`setPaneLastCommand(paneId, cmd)`、`clearPaneLastCommand(paneId)`
 
 **背景:** コマンド行は `osc.ts` の `CommandBlocks` が nonce 検証済みで持っている（`pendingCommand`）が、
 private フィールドでストアに出ていない。`osc.ts` は既に `setPaneStatus(this.paneId, …)` /
@@ -930,6 +930,12 @@ describe("paneLastCommand", () => {
     expect(get(paneLastCommand).get(5)).toBe("cargo test");
     setPaneLastCommand(5, "cargo build");
     expect(get(paneLastCommand).get(5)).toBe("cargo build");
+  });
+
+  it("ペイン破棄で忘れる", () => {
+    setPaneLastCommand(7, "ls");
+    clearPaneLastCommand(7);
+    expect(get(paneLastCommand).has(7)).toBe(false);
   });
 
   it("空文字と null は覚えない（空の行を出さない）", () => {
@@ -967,15 +973,28 @@ export function setPaneLastCommand(paneId: number, cmd: string | null) {
 }
 ```
 
-`disposePane` に掃除を 1 つ足す（`paneStatusSince` と同じ形）:
+**掃除経路を明示的に足す。** `paneStatusSince` は `setPaneStatus(paneId, null)` が破棄時に
+呼ばれるので巻き添えで消えるが、`paneLastCommand` にはその経路が無い＝放っておくと
+閉じたペインのコマンドが溜まり続ける。`clearPaneCwd` / `clearPaneModelEffort` と同じ形で
+専用の関数を作り、`Terminal.svelte` の `onDestroy`（`clearPaneModelEffort(paneId)` の隣）から呼ぶ:
 
 ```ts
+/** ペイン破棄時のレジストリ掃除（Terminal.svelte の onDestroy から）。
+ *  消さないと閉じたペインの直近コマンドが溜まり続ける（ID 再利用で誤表示にもなる）。 */
+export function clearPaneLastCommand(paneId: number) {
   paneLastCommand.update((m) => {
     if (!m.has(paneId)) return m;
     const next = new Map(m);
     next.delete(paneId);
     return next;
   });
+}
+```
+
+`src/terminal/Terminal.svelte` の `onDestroy` に 1 行:
+
+```ts
+    clearPaneLastCommand(paneId); // 破棄ペインの直近コマンドを残さない
 ```
 
 `src/terminal/blocks/osc.ts` の、`parseCommandLine` の結果を `this.pendingCommand` に入れている箇所
@@ -993,7 +1012,7 @@ import に `setPaneLastCommand` を足す（既に `setPaneStatus` / `setPaneCwd
 - [ ] **Step 4: テストが通ることを確認**
 
 Run: `pnpm vitest run src/store/appStore.test.ts`
-Expected: PASS（4 件）
+Expected: PASS（5 件）
 
 - [ ] **Step 5: コミット**
 
