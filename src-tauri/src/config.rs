@@ -104,10 +104,49 @@ fn default_crew_slots() -> Vec<CrewSlot> {
     ]
 }
 
-/// 枠番号 → config_dir() からの相対パス。枠ごとに固定名なので、取り込みは常に上書き＝
-/// 古いスプライトが溜まらない。
-pub fn crew_sprite_rel(slot: usize) -> String {
-    format!("crew/slot{slot}.png")
+/// 枠番号 → 新規インポート用の一意な相対パス（config_dir() からの相対）を生成する。
+/// タイムスタンプを起点に、同名が既にあれば連番を足して一意化する（commands.rs の
+/// save_image_to と同じ考え方）。取り込みのたびに文字列が変わること自体が目的：
+/// 固定名だと差し替えても config.crew[i].sprite の文字列が変わらず、Crew.svelte の
+/// 検証キャッシュ（validatedFor）とブラウザの画像キャッシュの両方に阻まれて、
+/// 新しい画像を選んでも見た目が変わらない不具合になっていた（Task 10 レビューで発見）。
+pub fn crew_sprite_rel(slot: usize, dir: &Path) -> String {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let mut rel = format!("crew/slot{slot}-{ts}.png");
+    let mut n = 1;
+    while dir.join(&rel).exists() {
+        rel = format!("crew/slot{slot}-{ts}-{n}.png");
+        n += 1;
+    }
+    rel
+}
+
+/// name が枠 slot 用のスプライトファイル名か（新旧どちらの命名規則も拾う）。
+/// 旧仕様の固定名 `slot{N}.png` と、新仕様の一意名 `slot{N}-{ts}[-{n}].png` の両方を
+/// 対象にする＝旧バージョンで書かれたファイルが残っていても掃除できる。
+fn is_slot_sprite_file(name: &str, slot: usize) -> bool {
+    name == format!("slot{slot}.png") || name.starts_with(&format!("slot{slot}-"))
+}
+
+/// 枠 slot の古いスプライトファイル（`keep` 以外）を削除する。best-effort:
+/// crew_dir が無い/個々の削除に失敗（既に無い等）しても呼び出し側の成功は妨げない。
+fn cleanup_old_crew_sprites(crew_dir: &Path, slot: usize, keep: &Path) {
+    let entries = match std::fs::read_dir(crew_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path == keep {
+            continue;
+        }
+        if is_slot_sprite_file(&entry.file_name().to_string_lossy(), slot) {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 /// 取り込み前の検証。枠は2つだけ、受けるのは PNG だけ。実際にPNGとして妥当か（6コマの
@@ -128,18 +167,27 @@ fn validate_crew_import(slot: usize, src: &str) -> std::result::Result<(), Strin
     Ok(())
 }
 
-/// 選ばれたファイルを config_dir() 下の固定名へコピーする。設定GUI のファイルピッカーが
+/// 選ばれたファイルを config_dir() 下の一意な名前へコピーする。設定GUI のファイルピッカーが
 /// 返した絶対パスを受け取り、config.toml に永続化できる相対パスへ変換して返す。
 // config.rs は `use crate::error::Result` で1引数版 Result を持つため、標準の
 // Result<T, E> をそのまま使う場合はフルパスで明示する必要がある。
 #[tauri::command]
 pub fn import_crew_sprite(slot: usize, src: String) -> std::result::Result<String, String> {
     validate_crew_import(slot, &src)?;
-    let dir = config_dir().join("crew");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("保存先を作れません: {e}"))?;
-    let rel = crew_sprite_rel(slot);
-    let dest = config_dir().join(&rel);
-    std::fs::copy(&src, &dest).map_err(|e| format!("コピーに失敗しました: {e}"))?;
+    import_crew_sprite_into(slot, &src, &config_dir())
+}
+
+/// import_crew_sprite の実処理。config_dir をテストから注入できるよう分離する
+/// （config_dir_with_home / ensure_bytes_at と同じ形）。
+fn import_crew_sprite_into(slot: usize, src: &str, dir: &Path) -> std::result::Result<String, String> {
+    let crew_dir = dir.join("crew");
+    std::fs::create_dir_all(&crew_dir).map_err(|e| format!("保存先を作れません: {e}"))?;
+    let rel = crew_sprite_rel(slot, dir);
+    let dest = dir.join(&rel);
+    std::fs::copy(src, &dest).map_err(|e| format!("コピーに失敗しました: {e}"))?;
+    // 新ファイルの書き込みに成功した後でのみ古いファイルを消す＝コピー失敗時に
+    // 既存の（まだ有効な）スプライトを失わない。
+    cleanup_old_crew_sprites(&crew_dir, slot, &dest);
     Ok(rel)
 }
 
@@ -716,9 +764,23 @@ sprite = "crew/slot0.png"
     }
 
     #[test]
-    fn crew_sprite_dest_is_scoped_to_slot() {
-        assert_eq!(crew_sprite_rel(0), "crew/slot0.png");
-        assert_eq!(crew_sprite_rel(1), "crew/slot1.png");
+    fn crew_sprite_rel_is_scoped_to_slot_and_avoids_collision() {
+        let dir = std::env::temp_dir().join("orb-crew-rel-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("crew")).unwrap();
+
+        let rel0 = crew_sprite_rel(0, &dir);
+        let rel1 = crew_sprite_rel(1, &dir);
+        assert!(rel0.starts_with("crew/slot0-") && rel0.ends_with(".png"));
+        assert!(rel1.starts_with("crew/slot1-") && rel1.ends_with(".png"));
+
+        // 同名が既に存在すれば連番で回避する（同一ミリ秒の連続取り込みでも上書きしない。
+        // save_image_to の衝突回避と同じ考え方）。
+        std::fs::write(dir.join(&rel0), b"x").unwrap();
+        let rel0_next = crew_sprite_rel(0, &dir);
+        assert_ne!(rel0, rel0_next);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -726,5 +788,55 @@ sprite = "crew/slot0.png"
         assert!(validate_crew_import(2, "a.png").is_err());
         assert!(validate_crew_import(0, "a.jpg").is_err());
         assert!(validate_crew_import(0, "a.PNG").is_ok());
+    }
+
+    #[test]
+    fn reimporting_a_different_sprite_yields_a_different_path_and_deletes_the_old_file() {
+        // タスクの核心の再現テスト: 同じ枠へ2回目の取り込みをしたとき、
+        // 1) 返る相対パス文字列が変わる（Crew.svelte の validatedFor キャッシュと <img src> の
+        //    どちらも「文字列が変われば再検証/再取得される」前提に乗るための必須条件）
+        // 2) 枠0の古いファイルが削除されている（積み上がらない）
+        let dir = std::env::temp_dir().join("orb-crew-import-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let src_dir = dir.join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let src1 = src_dir.join("a.png");
+        let src2 = src_dir.join("b.png");
+        std::fs::write(&src1, b"AAAA").unwrap();
+        std::fs::write(&src2, b"BBBB").unwrap();
+
+        let rel1 = import_crew_sprite_into(0, src1.to_str().unwrap(), &dir).unwrap();
+        let rel2 = import_crew_sprite_into(0, src2.to_str().unwrap(), &dir).unwrap();
+
+        assert_ne!(rel1, rel2, "differently-content re-import must yield a different stored path");
+        assert!(!dir.join(&rel1).exists(), "old slot file must be deleted after re-import");
+        assert_eq!(std::fs::read(dir.join(&rel2)).unwrap(), b"BBBB");
+
+        // 他の枠のファイルは無関係に残る（誤爆しない）。
+        let rel_other = import_crew_sprite_into(1, src1.to_str().unwrap(), &dir).unwrap();
+        assert!(dir.join(&rel_other).exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cleanup_old_crew_sprites_is_noop_when_nothing_to_delete() {
+        // 初回インポート相当（削除対象なし）でも panic/error なく完了する。
+        let dir = std::env::temp_dir().join("orb-crew-cleanup-noop-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("crew")).unwrap();
+
+        let keep = dir.join("crew/slot0-1.png");
+        std::fs::write(&keep, b"x").unwrap();
+        cleanup_old_crew_sprites(&dir.join("crew"), 0, &keep); // 自分自身以外に削除対象が無い
+        assert!(keep.exists());
+
+        // crew ディレクトリ自体が無い（read_dir 失敗）場合でも panic しない。
+        let _ = std::fs::remove_dir_all(&dir);
+        cleanup_old_crew_sprites(&dir.join("crew"), 0, &keep);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
