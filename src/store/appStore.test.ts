@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { get } from "svelte/store";
 import {
   cwd,
@@ -7,6 +7,9 @@ import {
   clearPaneCwd,
   paneModelEffort,
   setPaneModelEffort,
+  paneStatus,
+  paneStatusSince,
+  setPaneStatus,
   broadcastTargets,
   registerPaneInput,
   unregisterPaneInput,
@@ -106,6 +109,38 @@ describe("broadcastTargets (#77 FN-2/FN-4b: ブロードキャスト配送先の
 
   it("全員 alt-screen 中でも発信元だけは残る", () => {
     expect(broadcastTargets([1, 2, 3], 2, () => true)).toEqual([2]);
+  });
+});
+
+describe("paneStatusSince", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("状態が変わった時だけ時刻を更新する", () => {
+    setPaneStatus(1, null);
+    setPaneStatus(1, "running");
+    const first = get(paneStatusSince).get(1);
+    expect(first).toBeTypeOf("number");
+
+    setPaneStatus(1, "running"); // 同じ値の再設定
+    expect(get(paneStatusSince).get(1)).toBe(first);
+
+    vi.advanceTimersByTime(100); // 時間を進める
+    setPaneStatus(1, "failed");
+    expect(get(paneStatusSince).get(1)).not.toBe(first);
+  });
+
+  it("状態が消えたら時刻も消す", () => {
+    setPaneStatus(2, "attention");
+    expect(get(paneStatusSince).has(2)).toBe(true);
+    setPaneStatus(2, null);
+    expect(get(paneStatusSince).has(2)).toBe(false);
+    expect(get(paneStatus).has(2)).toBe(false);
   });
 });
 

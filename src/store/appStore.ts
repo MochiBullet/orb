@@ -39,13 +39,27 @@ export const lastShellPane = writable<number | null>(null);
  *  「手が要る」系だけ消える（acknowledgePane）。 */
 export const paneStatus = writable<ReadonlyMap<number, PaneStatus>>(new Map());
 
+/** 各ペインが「今の状態」になった時刻(ms)。Crew の経過時間表示の元。
+ *  setPaneStatus が値の変化時だけ書く＝同じ状態の再設定で経過がリセットされない。 */
+export const paneStatusSince = writable<ReadonlyMap<number, number>>(new Map());
+
 /** 状態を設定/解除する（null = バッジ無しへ）。値が変わらない時は再通知しない。 */
 export function setPaneStatus(paneId: number, s: PaneStatus | null) {
+  let changed = false;
   paneStatus.update((m) => {
     if ((m.get(paneId) ?? null) === s) return m;
+    changed = true;
     const next = new Map(m);
     if (s == null) next.delete(paneId);
     else next.set(paneId, s);
+    return next;
+  });
+  if (!changed) return;
+  // 状態が消えた時は時刻も消す。残すと次に状態が付いた時、古い時刻から数えて嘘の経過を出す。
+  paneStatusSince.update((m) => {
+    const next = new Map(m);
+    if (s == null) next.delete(paneId);
+    else next.set(paneId, Date.now());
     return next;
   });
 }
