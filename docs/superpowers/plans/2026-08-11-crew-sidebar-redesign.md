@@ -721,12 +721,13 @@ fn crew_defaults_to_two_slots() {
 
 #[test]
 fn crew_slots_round_trip() {
-    let src = r#"
+    // 生文字列は r##"…"## にする。中身に "#123456" が入るため r#"…"# だと途中で閉じる。
+    let src = r##"
 [[crew]]
 name = "枠A"
 color = "#123456"
 sprite = "crew/slot0.png"
-"#;
+"##;
     let c: Config = toml::from_str(src).expect("parses");
     assert_eq!(c.crew.len(), 1);
     assert_eq!(c.crew[0].name, "枠A");
@@ -774,6 +775,14 @@ fn default_crew_slots() -> Vec<CrewSlot> {
 ```rust
     #[serde(default = "default_crew_slots")]
     pub crew: Vec<CrewSlot>,
+```
+
+**`config_from_value` にも 1 行足す**（#74 のフィールド単位救済パス）。この関数は `Config { … }` を
+全フィールド明示で組み立てているので、足さないとコンパイルが通らない。かつ、ここを通る
+（壊れた config.toml の救済時）場合にも既定 2 枠が返る保証になる:
+
+```rust
+        crew: field_or_default(v, "crew", default_crew_slots()),
 ```
 
 `src/core/config.ts` に追加:
