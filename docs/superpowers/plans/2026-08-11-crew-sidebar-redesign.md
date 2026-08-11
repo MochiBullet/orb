@@ -378,10 +378,13 @@ git commit -m "feat(crew): seat selection across tabs, ordered by who needs a ha
 
 - [ ] **Step 1: 失敗するテストを書く**
 
-`src/crew/model.test.ts` の末尾に追記:
+`src/crew/model.test.ts` の末尾に追記する。**import は既存の先頭の import 行へ足す**
+（ファイル中間に import を書かない）:
 
 ```ts
-import { formatElapsed, bubbleText, CREW_IDLE_LABEL } from "./model";
+// 先頭の import を次に差し替える:
+// import { selectSeats, poseForStatus, resolveName, MAX_SEATS, formatElapsed,
+//          bubbleText, CREW_IDLE_LABEL, type CrewCandidate } from "./model";
 
 describe("formatElapsed", () => {
   it("分と秒で出す", () => {
@@ -917,11 +920,10 @@ private フィールドでストアに出ていない。`osc.ts` は既に `setP
 
 - [ ] **Step 1: 失敗するテストを書く**
 
-`src/store/appStore.test.ts` に追記:
+`src/store/appStore.test.ts` に追記する。**import は既存の先頭の import 行へ足す**
+（`paneLastCommand` と `setPaneLastCommand` を既存の import に加える）:
 
 ```ts
-import { paneLastCommand, setPaneLastCommand } from "./appStore";
-
 describe("paneLastCommand", () => {
   it("ペインごとに直近のコマンドを覚える", () => {
     setPaneLastCommand(5, "cargo test");
