@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, crewVisible, setFocusedAsAiPane, aiPane, paneStatus, acknowledgePane, anyOverlayOpen, workspaceWidthPx } from "../store/appStore";
+  import { layout, focusedPane, cwd as cwdStore, sidebarSide, showSettings, showPalette, paletteMode, broadcast, clearPane, consumeScrollback, writeToPane, tabWelcome, dnd, crewVisible, setFocusedAsAiPane, aiPane, paneStatus, acknowledgePane, anyOverlayOpen, workspaceWidthPx, windowFocused } from "../store/appStore";
   import { formatImagePath, isImagePath } from "../core/insert-path";
-  import { STATUS_ICON, STATUS_LABEL } from "../core/agent-status";
+  import { STATUS_ICON, STATUS_LABEL, shouldShowPaneBadge } from "../core/agent-status";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { tabs, activeTabId, ensureFirstTab, newTab, closeTab, openInfoTab, type Tab } from "./tabs";
   import {
@@ -522,9 +522,11 @@
         : ""}
     >
       <Terminal paneId={lf.id} initialCmd={lf.initialCmd} role={lf.role} label={lf.label} />
-      {#if lf.tabId === $activeTabId && lf.id !== $focusedPane}
+      {#if lf.tabId === $activeTabId}
         {@const st = $paneStatus.get(lf.id)}
-        {#if st}
+        <!-- 記録は focus 不問（Terminal.svelte 参照）。表示側でだけ「見ている pane」を隠す
+             （shouldShowPaneBadge は shouldNotifyForPane と同じ watching 定義）。 -->
+        {#if st && shouldShowPaneBadge(lf.id, $focusedPane, $windowFocused)}
           <span class="pane-badge" title={STATUS_LABEL[st]} aria-label={STATUS_LABEL[st]}>{STATUS_ICON[st]}</span>
         {/if}
       {/if}

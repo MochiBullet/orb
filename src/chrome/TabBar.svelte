@@ -1,23 +1,29 @@
 <script lang="ts">
   import { tabs, activeTabId, newTab, closeTab, switchTab, renameTab, type Tab } from "../layout/tabs";
-  import { layout, paneStatus } from "../store/appStore";
+  import { layout, paneStatus, focusedPane, windowFocused } from "../store/appStore";
   import { leafIds, type PaneNode } from "../layout/tree";
-  import { aggregateStatus, STATUS_ICON, STATUS_LABEL, type PaneStatus } from "../core/agent-status";
+  import { aggregateStatus, STATUS_ICON, STATUS_LABEL, shouldShowPaneBadge, type PaneStatus } from "../core/agent-status";
 
   let editing = $state<number | null>(null);
   let editValue = $state("");
 
   /** #50: タブ内全ペインの状態を1個へ集約（🔔>🔴>🟡>✅>🟢）。アクティブタブの
-   *  レイアウトはグローバル $layout が権威（Workspace の tabLayout と同じ規約）。 */
+   *  レイアウトはグローバル $layout が権威（Workspace の tabLayout と同じ規約）。
+   *  記録は focus 不問（Terminal.svelte 参照）。集約に混ぜる前に shouldShowPaneBadge で
+   *  「見ている pane」の状態を除く＝ペイン右上バッジと同じ watching 定義で揃える。 */
   function tabStatus(
     t: Tab,
     active: number,
     lay: PaneNode | null,
     statuses: ReadonlyMap<number, PaneStatus>,
+    focusedPaneId: number,
+    winFocused: boolean,
   ): PaneStatus | null {
     const l = t.id === active ? lay : t.layout;
     if (!l) return null;
-    return aggregateStatus(leafIds(l).map((id) => statuses.get(id)));
+    return aggregateStatus(
+      leafIds(l).map((id) => (shouldShowPaneBadge(id, focusedPaneId, winFocused) ? statuses.get(id) : undefined)),
+    );
   }
 
   function startEdit(id: number, current: string) {
@@ -38,7 +44,7 @@
 
 <div class="tabbar">
   {#each $tabs as t, i (t.id)}
-    {@const st = tabStatus(t, $activeTabId, $layout, $paneStatus)}
+    {@const st = tabStatus(t, $activeTabId, $layout, $paneStatus, $focusedPane, $windowFocused)}
     <button
       class="tab"
       class:active={t.id === $activeTabId}

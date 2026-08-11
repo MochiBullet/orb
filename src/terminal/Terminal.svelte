@@ -49,7 +49,6 @@
   import { matchFileLine } from "../core/file-line";
   import { disposePaneQueue } from "../store/promptQueue";
   import { pushToast } from "../store/toasts";
-  import { shouldNotifyForPane } from "./blocks/notify";
   import { leafIds } from "../layout/tree";
   import { config } from "../core/config";
   import { clampFontSize, clampScrollback, FONT_SIZE_MIN, FONT_SIZE_MAX, pushCapped } from "../core/limits";
@@ -451,9 +450,13 @@
 
   // #50: AI(claude) ペインの「入力待ち/要承認」検知。claude は1コマンドとして走り続け
   // OSC133 D がターン毎に出ないため、出力ストリームの静止(2.5s)＋末尾パターンで推定する。
-  // 判定は core/agent-status の純関数。ゲート2枚:
+  // 判定は core/agent-status の純関数。ゲートは1枚:
   //  - blocks.isCommandRunning(): プロンプトで静止しているだけ（claude 終了後等）は対象外
-  //  - shouldNotifyForPane(): 見ている時はバッジ不要（#32/#20 と同じ判定を共有）
+  // 記録（setPaneStatus）はフォーカスの有無に関係なく常に行う。Crew は paneStatus をそのまま
+  // 「今何をしているか」の事実として出すので、見ている時だけ書き込みを止めると見ているペインが
+  // 永久に無状態＝待機のまま固まる（waiting へ一度も遷移しないと running への復帰も起きない）。
+  // 「見ている時はバッジ不要」は shouldNotifyForPane の役目のまま（通知）だが、ペイン右上/タブの
+  // バッジ表示側では core/agent-status の shouldShowPaneBadge が同じ判定を担う（Workspace/TabBar）。
   const AI_IDLE_MS = 2500;
   let aiIdleTimer: number | undefined;
   let aiTail = "";
@@ -477,7 +480,10 @@
       // ゲートにすると起動 claude のアイドル判定が永久に通らない。起動 agent フラグが立っていれば
       // C 不在でもアイドル判定を許可する（フラグは claude 終了＝A で解除＝素プロンプトは誤判定しない）。
       if (!blocks?.isCommandRunning() && !isLaunchedAgentActive(paneId)) return;
-      if (!shouldNotifyForPane(paneId)) return;
+      // ここで shouldNotifyForPane を挟まない: 挟むと「見ている」ペインは一度も waiting/attention
+      // へ書き込まれず、Crew が読む paneStatus に永久にエントリが無い＝待機のまま固まる（再発防止）。
+      // 見ている時にバッジ/通知を出さない制御は、通知側(shouldNotifyForPane)とバッジ側
+      // (shouldShowPaneBadge、Workspace/TabBar)がそれぞれの描画/送信タイミングで別途担う。
       setPaneStatus(paneId, classifyIdle(aiTail));
     }, AI_IDLE_MS);
   }

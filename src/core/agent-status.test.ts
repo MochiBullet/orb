@@ -5,6 +5,7 @@ import {
   stripAnsi,
   classifyIdle,
   shouldTrackAgentStatus,
+  shouldShowPaneBadge,
 } from "./agent-status";
 
 describe("statusForClose (#50: D 確定時のバッジ判定・#32/#20 とゲート共有)", () => {
@@ -89,5 +90,20 @@ describe("shouldTrackAgentStatus (#50/#51 回帰修正: role=ai／起動 agent�
     expect(shouldTrackAgentStatus("shell", false, 4, 2)).toBe(false);
     expect(shouldTrackAgentStatus("shell", false, 4, null)).toBe(false);
     expect(shouldTrackAgentStatus(undefined, false, 4, 2)).toBe(false);
+  });
+});
+
+describe("shouldShowPaneBadge (見ている pane の corner/tab バッジ抑止。記録は常時行うため表示側でだけ隠す)", () => {
+  it("ウィンドウにフォーカスがあり、かつそのペインがフォーカス中なら隠す", () => {
+    expect(shouldShowPaneBadge(5, 5, true)).toBe(false);
+  });
+
+  it("ウィンドウが非フォーカスなら、フォーカス中のペインでも出す（alt-tab で離れている＝見ていない）", () => {
+    expect(shouldShowPaneBadge(5, 5, false)).toBe(true);
+  });
+
+  it("フォーカス中でない別ペインは、ウィンドウのフォーカス有無に関係なく常に出す", () => {
+    expect(shouldShowPaneBadge(3, 5, true)).toBe(true);
+    expect(shouldShowPaneBadge(3, 5, false)).toBe(true);
   });
 });

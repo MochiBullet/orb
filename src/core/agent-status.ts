@@ -107,3 +107,22 @@ export function classifyIdle(tail: string): "attention" | "waiting" {
   const t = stripAnsi(tail);
   return ATTENTION_PATTERNS.some((re) => re.test(t)) ? "attention" : "waiting";
 }
+
+/**
+ * バッジ（ペイン右上の corner badge／TabBar のタブ集約）をこの pane で表示してよいか。
+ *
+ * setPaneStatus への記録はもうフォーカスの有無に関係なく常に行う（Crew が読む paneStatus を
+ * 「今何をしているか」の事実のまま保つため）。その結果、見ているペインにもバッジが付き得るように
+ * なったので、表示側だけでここを隠す。terminal/blocks/notify.ts の shouldNotifyForPane と同じ
+ * 「watching＝ウィンドウにフォーカスがあり、かつこの pane が focusedPane」という定義を、
+ * Svelte テンプレート側（$focusedPane/$windowFocused の変化のたびに再評価される）向けに
+ * 純関数として複製したもの。定義を分けるとバッジと通知の「見ている」判定がズレるので揃える。
+ * Crew（サイドバーの一覧）はこの関数を使わない＝常に事実をそのまま出す。
+ */
+export function shouldShowPaneBadge(
+  paneId: number,
+  focusedPaneId: number,
+  windowFocused: boolean,
+): boolean {
+  return !(windowFocused && paneId === focusedPaneId);
+}

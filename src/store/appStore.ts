@@ -16,6 +16,20 @@ export const workspaceWidthPx = writable<number>(0);
 /** フォーカス中のペイン ID（分割・クローズ・枠ハイライトの対象）。 */
 export const focusedPane = writable<number>(0);
 
+/** ウィンドウが OS フォーカスを持っているか。Workspace のペイン右上バッジ／TabBar のタブ集約が
+ *  「見ている pane にはバッジを出さない」判定（core/agent-status の shouldShowPaneBadge）に使う
+ *  単一ソース。terminal/blocks/notify.ts の shouldNotifyForPane と同じ document.hasFocus() 起点
+ *  で揃える（起点がズレるとバッジと通知の「見ている」判定が食い違う）。jsdom の無い vitest
+ *  （node 環境）では window/document が無いため既定 true のまま listener を張らずに終わる
+ *  （テストはこの store でなく shouldShowPaneBadge を直接検証する）。 */
+export const windowFocused = writable<boolean>(
+  typeof document !== "undefined" ? document.hasFocus() : true,
+);
+if (typeof window !== "undefined") {
+  window.addEventListener("focus", () => windowFocused.set(true));
+  window.addEventListener("blur", () => windowFocused.set(false));
+}
+
 /** AI(claude)ペインの ID。Ctrl+L で選択テキストの送信先になる。null=AIペイン無し。 */
 export const aiPane = writable<number | null>(null);
 
