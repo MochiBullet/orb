@@ -80,6 +80,30 @@ fn default_show_info_on_startup() -> bool {
     true
 }
 
+/// Crew の1枠。sprite が空なら既定の SVG キャラを描く。
+/// Project と同じく全フィールドに serde(default) を付け、1つ欠けても枠ごと落ちないようにする。
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CrewSlot {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default = "default_crew_color")]
+    pub color: String,
+    /// config_dir() からの相対パス。空 = 既定 SVG。
+    #[serde(default)]
+    pub sprite: String,
+}
+
+fn default_crew_color() -> String {
+    "#4fb3a4".into()
+}
+
+fn default_crew_slots() -> Vec<CrewSlot> {
+    vec![
+        CrewSlot { name: String::new(), color: "#4fb3a4".into(), sprite: String::new() },
+        CrewSlot { name: String::new(), color: "#9b7fd4".into(), sprite: String::new() },
+    ]
+}
+
 /// orb 本体の設定（config.toml）。
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -119,6 +143,9 @@ pub struct Config {
     /// 無いとき末尾へ非アクティブで補充する（真の初回起動は設定に依らずアクティブで開く）。
     #[serde(default = "default_show_info_on_startup")]
     pub show_info_on_startup: bool,
+    /// Crew ビュー用の2枠（名前・色・差し替えスプライト）。
+    #[serde(default = "default_crew_slots")]
+    pub crew: Vec<CrewSlot>,
 }
 
 impl Default for Config {
@@ -137,6 +164,7 @@ impl Default for Config {
             bg_pos_y: default_bg_pos_y(),
             bg_zoom: default_bg_zoom(),
             show_info_on_startup: default_show_info_on_startup(),
+            crew: default_crew_slots(),
         }
     }
 }
@@ -209,6 +237,7 @@ fn config_from_value(v: &toml::Value) -> Config {
         bg_pos_y: field_or_default(v, "bg_pos_y", default_bg_pos_y()),
         bg_zoom: field_or_default(v, "bg_zoom", default_bg_zoom()),
         show_info_on_startup: field_or_default(v, "show_info_on_startup", default_show_info_on_startup()),
+        crew: field_or_default(v, "crew", default_crew_slots()),
     }
 }
 
@@ -620,5 +649,30 @@ accent = "#abcdef"
         // unwrap_or_default() で空 Vec に化けてしまい、キー欠損と区別できなかった）。
         assert!(parse_projects_text("[project]\nslug = \"a\"\ndir = \"C:/a\"\n").is_none());
         assert!(parse_projects_text("project = \"oops\"\n").is_none());
+    }
+
+    #[test]
+    fn crew_defaults_to_two_slots() {
+        let c: Config = toml::from_str("").expect("empty config parses");
+        assert_eq!(c.crew.len(), 2);
+        assert!(c.crew[0].sprite.is_empty());
+        assert!(!c.crew[0].color.is_empty());
+    }
+
+    #[test]
+    fn crew_slots_round_trip() {
+        // r#"..."# だと本文中の `"#123456"` の `"#` がデリミタと衝突して早期終了する
+        // （parse_config_text_keeps_other_fields_when_one_field_has_wrong_type と同じ罠）。
+        // ハッシュを1つ増やして r##"..."## にする。
+        let src = r##"
+[[crew]]
+name = "枠A"
+color = "#123456"
+sprite = "crew/slot0.png"
+"##;
+        let c: Config = toml::from_str(src).expect("parses");
+        assert_eq!(c.crew.len(), 1);
+        assert_eq!(c.crew[0].name, "枠A");
+        assert_eq!(c.crew[0].sprite, "crew/slot0.png");
     }
 }

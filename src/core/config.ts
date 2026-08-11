@@ -21,6 +21,15 @@ export interface OrbConfig {
   bg_zoom: number;
   /** #47: 起動時に info（取扱説明書）タブを開く（復元セッションに無ければ末尾へ補充）。 */
   show_info_on_startup: boolean;
+  /** Crew ビュー用の2枠（名前・色・差し替えスプライト）。 */
+  crew: CrewSlot[];
+}
+
+export interface CrewSlot {
+  name: string;
+  color: string;
+  /** config_dir() からの相対パス。空 = 既定の SVG キャラ。 */
+  sprite: string;
 }
 
 const DEFAULT: OrbConfig = {
@@ -37,6 +46,10 @@ const DEFAULT: OrbConfig = {
   bg_pos_y: 100,
   bg_zoom: 1,
   show_info_on_startup: true,
+  crew: [
+    { name: "", color: "#4fb3a4", sprite: "" },
+    { name: "", color: "#9b7fd4", sprite: "" },
+  ],
 };
 
 /** ~/.config/orb/config.toml の内容。起動時に loadConfig() で埋める。 */
