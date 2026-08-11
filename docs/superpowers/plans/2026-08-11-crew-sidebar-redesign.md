@@ -1188,11 +1188,23 @@ git commit -m "feat(crew): name, colour and sprite pickers in settings"
 `docs/crew-sprite-template.md` に、コマ順・1コマ正方形・推奨サイズ・透過の扱い・
 `設定 → CREW → 画像を選ぶ` の手順・検証に落ちたときのトースト文言を書く。
 
-- [ ] **Step 3: コミット**
+- [ ] **Step 3: InfoTab の説明文を現状に合わせる**
+
+`src/chrome/InfoTab.svelte`（orb 内蔵の取扱説明）が、Task 11 で廃止した INBOX を今も説明している:
+
+- 149行目付近: 「状態バッジ（タブ・ペイン右上・サイドバー **INBOX**）」
+- 153行目付近: 「手が要るペインには **INBOX** から1クリックでジャンプ。フォーカスすると既読で消える。」
+
+挙動そのもの（1クリックでジャンプ・フォーカスで既読）は Crew が引き継いでいるので、
+**INBOX という名前を CREW に置き換え、Crew が増えた点（手が要るペインが無いときは作業中のペインを見せる）を
+1 文足す**。このリポジトリは過去に「廃止した機能を InfoTab が説明し続ける」自己矛盾を出しているので、
+機能を消したら同じコミット群の中で説明文も直す。
+
+- [ ] **Step 4: コミット**
 
 ```bash
-git add docs/crew-sprite-template.md assets/crew-template.png
-git commit -m "docs(crew): sprite sheet template and how to draw one"
+git add docs/crew-sprite-template.md assets/crew-template.png src/chrome/InfoTab.svelte
+git commit -m "docs(crew): sprite sheet template, and stop describing the retired INBOX"
 ```
 
 ---
