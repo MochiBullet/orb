@@ -141,9 +141,15 @@ export function clearPaneLastCommand(paneId: number) {
  *
  *  **これは記録側だが、フォーカス依存を意図的に残している。** 「見たら既読」は #50 の
  *  受け入れ条件そのもので、ユーザーが自分の操作（フォーカス移動・ウィンドウ復帰）で
- *  明示的に消す仕草にあたるため。結果として Crew も、見ているペインの waiting/attention は
- *  出さない（＝目の前にあるプロンプトを席でも二重に主張しない）。
- *  記録の無条件化（statusForClose / trackAgentOutput）はこの仕様には及ばない。 */
+ *  明示的に消す仕草にあたるため。記録の無条件化（statusForClose / trackAgentOutput）は
+ *  この仕様には及ばない。
+ *
+ *  **効く範囲は限定的**なので、ここを「見ているペインの状態は出ない」と読まないこと。
+ *  発火するのはフォーカスが**変化した**時とウィンドウ復帰時だけで、
+ *  **見ているペインで新しく waiting/attention になった場合は消すトリガーが一つも来ない**
+ *  （focusedPane もウィンドウフォーカスも変化していないため）。つまり Crew は
+ *  「見ているペインの要承認」を**出す**。消えるのは「別のペインから戻ってきた時に
+ *  古い状態が残っていた場合」だけ。 */
 export function acknowledgePane(paneId: number) {
   const cur = get(paneStatus).get(paneId);
   if (cur && cur !== "running") setPaneStatus(paneId, null);
