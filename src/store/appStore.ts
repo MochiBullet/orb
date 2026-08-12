@@ -23,9 +23,12 @@ export const focusedPane = writable<number>(0);
  *  で揃える（起点がズレるとバッジと通知の「見ている」判定が食い違う）。jsdom の無い vitest
  *  （node 環境）では window/document が無いため既定 true のまま listener を張らずに終わる
  *  （テストはこの store でなく shouldShowPaneBadge を直接検証する）。 */
-export const windowFocused = writable<boolean>(
-  typeof document !== "undefined" ? document.hasFocus() : true,
-);
+// 初期値は **true 固定**（`document.hasFocus()` を読まない）。読み込み時点の hasFocus() は
+// まだ false のことがあり、非同期の isFocused() が解決するまでの数百 ms だけ「非フォーカス」に
+// なる＝その間だけ見ているペインにバッジが出る、という**間欠の不具合になる**。
+// 外した時の被害が非対称なので true に倒す: 誤って true → バッジが一瞬出ないだけ。
+// 誤って false → 見ているものにバッジが出る（直そうとした症状そのもの）。
+export const windowFocused = writable<boolean>(true);
 if (typeof window !== "undefined") {
   // DOM の focus/blur だけでは足りない。WebView2 は alt-tab 復帰でこれを発火しないことがあり
   // （Terminal.svelte の refocusIfMine が同じ理由で Tauri ネイティブを主軸にしている）、
