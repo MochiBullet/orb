@@ -398,14 +398,15 @@ export class CommandBlocks {
     this.updateStatusOnClose(code);
   }
 
-  /** #50: コマンド確定時のバッジ更新。#32/#20 と同じ「見ていない時だけ」ゲートと
-   *  #20 と同じ長時間しきい値を共有する（通知とバッジがズレない）。null は running 解除。 */
+  /** #50: コマンド確定時の状態更新。**記録は見ているかどうかに関係なく行う**
+   *  （見ている時に出さないのは表示側の責務＝バッジは shouldShowPaneBadge、通知は
+   *  shouldNotifyForPane。ここで消すと Crew が見ているペインの失敗を出せない）。
+   *  長時間しきい値は #20 の通知と共有する。null は running 解除。 */
   private updateStatusOnClose(code: number) {
-    const watching = !shouldNotifyForPane(this.paneId);
     // #Theme-D1: 所要時間は C(出力開始) 起点を優先＝プロンプト放置時間を longRun 判定に混ぜない。
     const start = selectCmdStart(this.cmdStart, this.outputStartTime);
     const longRun = start > 0 && Date.now() - start >= CommandBlocks.NOTIFY_MS;
-    setPaneStatus(this.paneId, statusForClose(code, watching, longRun));
+    setPaneStatus(this.paneId, statusForClose(code, longRun));
   }
 
   /** #50: いまコマンド実行中か（E/C 受信済み・D 未受信）。AI ペインのアイドル判定のゲート。

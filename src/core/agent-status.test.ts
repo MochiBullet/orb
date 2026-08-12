@@ -8,18 +8,20 @@ import {
   shouldShowPaneBadge,
 } from "./agent-status";
 
-describe("statusForClose (#50: D 確定時のバッジ判定・#32/#20 とゲート共有)", () => {
-  it("見ている時は何も出さない（running 解除を兼ねる null）", () => {
-    expect(statusForClose(0, true, true)).toBeNull();
-    expect(statusForClose(1, true, true)).toBeNull();
-    expect(statusForClose(-1, true, false)).toBeNull();
+describe("statusForClose (#50: D 確定時に記録する状態)", () => {
+  it("失敗は所要時間に関係なく failed、成功は長時間だけ done", () => {
+    expect(statusForClose(1, false)).toBe("failed");
+    expect(statusForClose(-1, false)).toBe("failed"); // 中断クローズ(-1)も失敗扱い
+    expect(statusForClose(0, true)).toBe("done");
+    expect(statusForClose(0, false)).toBeNull(); // 一瞬で終わる成功は記録しない
   });
 
-  it("見ていない時: 失敗は所要時間に関係なく failed、成功は長時間だけ done", () => {
-    expect(statusForClose(1, false, false)).toBe("failed");
-    expect(statusForClose(-1, false, false)).toBe("failed"); // 中断クローズ(-1)も失敗扱い
-    expect(statusForClose(0, false, true)).toBe("done");
-    expect(statusForClose(0, false, false)).toBeNull(); // 一瞬で終わる成功はバッジにしない
+  it("見ているかどうかは記録に影響しない（見ているペインの失敗も記録する）", () => {
+    // 以前は watching 引数があり、見ているペインでは失敗すら null になっていた。
+    // その結果 Crew が「見ているペインの失敗」を出せなかった。表示の抑制は
+    // shouldShowPaneBadge / shouldNotifyForPane の責務で、記録側では行わない。
+    expect(statusForClose(1, false)).toBe("failed");
+    expect(statusForClose(1, true)).toBe("failed");
   });
 });
 

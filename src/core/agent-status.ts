@@ -65,14 +65,20 @@ export function aggregateStatus(list: (PaneStatus | undefined)[]): PaneStatus | 
 }
 
 /**
- * コマンド確定（OSC133 D / 中断クローズ）時のバッジ判定。
- * - watching（最前面ウィンドウ＆当該ペインにフォーカス）なら null＝見ている人にバッジは不要。
- *   null は「running バッジの解除」も兼ねる。
- * - 失敗は所要時間に関係なくバッジ。成功は longRun（#20 の通知しきい値と同じ）だけ。
- *   一瞬で終わる ls 等の成功までバッジにすると背景ペインが常時 ✅ で埋まるため。
+ * コマンド確定（OSC133 D / 中断クローズ）時に**記録する**状態。
+ *
+ * ここは記録の経路であって表示の経路ではない。以前は watching（最前面ウィンドウ＆当該ペインに
+ * フォーカス）なら null を返して「見ている人にバッジは不要」を実現していたが、それだと
+ * **見ているペインでコマンドが失敗しても failed が記録されず、Crew が事実を出せない**
+ * （Crew は「今このペインが何をしているか」の表示なので、見ているものこそ出す必要がある）。
+ * 「見ている時に出さない」は表示側の責務へ移した（バッジ = shouldShowPaneBadge、通知 =
+ * terminal/blocks/notify.ts の shouldNotifyForPane）。
+ *
+ * - 失敗は所要時間に関係なく記録。成功は longRun（#20 の通知しきい値と同じ）だけ。
+ *   一瞬で終わる ls 等の成功まで記録すると、席もバッジも常時 ✅ で埋まるため。
+ * - null は「running の解除」も兼ねる。
  */
-export function statusForClose(code: number, watching: boolean, longRun: boolean): PaneStatus | null {
-  if (watching) return null;
+export function statusForClose(code: number, longRun: boolean): PaneStatus | null {
   if (code !== 0) return "failed";
   return longRun ? "done" : null;
 }
