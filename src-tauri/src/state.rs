@@ -26,14 +26,23 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// #82: ラベルから対応する pane_id を探す（queue watcher 用）。同じラベルが複数ペインに
-    /// 付いていた場合は先勝ち（運用上ラベルは一意に付ける前提のため、通常は起こらない）。
+    /// #82: ラベルから対応する pane_id を探す（queue watcher 用）。
+    ///
+    /// 同じラベルのペインが複数あったら **最後に作られたもの（pane_id 最大）へ配送する**。
+    /// pane_id はフロントの nextPaneId() が単調増加で採番するので、最大 = 最新。
+    /// クイック起動ボタンをもう一度押したら新しいペインが引き継ぐ、が自然な期待値のため。
+    ///
+    /// 以前は HashMap を find() していた。コメントには「先勝ち」と書いてあったが、
+    /// **HashMap の反復順は不定なので実際にはどれが選ばれるか毎回変わりうる**（同じラベルの
+    /// ペインを2つ開いた状態で実際に踏んだ）。コードが提供していない保証をコメントが
+    /// 主張していた形なので、決定的な規則に置き換えた。
     pub fn pane_for_label(&self, label: &str) -> Option<PaneId> {
         let labels = self.pane_labels.lock().unwrap_or_else(|p| p.into_inner());
         labels
             .iter()
-            .find(|(_, v)| v.as_str() == label)
+            .filter(|(_, v)| v.as_str() == label)
             .map(|(k, _)| *k)
+            .max()
     }
 
     /// 全 PTY をツリーごと kill する（drain はしない＝呼び出し直後にプロセスが
@@ -109,4 +118,36 @@ pub fn install_panic_hook(state: AppState) {
         }
         default_hook(info);
     }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state_with_labels(pairs: &[(PaneId, &str)]) -> AppState {
+        let st = AppState::default();
+        {
+            let mut m = st.pane_labels.lock().unwrap();
+            for (id, label) in pairs {
+                m.insert(*id, (*label).to_string());
+            }
+        }
+        st
+    }
+
+    #[test]
+    fn pane_for_label_prefers_the_newest_pane() {
+        // 同じラベルのペインが3つ。pane_id は単調増加なので最大 = 最後に起動したもの。
+        // 以前は HashMap の find() で、どれが返るか不定だった。
+        let st = state_with_labels(&[(3, "worker:d"), (11, "worker:d"), (7, "worker:d")]);
+        assert_eq!(st.pane_for_label("worker:d"), Some(11));
+    }
+
+    #[test]
+    fn pane_for_label_ignores_other_labels() {
+        let st = state_with_labels(&[(2, "worker:a"), (9, "worker:b"), (4, "worker:a")]);
+        assert_eq!(st.pane_for_label("worker:a"), Some(4));
+        assert_eq!(st.pane_for_label("worker:b"), Some(9));
+        assert_eq!(st.pane_for_label("worker:zzz"), None);
+    }
 }
