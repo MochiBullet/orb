@@ -289,6 +289,10 @@ export async function runQuickLaunch(entry: QuickLaunch): Promise<void> {
   // 直近の会話を再開しうるため、ボタン1つで意図しない会話に接続する事故を避ける。
   const { tree: column, aiIds } = buildQuickLaunchColumn(items, "fresh");
 
+  // フォーカスは**意図的に移さない**。手動スプリット（Workspace の split）は新ペインへ
+  // フォーカスを移すが、こちらは「今の作業を続けたまま補助セッションを横に足す」ための
+  // ボタンなので、押しただけで入力先が奪われない方が正しい。
+  // （宣言が無いと、この非対称が設計判断なのか書き忘れなのかコードから区別できない）
   const current = get(layout);
   const newPaneFraction = widthPxToRatio(entry.width_px, get(workspaceWidthPx));
   const root: PaneNode = current
