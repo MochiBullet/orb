@@ -2,7 +2,7 @@
   // Crew ビュー本体（サイドバーの1セクション）。#50 INBOX の後継＝全タブ横断で「手が要る順」に
   // 席を並べ、状態は吹き出しの文字で言う（色では言わない）。判定ロジックは一切持たず、
   // model.ts / char-svg.ts / sprite.ts に委ねるだけ（判定の二重実装で INBOX/バッジとズレるのを防ぐ）。
-  import { onMount, onDestroy } from "svelte";
+  import { onDestroy } from "svelte";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import {
     selectSeats,
@@ -14,7 +14,7 @@
   import { charSvg } from "./char-svg";
   import { validateSheet, frameRect, SPRITE_ORDER } from "./sprite";
   import { resolveCrewSpritePath, crewSpriteBaseReady } from "./sprite-path";
-  import { layout, focusedPane, paneStatus, paneStatusSince, paneLastCommand } from "../store/appStore";
+  import { layout, focusedPane, paneStatus, paneStatusSince, paneLastCommand, windowFocused } from "../store/appStore";
   import { config } from "../core/config";
   import { tabs, activeTabId, switchTab } from "../layout/tabs";
   import { leafIds, leafInfoMap, type PaneRole } from "../layout/tree";
@@ -61,24 +61,16 @@
   // ---- 経過時間の時計 ------------------------------------------------------
   // 席が0のとき／ウィンドウが非フォーカスのときは止める（背後のorbがCPUを焼かないため）。
   let now = $state(Date.now());
-  let windowFocused = $state(true);
   let clockId: number | undefined;
 
-  function onWindowFocus() {
-    windowFocused = true;
-  }
-  function onWindowBlur() {
-    windowFocused = false;
-  }
-
-  onMount(() => {
-    windowFocused = document.hasFocus();
-    window.addEventListener("focus", onWindowFocus);
-    window.addEventListener("blur", onWindowBlur);
-  });
-
+  // ウィンドウのフォーカスは appStore の windowFocused だけを見る（単一ソース）。
+  // 以前はここに DOM の focus/blur + document.hasFocus() で独自の実装を持っていたが、
+  // それは appStore 側が既に潰した罠を2つとも抱えていた: WebView2 は alt-tab 復帰で
+  // focus を発火しないことがあり（→ false で固着して時計が止まり、経過時間が進まなくなる）、
+  // document.hasFocus() は読み込み時点で false を返しうる。単一ソースにすればその修正が
+  // そのまま効く。
   $effect(() => {
-    const shouldTick = seating.seats.length > 0 && windowFocused;
+    const shouldTick = seating.seats.length > 0 && $windowFocused;
     if (shouldTick && clockId === undefined) {
       now = Date.now(); // 再開直後の表示を最新化してから刻む
       clockId = window.setInterval(() => (now = Date.now()), 1000);
@@ -90,8 +82,6 @@
 
   onDestroy(() => {
     if (clockId !== undefined) window.clearInterval(clockId);
-    window.removeEventListener("focus", onWindowFocus);
-    window.removeEventListener("blur", onWindowBlur);
   });
 
   // 非フォーカス中は上の effect が interval を止めたままなので、その間に席の状態が変わっても
