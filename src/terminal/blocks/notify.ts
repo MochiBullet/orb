@@ -1,5 +1,5 @@
 import { get } from "svelte/store";
-import { focusedPane } from "../../store/appStore";
+import { focusedPane, windowFocused } from "../../store/appStore";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 
 /**
@@ -13,11 +13,20 @@ import { sendNotification } from "@tauri-apps/plugin-notification";
  *
  * 前面スパム防止：ウィンドウが最前面で、かつ発火ペインが今フォーカス中のペインなら出さない。
  * → ウィンドウが非フォーカス、または別ペイン/別タブ（＝今見ていない）なら出す。
- * `document.hasFocus()` が使えない環境では安全側（通知する）に倒す。
+ *
+ * **「ウィンドウが最前面か」は appStore の windowFocused ストアだけを見る。**
+ * 以前はここで直接 `document.hasFocus()` を読んでいたが、バッジ側（shouldShowPaneBadge）が
+ * Tauri の onFocusChanged 起点へ移った結果、**同じ「見ている」を別々の起点で判定する状態**に
+ * なっていた。alt-tab 復帰の瞬間に Tauri は true・DOM はまだ false、という食い違いが実際に起き、
+ * 「バッジは正しく隠れるのに、見ているペインへ通知だけ飛ぶ」を生む。起点を1つに戻す。
+ *
+ * 副作用（意図的）: Tauri も DOM も無い環境（vitest の node）ではストアが初期値 true のままなので
+ * 「見ている」扱いになり、フォーカス中ペインの通知が出ない。以前は逆に安全側（通知する）へ
+ * 倒していたが、そもそも通知 API 自体が無い環境なので実害が無く、
+ * **起点を1つに保つ方を優先する**。
  */
 export function shouldNotifyForPane(paneId: number): boolean {
-  const windowFocused = typeof document !== "undefined" && document.hasFocus();
-  return !windowFocused || get(focusedPane) !== paneId;
+  return !get(windowFocused) || get(focusedPane) !== paneId;
 }
 
 /** 同一 (title, body) の通知をこの時間(ms)内は抑止する（連打/重複のスパム防止）。
