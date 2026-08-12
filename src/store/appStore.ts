@@ -17,38 +17,43 @@ export const workspaceWidthPx = writable<number>(0);
 /** フォーカス中のペイン ID（分割・クローズ・枠ハイライトの対象）。 */
 export const focusedPane = writable<number>(0);
 
-/** ウィンドウが OS フォーカスを持っているか。Workspace のペイン右上バッジ／TabBar のタブ集約が
- *  「見ている pane にはバッジを出さない」判定（core/agent-status の shouldShowPaneBadge）に使う
- *  単一ソース。terminal/blocks/notify.ts の shouldNotifyForPane と同じ document.hasFocus() 起点
- *  で揃える（起点がズレるとバッジと通知の「見ている」判定が食い違う）。jsdom の無い vitest
- *  （node 環境）では window/document が無いため既定 true のまま listener を張らずに終わる
+/** ウィンドウが OS フォーカスを持っているか。**「見ている」判定の単一ソース。**
+ *  バッジ（core/agent-status の shouldShowPaneBadge）・通知（terminal/blocks/notify.ts の
+ *  shouldNotifyForPane）・Crew の経過時間タイマーが全部ここを読む。
+ *  以前は判定ごとに `document.hasFocus()` を直接読んでいて、片方だけ起点を移した結果
+ *  「バッジは隠れたのに通知は飛ぶ」という食い違いが起きた。起点は必ずここ1つに集める。
+ *
+ *  初期値は **true 固定**（`document.hasFocus()` を読まない）。読み込み時点の hasFocus() は
+ *  まだ false のことがあり、真値が入るまでの数百 ms だけ「非フォーカス」になる＝その間だけ
+ *  見ているペインにバッジが出る、という**間欠の不具合**になる。外した時の被害が非対称なので
+ *  true に倒す: 誤って true → バッジが一瞬出ないだけ。誤って false → 見ているものに出る。
+ *
+ *  jsdom の無い vitest（node 環境）では window が無いので初期値 true のまま
  *  （テストはこの store でなく shouldShowPaneBadge を直接検証する）。 */
-// 初期値は **true 固定**（`document.hasFocus()` を読まない）。読み込み時点の hasFocus() は
-// まだ false のことがあり、非同期の isFocused() が解決するまでの数百 ms だけ「非フォーカス」に
-// なる＝その間だけ見ているペインにバッジが出る、という**間欠の不具合になる**。
-// 外した時の被害が非対称なので true に倒す: 誤って true → バッジが一瞬出ないだけ。
-// 誤って false → 見ているものにバッジが出る（直そうとした症状そのもの）。
 export const windowFocused = writable<boolean>(true);
 if (typeof window !== "undefined") {
-  // DOM の focus/blur だけでは足りない。WebView2 は alt-tab 復帰でこれを発火しないことがあり
-  // （Terminal.svelte の refocusIfMine が同じ理由で Tauri ネイティブを主軸にしている）、
-  // 発火しないと store が古い値のまま固まる＝見ている pane にバッジが出続ける。
-  // Tauri の onFocusChanged を主軸にし、DOM イベントは保険として残す。
-  window.addEventListener("focus", () => windowFocused.set(true));
-  window.addEventListener("blur", () => windowFocused.set(false));
   const win = (() => {
     try {
       return getCurrentWindow();
     } catch {
-      return null; // Tauri 外（テスト/ブラウザ）では DOM イベントだけで動く
+      return null; // Tauri 外（テスト/ブラウザ）
     }
   })();
   if (win) {
-    // onFocusChanged は「変化」でしか発火しない。起動時から前面にあるウィンドウでは
-    // 一度も呼ばれず初期値のまま固まるので、実際の状態を一度読んで初期値を上書きする
-    // （document.hasFocus() はページ読み込み時点の値で、まだ false のことがある）。
-    void win.isFocused().then((f) => windowFocused.set(f)).catch(() => {});
+    // **Tauri の値だけが真値。DOM イベントは「値のソース」ではなく「読み直すきっかけ」。**
+    // WebView2 は alt-tab 復帰で focus/blur を発火しないことがある（Terminal.svelte の
+    // refocusIfMine が同じ理由で Tauri を主軸にしている）一方、onFocusChanged は
+    // エッジトリガなので取りこぼすと古い値で固着する。DOM を再同期のきっかけに降格させると、
+    // **DOM が誤発火しても故障源にならず、かつ取りこぼしを回収できる**（両方の弱点を打ち消す）。
+    const sync = () => void win.isFocused().then((f) => windowFocused.set(f)).catch(() => {});
+    sync(); // 起動時に一度、実際の状態を読む（onFocusChanged は変化でしか発火しない）
     void win.onFocusChanged(({ payload: focused }) => windowFocused.set(focused)).catch(() => {});
+    window.addEventListener("focus", sync);
+    window.addEventListener("blur", sync);
+  } else {
+    // Tauri が無い環境（ブラウザで開いた時）では DOM しか手が無いので、そのまま値にする。
+    window.addEventListener("focus", () => windowFocused.set(true));
+    window.addEventListener("blur", () => windowFocused.set(false));
   }
 }
 
